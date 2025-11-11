@@ -1,0 +1,176 @@
+{
+  "fiis": [
+    {
+      "ticker": "MXRF11",
+      "name": "MXRF11",
+      "sector": "Fundo Imobiliário",
+      "entries": [
+        {
+          "month": "2023-06",
+          "cotas_added": 10.0,
+          "price_per_cota": 9.63,
+          "dividend_per_cota": 0.12,
+          "dividend_total": 1.2,
+          "notes": ""
+        },
+        {
+          "month": "2023-09",
+          "cotas_added": 0.0,
+          "price_per_cota": 9.54,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 1.1,
+          "notes": ""
+        },
+        {
+          "month": "2024-05",
+          "cotas_added": 6.0,
+          "price_per_cota": 10.44,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 1.6,
+          "notes": ""
+        },
+        {
+          "month": "2024-07",
+          "cotas_added": 9.0,
+          "price_per_cota": 10.2,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 2.5,
+          "notes": ""
+        },
+        {
+          "month": "2024-09",
+          "cotas_added": 3.0,
+          "price_per_cota": 10.07,
+          "dividend_per_cota": 0.09,
+          "dividend_total": 2.52,
+          "notes": ""
+        },
+        {
+          "month": "2024-11",
+          "cotas_added": 15.0,
+          "price_per_cota": 9.62,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 4.3,
+          "notes": ""
+        },
+        {
+          "month": "2024-12",
+          "cotas_added": 7.0,
+          "price_per_cota": 9.03,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 5.0,
+          "notes": ""
+        },
+        {
+          "month": "2025-06",
+          "cotas_added": 5.0,
+          "price_per_cota": 9.48,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 5.5,
+          "notes": ""
+        },
+        {
+          "month": "2025-09",
+          "cotas_added": 0.0,
+          "price_per_cota": 9.63,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 5.5,
+          "notes": ""
+        },
+        {
+          "month": "2025-10",
+          "cotas_added": 0.0,
+          "price_per_cota": 9.63,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 5.5,
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "ticker": "VGHF11",
+      "name": "VALORA HEDGE FUND",
+      "sector": "Fundo Imobiliário",
+      "entries": [
+        {
+          "month": "2023-03",
+          "cotas_added": 5.0,
+          "price_per_cota": 9.022,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 0.5,
+          "notes": ""
+        },
+        {
+          "month": "2023-05",
+          "cotas_added": 5.0,
+          "price_per_cota": 9.022,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 1.2,
+          "notes": ""
+        },
+        {
+          "month": "2023-09",
+          "cotas_added": 1.0,
+          "price_per_cota": 9.54,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 1.1,
+          "notes": ""
+        },
+        {
+          "month": "2023-11",
+          "cotas_added": 1.0,
+          "price_per_cota": 9.48,
+          "dividend_per_cota": 0.1,
+          "dividend_total": 1.2,
+          "notes": ""
+        },
+        {
+          "month": "2024-03",
+          "cotas_added": 9.0,
+          "price_per_cota": 5.16,
+          "dividend_per_cota": 0.08,
+          "dividend_total": 1.68,
+          "notes": ""
+        },
+        {
+          "month": "2025-11",
+          "cotas_added": 0.0,
+          "price_per_cota": 7.31,
+          "dividend_per_cota": 0.7,
+          "dividend_total": 1.47,
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "ticker": "VGIA11",
+      "name": "VGIA11",
+      "sector": "Fundo Imobiliário",
+      "entries": [
+        {
+          "month": "2023-05",
+          "cotas_added": 10.0,
+          "price_per_cota": 13.838,
+          "dividend_per_cota": 0.13,
+          "dividend_total": 1.3,
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "ticker": "XPML11",
+      "name": "XPML11",
+      "sector": "Fundo Imobiliário",
+      "entries": [
+        {
+          "month": "2024-02",
+          "cotas_added": 1.0,
+          "price_per_cota": 116.0,
+          "dividend_per_cota": 0.9,
+          "dividend_total": 0.9,
+          "notes": ""
+        }
+      ]
+    }
+  ]
+}
