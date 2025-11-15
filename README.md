@@ -44,7 +44,56 @@ Apos rodar `python main.py`, a janela do aplicativo e aberta e todas as acoes ac
 
 Voce pode editar o arquivo manualmente (com o app fechado) se precisar importar dados de outro lugar.
 
+### Executavel (.exe)
+
+Criamos um build com PyInstaller (`dist/FIIsTracker.exe`). Para recriar:
+
+```bash
+pyinstaller --clean --onefile --windowed --name FIIsTracker --add-data "data;data" main.py
+```
+
+Leve toda a pasta `dist/` para distribuir o app sem depender do Python instalado.
+
 ### Deploy?
 
 O app e local, feito com CustomTkinter. Para ter a mesma experiencia na web seria preciso construir um frontend separado e uma API/banco compativel. Use esta versao para controle pessoal direto no computador.
+
+### API Flask (prototipo)
+
+Uma pasta `backend/` contem um servidor Flask + SQLAlchemy para centralizar dados e importar o `data/fiis_data.json`. Para rodar localmente:
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+set FLASK_APP=app.py
+flask db upgrade   # cria o banco SQLite
+set IMPORT_TOKEN=devtoken
+flask run
+```
+
+Depois envie o JSON atual:
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/import ^
+  -H "Content-Type: application/json" ^
+  -H "X-Import-Token: devtoken" ^
+  --data "@..\data\fiis_data.json"
+```
+
+No deploy (ex.: PythonAnywhere), ajuste `DATABASE_URL`/`IMPORT_TOKEN` e reaproveite os mesmos comandos. A partir dai o app desktop pode consumir os dados via API em vez do JSON local.
+
+### Git push rapido
+
+```bash
+git init
+git remote add origin https://github.com/<usuario>/<repositorio>.git
+git add .
+git commit -m "feat: enviar FIIs Tracker para o GitHub"
+git branch -M main
+git push -u origin main
+```
+
+Lembre de criar o repositorio no GitHub antes de rodar o `push`.
 
