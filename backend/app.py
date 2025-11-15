@@ -167,6 +167,9 @@ def register_routes(app: Flask) -> None:
         user = User.query.filter_by(email=user_email).first()
         if not user:
             user = User(email=user_email)
+            # define uma senha padrao para importacao, pois password_hash e obrigatorio
+            import_password = os.environ.get("IMPORT_DEFAULT_PASSWORD", "importpass")
+            user.set_password(import_password)
             db.session.add(user)
             db.session.flush()
 
