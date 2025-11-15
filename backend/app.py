@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
-from typing import List
+from datetime import datetime, time, timedelta
+from typing import List, Optional
 
+import requests
 from flask import Flask, jsonify, request
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
 migrate = Migrate()
@@ -16,8 +18,14 @@ class User(db.Model):
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(255), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=True)
+    password_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
 
 
 class FIICatalog(db.Model):
@@ -55,6 +63,18 @@ class Entry(db.Model):
     user_fii = db.relationship(UserFII, backref=db.backref("entries", lazy=True))
 
 
+class Quote(db.Model):
+    __tablename__ = "quotes"
+    id = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(16), db.ForeignKey("fiis_catalog.ticker"), nullable=False)
+    price = db.Column(db.Float, nullable=True)
+    dividend_yield = db.Column(db.Float, nullable=True)
+    variation = db.Column(db.Float, nullable=True)
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    fii = db.relationship(FIICatalog)
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     default_db = "sqlite:///fiis_tracker.db"
@@ -74,10 +94,65 @@ def require_token(req: request) -> bool:
     return token == expected
 
 
+def is_market_open(reference: Optional[datetime] = None) -> bool:
+    now_utc = reference or datetime.utcnow()
+    br_time = now_utc - timedelta(hours=3)  # approximate BRT
+    if br_time.weekday() >= 5:
+        return False
+    start = time(10, 0)
+    end = time(18, 30)
+    return start <= br_time.time() <= end
+
+
+def fetch_quote_from_api(ticker: str) -> Optional[dict]:
+    api_key = os.environ.get("HGBRASIL_KEY")
+    if not api_key:
+        return None
+    url = "https://api.hgbrasil.com/finance/stock_price"
+    params = {"key": api_key, "symbol": ticker}
+    resp = requests.get(url, params=params, timeout=10)
+    if resp.status_code != 200:
+        return None
+    payload = resp.json()
+    data = payload.get("results", {}).get(ticker.upper())
+    if not data:
+        return None
+    return {
+        "price": data.get("price"),
+        "dividend_yield": data.get("dividend_yield"),
+        "variation": data.get("change_percent"),
+    }
+
+
 def register_routes(app: Flask) -> None:
     @app.get("/health")
     def health() -> tuple[dict, int]:
         return {"status": "ok", "time": datetime.utcnow().isoformat()}, 200
+
+    @app.post("/api/register")
+    def register_user():
+        data = request.get_json(silent=True) or {}
+        email = data.get("email")
+        password = data.get("password")
+        if not email or not password:
+            return jsonify({"error": "email and password required"}), 400
+        if User.query.filter_by(email=email).first():
+            return jsonify({"error": "user already exists"}), 409
+        user = User(email=email)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        return jsonify({"status": "ok", "user_id": user.id}), 201
+
+    @app.post("/api/login")
+    def login_user():
+        data = request.get_json(silent=True) or {}
+        email = data.get("email")
+        password = data.get("password")
+        user = User.query.filter_by(email=email).first()
+        if not user or not user.check_password(password or ""):
+            return jsonify({"error": "invalid credentials"}), 401
+        return jsonify({"status": "ok", "user_id": user.id}), 200
 
     @app.post("/api/import")
     def import_data():
@@ -148,6 +223,79 @@ def register_routes(app: Flask) -> None:
 
         db.session.commit()
         return jsonify({"status": "ok", "imported": imported}), 201
+
+    @app.get("/api/quotes/<string:ticker>")
+    def get_quote(ticker: str):
+        ticker = ticker.upper()
+        quote = (
+            Quote.query.filter_by(ticker=ticker)
+            .order_by(Quote.fetched_at.desc())
+            .first()
+        )
+        if not quote:
+            return jsonify({"error": "quote not found"}), 404
+        return jsonify(
+            {
+                "ticker": ticker,
+                "price": quote.price,
+                "dividend_yield": quote.dividend_yield,
+                "variation": quote.variation,
+                "fetched_at": quote.fetched_at.isoformat(),
+            }
+        )
+
+    @app.post("/api/quotes/<string:ticker>/refresh")
+    def refresh_quote(ticker: str):
+        ticker = ticker.upper()
+        latest = (
+            Quote.query.filter_by(ticker=ticker)
+            .order_by(Quote.fetched_at.desc())
+            .first()
+        )
+        if latest and (datetime.utcnow() - latest.fetched_at).total_seconds() < 3600:
+            return jsonify(
+                {
+                    "ticker": ticker,
+                    "price": latest.price,
+                    "dividend_yield": latest.dividend_yield,
+                    "variation": latest.variation,
+                    "fetched_at": latest.fetched_at.isoformat(),
+                    "source": "cache",
+                }
+            )
+        if not is_market_open() and latest:
+            return jsonify(
+                {
+                    "ticker": ticker,
+                    "price": latest.price,
+                    "dividend_yield": latest.dividend_yield,
+                    "variation": latest.variation,
+                    "fetched_at": latest.fetched_at.isoformat(),
+                    "source": "outside_market",
+                }
+            )
+        fetched = fetch_quote_from_api(ticker)
+        if not fetched:
+            return jsonify({"error": "quote unavailable"}), 503
+        quote = Quote(
+            ticker=ticker,
+            price=fetched.get("price"),
+            dividend_yield=fetched.get("dividend_yield"),
+            variation=fetched.get("variation"),
+            fetched_at=datetime.utcnow(),
+        )
+        db.session.add(quote)
+        db.session.commit()
+        return jsonify(
+            {
+                "ticker": ticker,
+                "price": quote.price,
+                "dividend_yield": quote.dividend_yield,
+                "variation": quote.variation,
+                "fetched_at": quote.fetched_at.isoformat(),
+                "source": "api",
+            }
+        )
 
 
 app = create_app()
