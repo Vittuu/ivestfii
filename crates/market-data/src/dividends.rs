@@ -31,6 +31,10 @@ const RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 const CACHE_LIMIT: usize = 16 * 1024 * 1024;
 const MAX_SYMBOLS: usize = 100;
 const MAX_EVENTS: usize = 5000;
+// The network window is bounded independently from the growing local archive.
+// Never evict an old payment merely to fit a cache limit: reject the update and
+// preserve the previous file if either archive bound is reached.
+const MAX_ARCHIVED_EVENTS: usize = 50_000;
 const MAX_CACHED_SYMBOLS: usize = 2000;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -89,6 +93,14 @@ pub struct DividendEvent {
     pub related_to: Option<String>,
     pub isin_code: Option<String>,
     pub source_url: String,
+    /// Original collection time for this version of the event. Archive rollover
+    /// must not make an old payment appear to have been observed again today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_observed_at: Option<String>,
+    /// The source revised a boundary event without a unique stable identity.
+    /// Retain the evidence, but do not count either possible version as money.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reconciliation_pending: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -243,7 +255,9 @@ impl DividendService {
             match result {
                 Ok(observation) => {
                     replace_observation(&mut cached, symbol, observation, checked_at);
-                    fresh_symbols.insert(symbol.clone());
+                    if cached.items[symbol].error.is_none() {
+                        fresh_symbols.insert(symbol.clone());
+                    }
                     store_cache(&self.cache_path, &cached)?;
                 }
                 Err(failure) => {
@@ -477,18 +491,215 @@ fn replace_observation(
     observation: DividendObservation,
     checked_at: String,
 ) {
-    // A revised payment/data-com changes the composite event identity. Replace
-    // the entire source window so a correction cannot retain the previous
-    // version alongside the new payment. Outside this window coverage is unknown.
+    let previous = cache.items.get(symbol).and_then(|x| x.observation.as_ref());
+    let (observation, error) = match merge_archive(previous, observation) {
+        Ok(result) => result,
+        Err(message) => {
+            // Cache limits are failures, never an instruction to truncate money.
+            if let Some(item) = cache.items.get_mut(symbol) {
+                item.checked_at = checked_at;
+                item.status = "unavailable".into();
+                item.error = Some(message);
+            }
+            return;
+        }
+    };
     cache.items.insert(
         symbol.into(),
         SavedItem {
             observation: Some(observation),
             checked_at,
-            status: "available".into(),
-            error: None,
+            status: if error.is_some() {
+                "unavailable"
+            } else {
+                "available"
+            }
+            .into(),
+            error,
         },
     );
+}
+
+fn event_family(event: &DividendEvent) -> (&str, &Option<String>, &str, &str) {
+    (&event.symbol, &event.isin_code, &event.kind, &event.label)
+}
+
+/// Declaration and reference competence survive payment/data-com corrections.
+/// They are matching hints only: uniqueness is checked on both source windows.
+fn stable_keys(event: &DividendEvent) -> Vec<String> {
+    [
+        ("declared", event.declared_date.as_deref()),
+        ("related", event.related_to.as_deref().map(str::trim)),
+    ]
+    .into_iter()
+    .filter_map(|(field, value)| {
+        value.filter(|value| !value.is_empty()).map(|value| {
+            serde_json::to_string(&(event_family(event), field, value))
+                .expect("serializable event reference")
+        })
+    })
+    .collect()
+}
+
+fn merge_archive(
+    previous: Option<&DividendObservation>,
+    mut current: DividendObservation,
+) -> Result<(DividendObservation, Option<String>), String> {
+    let Some(previous) = previous else {
+        return Ok((current, None));
+    };
+    if current.events.is_empty() && !previous.events.is_empty() {
+        return Ok((previous.clone(), Some("A B3 retornou uma lista vazia. O histórico salvo foi mantido; isso não confirma ausência de pagamentos.".into())));
+    }
+    // A dated event is required to locate the beginning of the source window.
+    // Undated-only responses cannot erase known historical payments either.
+    let Some(boundary) = current
+        .events
+        .iter()
+        .filter_map(|event| event.payment_date.clone())
+        .min()
+    else {
+        return if previous.events.is_empty() {
+            Ok((current, None))
+        } else {
+            Ok((previous.clone(), Some("A B3 não informou datas de pagamento na atualização. O histórico salvo foi mantido até a fonte esclarecer os eventos.".into())))
+        };
+    };
+    let fresh_ids: BTreeSet<_> = current
+        .events
+        .iter()
+        .map(|event| event.event_id.clone())
+        .collect();
+    let old_ids: BTreeSet<_> = previous
+        .events
+        .iter()
+        .map(|event| event.event_id.as_str())
+        .collect();
+    let old_pending: BTreeSet<_> = previous
+        .events
+        .iter()
+        .filter(|event| event.reconciliation_pending)
+        .map(|event| event.event_id.as_str())
+        .collect();
+    let mut archive: Vec<_> = previous
+        .events
+        .iter()
+        .filter(|event| {
+            !fresh_ids.contains(event.event_id.as_str())
+                && event
+                    .payment_date
+                    .as_deref()
+                    .is_some_and(|date| date < boundary.as_str())
+        })
+        .cloned()
+        .collect();
+    for event in &mut current.events {
+        event.reconciliation_pending |= old_pending.contains(event.event_id.as_str());
+    }
+    for event in &mut archive {
+        if event.last_observed_at.is_none() {
+            event.last_observed_at = Some(previous.fetched_at.clone());
+        }
+    }
+    let mut old_keys: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut new_keys: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+    for event in &previous.events {
+        for key in stable_keys(event) {
+            old_keys
+                .entry(key)
+                .or_default()
+                .insert(event.event_id.clone());
+        }
+    }
+    for (index, event) in current.events.iter().enumerate() {
+        for key in stable_keys(event) {
+            new_keys.entry(key).or_default().insert(index);
+        }
+    }
+    let archive_ids: BTreeSet<_> = archive.iter().map(|event| event.event_id.clone()).collect();
+    let mut archive_families = BTreeMap::<String, (BTreeSet<String>, BTreeSet<String>)>::new();
+    for event in &archive {
+        let family =
+            serde_json::to_string(&event_family(event)).expect("serializable event family");
+        let (all, missing_reference) = archive_families.entry(family).or_default();
+        all.insert(event.event_id.clone());
+        if stable_keys(event).is_empty() {
+            missing_reference.insert(event.event_id.clone());
+        }
+    }
+    let mut replaced = BTreeSet::new();
+    let mut pending_old = BTreeSet::new();
+    let mut pending_new = BTreeSet::new();
+    let mut pending_families = BTreeSet::new();
+    let mut pending_reference_missing = BTreeSet::new();
+    for (index, event) in current.events.iter().enumerate() {
+        // An identical dated identity was already observed: it is not a newly
+        // appearing version of an archived event with a shared declaration.
+        if old_ids.contains(event.event_id.as_str()) {
+            continue;
+        }
+        let keys = stable_keys(event);
+        let candidates: BTreeSet<_> = keys
+            .iter()
+            .filter_map(|key| old_keys.get(key))
+            .flatten()
+            .cloned()
+            .collect();
+        let archived_candidates: BTreeSet<_> =
+            candidates.intersection(&archive_ids).cloned().collect();
+        if !archived_candidates.is_empty() {
+            let fresh_matches: BTreeSet<_> = keys
+                .iter()
+                .filter_map(|key| new_keys.get(key))
+                .flatten()
+                .copied()
+                .collect();
+            if candidates.len() == 1 && fresh_matches.len() == 1 {
+                replaced.extend(archived_candidates);
+            } else {
+                pending_old.extend(archived_candidates);
+                pending_new.extend(fresh_matches);
+            }
+        }
+        // Without a reference on one side, a moved payment cannot be
+        // distinguished safely from a new payment. Quarantine only this family
+        // instead of freezing unrelated, unambiguous payments in the response.
+        let family =
+            serde_json::to_string(&event_family(event)).expect("serializable event family");
+        if let Some((all, missing_reference)) = archive_families.get(&family) {
+            if keys.is_empty() && !all.is_empty() {
+                pending_families.insert(family);
+                pending_new.insert(index);
+            } else if !missing_reference.is_empty() {
+                pending_reference_missing.insert(family);
+                pending_new.insert(index);
+            }
+        }
+    }
+    for family in pending_families {
+        pending_old.extend(archive_families[&family].0.iter().cloned());
+    }
+    for family in pending_reference_missing {
+        pending_old.extend(archive_families[&family].1.iter().cloned());
+    }
+    archive.retain(|event| !replaced.contains(&event.event_id));
+    for event in &mut archive {
+        event.reconciliation_pending |= pending_old.contains(&event.event_id);
+    }
+    for (index, event) in current.events.iter_mut().enumerate() {
+        event.reconciliation_pending |= pending_new.contains(&index);
+    }
+    current.events.extend(archive);
+    if current.events.len() > MAX_ARCHIVED_EVENTS {
+        return Err("O histórico local de proventos atingiu o limite seguro. A atualização foi suspensa e o arquivo anterior foi preservado; nenhum pagamento foi descartado.".into());
+    }
+    current
+        .events
+        .sort_by(|a, b| (&a.payment_date, &a.event_id).cmp(&(&b.payment_date, &b.event_id)));
+    current.coverage_warning = "A B3 publica uma janela recente de eventos. Pagamentos anteriores já consultados são preservados no histórico local; meses nunca consultados podem estar incompletos.".into();
+    let error = current.events.iter().any(|event| event.reconciliation_pending).then(||
+        "Há proventos com revisão de datas sem identificação única na B3. As versões foram preservadas para conferência e não foram somadas aos rendimentos; os demais eventos foram atualizados.".into());
+    Ok((current, error))
 }
 
 fn income_kind(label: &str) -> &'static str {
@@ -534,7 +745,14 @@ pub fn income_events(panel: &DividendPanel) -> Vec<ivestfii_core::income::Income
                 Some(ivestfii_core::income::IncomeEvent {
                     symbol: event.symbol.clone(),
                     amount_per_share: event.per_share.clone(),
-                    record_date: event.record_date.clone().unwrap_or_default(),
+                    // An unresolved source revision is retained as incomplete
+                    // evidence, so another event in this month cannot make the
+                    // core report a falsely complete monetary total.
+                    record_date: if event.reconciliation_pending {
+                        String::new()
+                    } else {
+                        event.record_date.clone().unwrap_or_default()
+                    },
                     payment_date: event.payment_date.clone().unwrap_or_default(),
                     source_url: event.source_url.clone(),
                     source: "B3 · eventos corporativos públicos de fundos".into(),
@@ -625,6 +843,8 @@ pub fn parse_b3_dividends(
             related_to: text(raw.get("relatedTo"), 500)?,
             isin_code: Some(isin),
             source_url: source_url.clone(),
+            last_observed_at: Some(stamp(fetched_at)),
+            reconciliation_pending: false,
         };
         event.date_precision = if event.payment_date.is_some() && event.record_date.is_some() {
             "exact"
@@ -734,7 +954,7 @@ fn validate(cache: &Cache) -> Result<(), String> {
                 || observation.coverage_warning.len() > 1000
                 || DateTime::parse_from_rfc3339(&observation.fetched_at)
                     .map_or(true, |at| at > Utc::now() + chrono::Duration::minutes(5))
-                || observation.events.len() > MAX_EVENTS
+                || observation.events.len() > MAX_ARCHIVED_EVENTS
             {
                 return Err(invalid());
             }
@@ -766,6 +986,13 @@ fn validate(cache: &Cache) -> Result<(), String> {
                     || event.remarks.as_ref().is_some_and(|s| s.len() > 4000)
                     || event.related_to.as_ref().is_some_and(|s| s.len() > 500)
                     || event.isin_code.as_ref().is_some_and(|s| s.len() > 50)
+                    || event.last_observed_at.as_deref().is_some_and(|value| {
+                        parse_time(value).is_none_or(|observed| {
+                            observed > Utc::now() + chrono::Duration::minutes(5)
+                                || parse_time(&observation.fetched_at)
+                                    .is_none_or(|fetched| observed > fetched)
+                        })
+                    })
                 {
                     return Err(invalid());
                 }
@@ -870,6 +1097,419 @@ mod tests {
             now(),
         )
         .unwrap()
+    }
+
+    fn august(rate: &str) -> Value {
+        let mut event = event(json!(rate));
+        event["paymentDate"] = json!("14/08/2026");
+        event["lastDatePrior"] = json!("31/07/2026");
+        event["approvedOn"] = json!("31/07/2026");
+        event["relatedTo"] = json!("Julho-2026/2026");
+        event
+    }
+
+    fn income_snapshot() -> ivestfii_core::PortfolioSnapshot {
+        serde_json::from_value(json!({
+            "funds":[{"id":"fund","ticker":"MXRF11","name":"Synthetic fund","sector":"", "entries":[{
+                "id":"purchase","month":"2026-01","purchaseDate":"2026-01-02",
+                "cotasAdded":"10","pricePerCota":"10","dividendPerCota":"0","dividendTotal":null,"notes":""
+            }],"totalCotas":"10","totalInvested":"100","averagePrice":"10","dividendsReceived":"0","estimatedMonthlyIncome":"0"}],
+            "totals":{"invested":"100","cotas":"10","dividendsReceived":"0","estimatedMonthlyIncome":"0"},
+            "recordCount":1
+        })).unwrap()
+    }
+
+    fn income(
+        cache: &Cache,
+        snapshot: &ivestfii_core::PortfolioSnapshot,
+    ) -> ivestfii_core::income::MonthlyIncomeReport {
+        ivestfii_core::income::calculate_monthly_income(
+            snapshot,
+            &income_events(&panel(&["MXRF11".into()], cache)),
+            "2026-07",
+            "2026-08",
+            NaiveDate::from_ymd_opt(2026, 10, 20).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn rolling_window_archives_payments_so_accumulated_income_never_drops_at_rollover() {
+        let mut cache = Cache::default();
+        let mut old = fixture(vec![event(json!("0,1"))]);
+        old.fetched_at = "2026-10-19T12:00:00Z".into();
+        old.events[0].last_observed_at = None; // existing v1 cache
+        replace_observation(&mut cache, "MXRF11", old, "2026-10-19T12:00:00Z".into());
+        assert_eq!(income(&cache, &income_snapshot()).months[0].api_amount, "1");
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![august("0,2")]),
+            stamp(now()),
+        );
+        let saved = cache.items["MXRF11"].observation.as_ref().unwrap();
+        assert_eq!(saved.events.len(), 2);
+        assert_eq!(
+            saved.events[0].last_observed_at.as_deref(),
+            Some("2026-10-19T12:00:00Z")
+        );
+        assert_eq!(
+            saved.events[1].last_observed_at.as_deref(),
+            Some("2026-10-20T12:00:00Z")
+        );
+        let snapshot = income_snapshot();
+        let report = income(&cache, &snapshot);
+        assert_eq!(
+            report
+                .months
+                .iter()
+                .map(|month| Decimal::from_str_exact(&month.api_amount).unwrap())
+                .sum::<Decimal>(),
+            Decimal::from(3)
+        );
+        assert_eq!(report.months[0].api_amount, "1");
+        assert_eq!(report.months[1].api_amount, "2");
+        assert!(cache.items["MXRF11"].error.is_none());
+        // An actual receipt replaces only its own archived fund/month.
+        let mut with_receipt = snapshot.clone();
+        let mut receipt = with_receipt.funds[0].entries[0].clone();
+        receipt.id = "receipt".into();
+        receipt.month = "2026-07".into();
+        receipt.purchase_date = None;
+        receipt.cotas_added = "0".into();
+        receipt.dividend_total = Some("1.25".into());
+        with_receipt.funds[0].entries.push(receipt);
+        let reconciled = income(&cache, &with_receipt);
+        assert_eq!(reconciled.months[0].recorded_amount, "1.25");
+        assert_eq!(reconciled.months[0].api_amount, "0");
+        assert_eq!(reconciled.months[1].api_amount, "2");
+        assert_eq!(with_receipt.funds[0].entries.len(), 2);
+        assert_eq!(snapshot.funds[0].entries.len(), 1);
+    }
+
+    #[test]
+    fn revised_rate_and_dates_replace_recent_window_even_without_stable_references() {
+        let mut cache = Cache::default();
+        let mut old = event(json!("0,1"));
+        old["approvedOn"] = Value::Null;
+        old["relatedTo"] = Value::Null;
+        // A preceding event locates both date versions inside the current
+        // authoritative window, rather than across its uncertain boundary.
+        let mut anchor = event(json!("0,01"));
+        anchor["paymentDate"] = json!("15/06/2026");
+        anchor["lastDatePrior"] = json!("31/05/2026");
+        anchor["approvedOn"] = json!("31/05/2026");
+        anchor["relatedTo"] = json!("Maio-2026/2026");
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![anchor.clone(), old.clone()]),
+            stamp(now()),
+        );
+        old["rate"] = json!("0,2");
+        old["paymentDate"] = json!("15/07/2026");
+        old["lastDatePrior"] = json!("29/06/2026");
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![anchor, old]),
+            stamp(now()),
+        );
+        let saved = cache.items["MXRF11"].observation.as_ref().unwrap();
+        assert_eq!(saved.events.len(), 2);
+        assert_eq!(saved.events[1].per_share, "0.2");
+        assert_eq!(saved.events[1].payment_date.as_deref(), Some("2026-07-15"));
+        assert_eq!(income(&cache, &income_snapshot()).months[0].api_amount, "2");
+    }
+
+    #[test]
+    fn rolling_boundary_can_split_a_month_without_erasing_an_earlier_payment() {
+        let mut first = event(json!("0,1"));
+        first["paymentDate"] = json!("15/06/2026");
+        first["lastDatePrior"] = json!("31/05/2026");
+        first["approvedOn"] = json!("31/05/2026");
+        first["relatedTo"] = json!("Maio-2026/2026");
+        let mut second = event(json!("0,1"));
+        second["paymentDate"] = json!("30/06/2026");
+        second["lastDatePrior"] = json!("15/06/2026");
+        second["approvedOn"] = json!("15/06/2026");
+        second["relatedTo"] = json!("Junho-parcial-2026/2026");
+        let mut cache = Cache::default();
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![first, second.clone()]),
+            stamp(now()),
+        );
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![second, event(json!("0,1"))]),
+            stamp(now()),
+        );
+        let observation = cache.items["MXRF11"].observation.as_ref().unwrap();
+        assert_eq!(observation.events.len(), 3);
+        assert!(observation
+            .events
+            .iter()
+            .any(|event| event.payment_date.as_deref() == Some("2026-06-15")));
+        let report = ivestfii_core::income::calculate_monthly_income(
+            &income_snapshot(),
+            &income_events(&panel(&["MXRF11".into()], &cache)),
+            "2026-06",
+            "2026-07",
+            NaiveDate::from_ymd_opt(2026, 10, 20).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.months[0].api_amount, "2");
+        assert_eq!(report.months[1].api_amount, "1");
+        assert!(cache.items["MXRF11"].error.is_none());
+    }
+
+    #[test]
+    fn stable_reference_reconciles_a_date_revision_across_the_archive_boundary() {
+        let mut cache = Cache::default();
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![event(json!("0,1"))]),
+            stamp(now()),
+        );
+        let mut corrected = event(json!("0,15"));
+        corrected["paymentDate"] = json!("03/08/2026");
+        corrected["lastDatePrior"] = json!("29/06/2026");
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![corrected, august("0,2")]),
+            stamp(now()),
+        );
+        let saved = cache.items["MXRF11"].observation.as_ref().unwrap();
+        assert_eq!(saved.events.len(), 2);
+        assert!(saved.events.iter().all(|event| event
+            .payment_date
+            .as_deref()
+            .unwrap()
+            .starts_with("2026-08")));
+        assert_eq!(
+            income(&cache, &income_snapshot()).months[1].api_amount,
+            "3.5"
+        );
+        assert!(cache.items["MXRF11"].error.is_none());
+    }
+
+    #[test]
+    fn ambiguous_reference_quarantines_versions_without_freezing_other_events() {
+        let mut cache = Cache::default();
+        let mut other_old = event(json!("0,02"));
+        other_old["paymentDate"] = json!("28/07/2026");
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![event(json!("0,1")), other_old]),
+            stamp(now()),
+        );
+        let mut revised = event(json!("0,15"));
+        revised["paymentDate"] = json!("03/08/2026");
+        let fresh = fixture(vec![revised, august("0,2")]);
+        replace_observation(&mut cache, "MXRF11", fresh.clone(), stamp(now()));
+        let saved = cache.items["MXRF11"].observation.as_ref().unwrap();
+        assert_eq!(saved.events.len(), 4);
+        assert_eq!(
+            saved
+                .events
+                .iter()
+                .filter(|event| event.reconciliation_pending)
+                .count(),
+            3
+        );
+        assert!(saved
+            .events
+            .iter()
+            .any(|event| event.per_share == "0.2" && !event.reconciliation_pending));
+        assert!(cache.items["MXRF11"]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("revisão"));
+        // The uncertain event keeps its payment month incomplete, including
+        // when another fully identified payment exists in that same month.
+        let report = income(&cache, &income_snapshot());
+        assert_eq!(report.months[0].api_amount, "0");
+        assert_eq!(report.months[1].api_amount, "0");
+        assert_eq!(report.months[1].funds[0].status, "missing");
+        // Re-reading the identical fresh window cannot silently clear a flag.
+        replace_observation(&mut cache, "MXRF11", fresh, stamp(now()));
+        assert_eq!(
+            cache.items["MXRF11"]
+                .observation
+                .as_ref()
+                .unwrap()
+                .events
+                .iter()
+                .filter(|event| event.reconciliation_pending)
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn missing_boundary_identity_is_pending_instead_of_duplicate_income() {
+        let mut old = event(json!("0,1"));
+        old["approvedOn"] = Value::Null;
+        old["relatedTo"] = Value::Null;
+        let mut revised = old.clone();
+        revised["paymentDate"] = json!("03/08/2026");
+        let mut cache = Cache::default();
+        replace_observation(&mut cache, "MXRF11", fixture(vec![old]), stamp(now()));
+        replace_observation(&mut cache, "MXRF11", fixture(vec![revised]), stamp(now()));
+        assert!(cache.items["MXRF11"]
+            .observation
+            .as_ref()
+            .unwrap()
+            .events
+            .iter()
+            .all(|event| event.reconciliation_pending));
+        assert_eq!(income(&cache, &income_snapshot()).months[1].api_amount, "0");
+        assert!(cache.items["MXRF11"].error.is_some());
+    }
+
+    #[test]
+    fn empty_or_undated_response_preserves_known_history_with_original_observation_time() {
+        let mut cache = Cache::default();
+        let old = fixture(vec![event(json!("0,1"))]);
+        replace_observation(&mut cache, "MXRF11", old.clone(), stamp(now()));
+        replace_observation(&mut cache, "MXRF11", fixture(vec![]), stamp(now()));
+        assert_eq!(cache.items["MXRF11"].observation.as_ref(), Some(&old));
+        assert!(cache.items["MXRF11"]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("lista vazia"));
+        let mut undated = event(json!("0,15"));
+        undated["paymentDate"] = Value::Null;
+        replace_observation(&mut cache, "MXRF11", fixture(vec![undated]), stamp(now()));
+        assert_eq!(cache.items["MXRF11"].observation.as_ref(), Some(&old));
+        assert!(cache.items["MXRF11"]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("datas de pagamento"));
+    }
+
+    #[test]
+    fn legacy_version_one_cache_reopens_and_archive_metadata_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dividends.json");
+        let mut cache = Cache::default();
+        let mut old = fixture(vec![event(json!("0,1"))]);
+        old.events[0].last_observed_at = None;
+        replace_observation(&mut cache, "MXRF11", old, stamp(now()));
+        store_cache(&path, &cache).unwrap();
+        let legacy = fs::read_to_string(&path).unwrap();
+        assert!(!legacy.contains("lastObservedAt"));
+        assert!(!legacy.contains("reconciliationPending"));
+        let mut reopened = read_cache(&path).unwrap();
+        replace_observation(
+            &mut reopened,
+            "MXRF11",
+            fixture(vec![august("0,2")]),
+            stamp(now()),
+        );
+        store_cache(&path, &reopened).unwrap();
+        let final_cache = read_cache(&path).unwrap();
+        assert_eq!(final_cache.version, 1);
+        assert_eq!(
+            final_cache.items["MXRF11"]
+                .observation
+                .as_ref()
+                .unwrap()
+                .events
+                .len(),
+            2
+        );
+        assert_eq!(
+            income(&final_cache, &income_snapshot()).months[0].api_amount,
+            "1"
+        );
+        assert_eq!(
+            income(&final_cache, &income_snapshot()).months[1].api_amount,
+            "2"
+        );
+        assert!(final_cache.items["MXRF11"]
+            .observation
+            .as_ref()
+            .unwrap()
+            .events
+            .iter()
+            .all(|event| event.last_observed_at.is_some()));
+    }
+
+    #[test]
+    fn archive_size_limit_preserves_previous_file_instead_of_truncating_payments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dividends.json");
+        let mut cache = Cache::default();
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![event(json!("0,1"))]),
+            stamp(now()),
+        );
+        store_cache(&path, &cache).unwrap();
+        let original = fs::read(&path).unwrap();
+        let observation = cache
+            .items
+            .get_mut("MXRF11")
+            .unwrap()
+            .observation
+            .as_mut()
+            .unwrap();
+        let template = observation.events[0].clone();
+        observation.events = (0..4000)
+            .map(|index| {
+                let mut event = template.clone();
+                event.related_to = Some(format!("Synthetic reference {index}"));
+                event.remarks = Some("x".repeat(4000));
+                event.event_id = event_id(&event);
+                event
+            })
+            .collect();
+        assert!(validate(&cache).is_ok());
+        assert!(store_cache(&path, &cache).unwrap_err().contains("16 MiB"));
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(
+            read_cache(&path).unwrap().items["MXRF11"]
+                .observation
+                .as_ref()
+                .unwrap()
+                .events
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn archived_provenance_cannot_be_invalid_or_newer_than_its_source_observation() {
+        let mut cache = Cache::default();
+        replace_observation(
+            &mut cache,
+            "MXRF11",
+            fixture(vec![event(json!("0,1"))]),
+            stamp(now()),
+        );
+        for value in ["invalid", "2026-10-20T12:00:01Z"] {
+            cache
+                .items
+                .get_mut("MXRF11")
+                .unwrap()
+                .observation
+                .as_mut()
+                .unwrap()
+                .events[0]
+                .last_observed_at = Some(value.into());
+            assert!(validate(&cache).is_err());
+        }
     }
 
     #[test]

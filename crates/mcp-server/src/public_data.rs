@@ -390,7 +390,7 @@ impl PublicData {
             .unwrap_or_else(|_| json!({"items":[],"errors":["Falha ao preparar proventos."]}));
         income["status"] = json!(panel_status(&income, "observation"));
         income["refreshRequested"] = json!(refresh_dividends);
-        income["interpretation"] = json!("Eventos públicos B3, separados dos lançamentos financeiros. Confira perShare, recordDate (data-com), paymentDate e fetchedAt; o gráfico usa o mês do pagamento e somente eventos de rendimento com datas exatas. Amortizações e datas incompletas não são inferidas como renda. A quantidade elegível deriva das compras locais e suas datas. Valores calculados por API não confirmam crédito na conta e não alteram a carteira.");
+        income["interpretation"] = json!("Eventos públicos B3, separados dos lançamentos financeiros. Confira perShare, recordDate (data-com), paymentDate e lastObservedAt (coleta da versão do evento); fetchedAt é a consulta recente da janela pública, que pode preservar eventos antigos do arquivo local sem revalidá-los. reconciliationPending não é rendimento conhecido; o gráfico usa o mês do pagamento e somente eventos de rendimento com datas exatas. Amortizações e datas incompletas não são inferidas como renda. A quantidade elegível deriva das compras locais e suas datas. Valores calculados por API não confirmam crédito na conta e não alteram a carteira.");
         json!({"marketData":market,"cvmData":reports,"dividendData":income})
     }
 }
