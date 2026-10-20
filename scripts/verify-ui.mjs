@@ -433,6 +433,9 @@ try {
     assert.ok(target.left>=0&&target.top>=0&&target.right<=target.width+1&&target.bottom<=target.height+1,`${label}: target fits the visible viewport ${JSON.stringify(target)}`);
     assert.equal(target.hit,true,`${label}: another overlay must not cover the control`);
   }
+  async function revealInViewport(locator){
+    await locator.evaluate(element=>{element.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return new Promise(resolve=>requestAnimationFrame(resolve));});
+  }
   async function openPage(mode,viewport,{reducedMotion='reduce',expandedSidebar=true,sidebarPreference}={}){
     const context=await browser.newContext({viewport,reducedMotion,...(mode.includes('zoom-200')?{deviceScaleFactor:2}:{})});
     if(sidebarPreference!==undefined)await context.addInitScript(value=>localStorage.setItem('ivestfii.sidebarCollapsed',value),sidebarPreference);
@@ -973,12 +976,11 @@ try {
       const stage=drawer.locator('.chat-stage');
       const metrics=await stage.evaluate(element=>({height:element.getBoundingClientRect().height,clientHeight:element.clientHeight,scrollHeight:element.scrollHeight}));
       assert.ok(metrics.height>=159,`The profile bar must leave a readable transcript at ${viewport.width}px; observed ${JSON.stringify(metrics)}`);
-      const reveal=async locator=>locator.evaluate(element=>{element.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return new Promise(resolve=>requestAnimationFrame(resolve));});
-      await reveal(drawer.getByRole('button',{name:'Analisar carteira',exact:true}));
+      await revealInViewport(drawer.getByRole('button',{name:'Analisar carteira',exact:true}));
       await targetVisibleAndClickable(drawer.getByRole('button',{name:'Analisar carteira',exact:true}),`analysis action ${viewport.width}`);
-      await reveal(drawer.getByRole('textbox',{name:'Sua pergunta',exact:true}));
+      await revealInViewport(drawer.getByRole('textbox',{name:'Sua pergunta',exact:true}));
       await targetVisibleAndClickable(drawer.getByRole('textbox',{name:'Sua pergunta',exact:true}),`profile-aware drawer draft ${viewport.width}`);
-      await reveal(drawer.getByRole('button',{name:'Enviar',exact:true}));
+      await revealInViewport(drawer.getByRole('button',{name:'Enviar',exact:true}));
       await targetVisibleAndClickable(drawer.getByRole('button',{name:'Enviar',exact:true}),`profile-aware drawer send ${viewport.width}`);
       await noOverflow(mobilePage,`profile-aware-assistant-${viewport.width}-no-overflow`);await shot(mobilePage,`profile-aware-assistant-compose-${viewport.width}`,{fullPage:false});
       await stage.scrollIntoViewIfNeeded();await shot(mobilePage,`profile-aware-assistant-${viewport.width}`,{fullPage:false});
@@ -1325,12 +1327,13 @@ try {
       assert.equal(await panel.getAttribute('aria-modal'),'true');assert.equal(await fab.count(),0);
       assert.equal(await page.locator('.page-content').getAttribute('inert'),'');assert.equal(await page.locator('.topbar').getAttribute('inert'),'');
       const input=panel.getByRole('textbox',{name:'Sua pergunta',exact:true});await input.fill('Rascunho móvel que precisa continuar guardado.');
-      await targetVisibleAndClickable(input,`assistant draft ${viewport.width}`);await targetVisibleAndClickable(panel.getByRole('button',{name:'Enviar',exact:true}),`assistant send ${viewport.width}`);
+      await revealInViewport(input);await targetVisibleAndClickable(input,`assistant draft ${viewport.width}`);
+      await revealInViewport(panel.getByRole('button',{name:'Enviar',exact:true}));await targetVisibleAndClickable(panel.getByRole('button',{name:'Enviar',exact:true}),`assistant send ${viewport.width}`);
       await panel.getByRole('button',{name:'Nova conversa',exact:true}).focus();await page.keyboard.press('Shift+Tab');assert.equal(await panel.evaluate(element=>element.contains(document.activeElement)),true);
       for(let index=0;index<14;index++){await page.keyboard.press('Tab');assert.equal(await panel.evaluate(element=>element.contains(document.activeElement)),true,`Focus left the modal assistant at ${viewport.width}px`);}
-      await panel.locator('.chat-toolbar .def').first().focus();await page.getByRole('tooltip').waitFor();
+      await revealInViewport(panel.locator('.chat-toolbar .def').first());await panel.locator('.chat-toolbar .def').first().focus();await page.getByRole('tooltip').waitFor();
       await page.keyboard.press('Escape');assert.equal(await panel.isVisible(),true,'Escape closes the explanation before the assistant');
-      await input.focus();await page.mouse.move(2,2);await page.getByRole('tooltip').waitFor({state:'hidden'});
+      await revealInViewport(input);await input.focus();await page.mouse.move(2,2);await page.getByRole('tooltip').waitFor({state:'hidden'});
       await noOverflow(page,`shared-assistant-${viewport.width}-no-overflow`);await shot(page,`assistant-drawer-${viewport.width}`,{fullPage:false});
       await input.focus();
       await page.keyboard.press('Escape');await panel.waitFor({state:'hidden'});await focusReturnsTo(page,fab);
