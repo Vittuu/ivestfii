@@ -10,7 +10,10 @@ const scriptPath = fileURLToPath(import.meta.url);
 const configFile = path.resolve(path.dirname(scriptPath), '../vite.config.ts');
 
 export async function verifyVitePrivacy() {
-  const temporaryParent = path.resolve(os.tmpdir());
+  // Windows runners can expose TEMP through an 8.3 alias (RUNNER~1).
+  // Vite rejects paths containing '~'; resolve the existing physical directory
+  // before creating the fixture so the public control remains a valid request.
+  const temporaryParent = await fs.realpath(path.resolve(os.tmpdir()));
   const root = await fs.mkdtemp(path.join(temporaryParent, 'ivestfii-vite-privacy-'));
   const marker = 'SYNTHETIC_PRIVATE_FIXTURE_MUST_NEVER_BE_SERVED';
   const paths = ['/data/fiis_data.json', '/.local/last-verification.json'];
@@ -28,7 +31,7 @@ export async function verifyVitePrivacy() {
     assert.ok(address && typeof address === 'object');
     const base = `http://127.0.0.1:${address.port}`;
     const control = await fetch(base + '/public-control.json', { headers: { Accept: 'application/json' } });
-    assert.equal(control.status, 200, 'The fixture root must be served normally outside private paths');
+    assert.equal(control.status, 200, `The fixture root must be served normally outside private paths (${root}): ${control.status === 200 ? '' : await control.text()}`);
     assert.deepEqual(await control.json(), { syntheticPublicControl: true });
 
     // JSON requests do not trigger Vite's HTML fallback when the file is absent.

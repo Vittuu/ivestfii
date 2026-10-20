@@ -37,15 +37,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Instalação do navegador de testes falhou.' }
           cargo fetch --locked
           if ($LASTEXITCODE -ne 0) { throw 'cargo fetch falhou.' }
-      - name: Testar Rust e interface
+      - name: Verificar proteção dos arquivos locais
+        shell: pwsh
+        run: |
+          node scripts/verify-vite-privacy.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Verificação de privacidade falhou.' }
+      - name: Testar Rust
         shell: pwsh
         run: |
           cargo test --workspace --locked
           if ($LASTEXITCODE -ne 0) { throw 'Testes Rust falharam.' }
+      - name: Compilar interface
+        shell: pwsh
+        run: |
           npm run build
           if ($LASTEXITCODE -ne 0) { throw 'Build web falhou.' }
+      - name: Verificar lançamentos
+        shell: pwsh
+        run: |
           npm run verify:ledger
           if ($LASTEXITCODE -ne 0) { throw 'Verificação do histórico falhou.' }
+      - name: Verificar interface
+        shell: pwsh
+        run: |
           npm run verify:ui
           if ($LASTEXITCODE -ne 0) { throw 'Verificação da interface falhou.' }
       - name: Compilar aplicativo Windows para teste
