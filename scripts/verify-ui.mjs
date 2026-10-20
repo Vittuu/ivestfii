@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
 import { verifyTooltips } from './verify-tooltip.mjs';
+import { verifyVitePrivacy } from './verify-vite-privacy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, '.local', 'ui-verification');
@@ -2324,7 +2325,11 @@ try {
 
   // ---------- Vite never serves the local portfolio or verification data ----------
   const privacy=[];
-  for(const requestPath of ['/data/fiis_data.json','/.local/last-verification.json']){const response=await fetch(base+requestPath);assert.ok([403,404].includes(response.status),`${requestPath} returned ${response.status}`);privacy.push({path:requestPath,status:response.status});await response.body?.cancel();}
+  // Request JSON explicitly: a missing file otherwise returns Vite's SPA HTML
+  // with status 200 on clean checkouts. Also verify existing synthetic files in
+  // an isolated root, without relying on or reading the user's local portfolio.
+  for(const requestPath of ['/data/fiis_data.json','/.local/last-verification.json']){const response=await fetch(base+requestPath,{headers:{Accept:'application/json'}});assert.ok([403,404].includes(response.status),`${requestPath} returned ${response.status}`);privacy.push({path:requestPath,status:response.status});await response.body?.cancel();}
+  privacy.push(...await verifyVitePrivacy());
   check('vite-protected-paths-denied');
   assert.deepEqual(browserErrors,[],'Browser runtime errors occurred');
   const report={status:'PASS',uiVersion,syntheticDataOnly:true,checks,privacy,browserErrors,screenshots,screenshotsDirectory:'.local/ui-verification',zoomMethod:'200% equivalent: 720 CSS px at DPR 2, layout viewport of a 1440 px window; no OS settings changed.'};
