@@ -561,6 +561,7 @@ fn declared_profile_is_wallet_scoped_and_missing_fields_are_not_inferred_from_ho
 #[test]
 fn performance_and_daily_cdi_use_shared_calculations_and_original_dates_without_writes() {
     use chrono::{Days, FixedOffset, NaiveDate, Utc};
+    use ivestfii_market_data::dividends::parse_b3_dividends;
     let fixture = fixture();
     let path = fixture.directory.path();
     public_caches(path);
@@ -586,6 +587,26 @@ fn performance_and_daily_cdi_use_shared_calculations_and_original_dates_without_
     }}))
     .unwrap();
     fs::write(path.join("public-data/cdi-history.json"), &history_bytes).unwrap();
+    let dividend_observation = parse_b3_dividends(
+        &serde_json::to_vec(&json!({"code":"TEST","cashDividends":[
+            {"isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"2,00",
+                "lastDatePrior":"2020-01-01","paymentDate":"2020-01-15"},
+            {"isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"0,40",
+                "lastDatePrior":"2020-02-01","paymentDate":"2020-02-10"},
+            {"isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"9,00",
+                "lastDatePrior":"2020-02-01","paymentDate":"2020-02-12"}
+        ]}))
+        .unwrap(),
+        "TEST11",
+        fetched.parse().unwrap(),
+    )
+    .unwrap();
+    let dividend_source_url = dividend_observation.source_url.clone();
+    let dividend_bytes = serde_json::to_vec(&json!({"version":1,"items":{"TEST11":{
+        "observation":dividend_observation,"checkedAt":fetched,
+        "status":"available","error":null}},"retryAfter":null}))
+    .unwrap();
+    fs::write(path.join("public-data/dividends.json"), &dividend_bytes).unwrap();
     let before = financial_state(path);
     let mut server = ready(path);
     let result = call(&mut server, json!({"conversationId":fixture.conversation}));
@@ -606,8 +627,22 @@ fn performance_and_daily_cdi_use_shared_calculations_and_original_dates_without_
     assert_eq!(result["performance"]["report"]["quoteFetchedAt"], fetched);
     assert_eq!(
         result["performance"]["report"]["totalResult"],
-        "-3.117283945"
+        "-1.117283945"
     );
+    let performance = &result["performance"]["report"];
+    assert_eq!(performance["dividends"], "4.5");
+    assert_eq!(performance["income"]["recordedAmount"], "2.5");
+    assert_eq!(performance["income"]["apiAmount"], "2");
+    assert_eq!(performance["income"]["asOf"], "2020-02-11");
+    assert_eq!(performance["dividendSource"], "b3");
+    assert_eq!(performance["dividendFetchedAt"], fetched);
+    assert_eq!(
+        performance["dividendSources"][0]["sourceUrl"],
+        dividend_source_url
+    );
+    // The API fills February only. January is already locally recorded, and
+    // the February 12 event is beyond the quote's February 11 cutoff.
+    assert_eq!(result["portfolio"]["totals"]["dividendsReceived"], "2.5");
     assert!(result["performance"]["report"]["cdi"].is_object());
     assert_eq!(result["cdiHistory"]["history"]["fetchedAt"], fetched);
     assert_eq!(
@@ -634,7 +669,43 @@ fn performance_and_daily_cdi_use_shared_calculations_and_original_dates_without_
         fs::read(path.join("public-data/cdi-history.json")).unwrap(),
         history_bytes
     );
+    assert_eq!(
+        fs::read(path.join("public-data/dividends.json")).unwrap(),
+        dividend_bytes
+    );
+    assert!(!path
+        .join("public-data/dividends.refresh-policy.json")
+        .exists());
     assert_eq!(financial_state(path), before);
+    let repeated = call(&mut server, json!({}));
+    assert_eq!(content(&repeated)["performance"], result["performance"]);
+    let repository = Repository::open_existing(path.join("portfolio.sqlite")).unwrap();
+    repository
+        .save_monthly_record(RecordInput {
+            id: None,
+            fund_id: snapshot.funds[0].id.clone(),
+            month: "2020-02".into(),
+            purchase_date: None,
+            cotas_added: "0".into(),
+            price_per_cota: "0".into(),
+            dividend_per_cota: "0".into(),
+            dividend_total: Some("0".into()),
+            notes: "Zero sintético informado pelo usuário substitui a API".into(),
+        })
+        .unwrap();
+    let after_manual_zero = financial_state(path);
+    let overridden = call(&mut server, json!({}));
+    let overridden = &content(&overridden)["performance"]["report"];
+    assert_eq!(overridden["income"]["apiAmount"], "0");
+    assert_eq!(overridden["dividends"], "2.5");
+    assert_eq!(overridden["totalResult"], "-3.117283945");
+    assert_eq!(overridden["cdi"], performance["cdi"]);
+    assert_ne!(overridden["difference"], performance["difference"]);
+    assert_eq!(financial_state(path), after_manual_zero);
+    assert_eq!(
+        fs::read(path.join("public-data/dividends.json")).unwrap(),
+        dividend_bytes
+    );
     let assistant = AssistantStore::open(path.join("assistant.sqlite")).unwrap();
     assert_eq!(assistant.messages(&fixture.conversation).unwrap().len(), 1);
 }

@@ -2,9 +2,10 @@
 //! Neither result is a time-weighted return or an annualized rate. Cash pockets,
 //! imported fixed income, CVM NAV and imported aggregate wealth are not inputs.
 use super::{
-    add, decimal_string, div, money, mul, normalize_ticker, parse_nonnegative, CoreError,
-    PortfolioSnapshot, Result,
+    add, decimal_string, div, money, mul, normalize_purchase_date, normalize_ticker,
+    parse_nonnegative, CoreError, PortfolioSnapshot, Result,
 };
+use crate::income::{calculate_monthly_income, IncomeEvent};
 use chrono::{Datelike, NaiveDate};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,36 @@ pub struct CdiPerformance {
     pub return_percent: String,
 }
 
+/// Provenance of cumulative known income. API income is calculated from public
+/// distributions and eligible holdings, never persisted as a received payment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FiiIncomeBreakdown {
+    pub recorded_amount: String,
+    pub api_amount: String,
+    pub as_of: String,
+    pub start_month: String,
+    pub end_month: String,
+    /// `complete` or `partial`: known income does not prove absent payments.
+    pub status: String,
+    pub missing_fund_month_count: usize,
+    pub date_required_fund_month_count: usize,
+    pub ignored_event_count: usize,
+    pub by_fund: Vec<FundIncomeBreakdown>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FundIncomeBreakdown {
+    pub fund_id: String,
+    pub symbol: String,
+    pub recorded_amount: String,
+    pub api_amount: String,
+    pub total_amount: String,
+    pub missing_month_count: usize,
+    pub date_required_month_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FiiPerformance {
@@ -43,6 +74,9 @@ pub struct FiiPerformance {
     pub start_month: Option<String>,
     pub invested: String,
     pub dividends: String,
+    /// Absent for legacy/manual-only calculations and old serialized reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub income: Option<FiiIncomeBreakdown>,
     pub market_value: Option<String>,
     pub price_result: Option<String>,
     pub total_result: Option<String>,
@@ -108,7 +142,7 @@ pub fn calculate_fii_performance(
 ) -> Result<FiiPerformance> {
     let mut output = FiiPerformance {
         status: "incomplete".into(), as_of: None, start_month: None,
-        invested: "0".into(), dividends: "0".into(), market_value: None,
+        invested: "0".into(), dividends: "0".into(), income: None, market_value: None,
         price_result: None, total_result: None, total_return_percent: None,
         cdi: None, difference: None, issues: vec![],
         assumptions: vec![
@@ -117,8 +151,8 @@ pub fn calculate_fii_performance(
             "A porcentagem é ganho dividido pelo custo das compras; não é TWR, taxa anualizada nem resultado ajustado pelo tempo dos fluxos.".into(),
             "Compras são custo de aquisição; sua origem externa ou reinvestida não é conhecida.".into(),
             "Proventos são somados sem remuneração ou reinvestimento no modelo; o CDI capitaliza diariamente.".into(),
-            "Sem dias de compra, o cenário CDI aplica cada compra no fim do mês. No mês da cotação, usa a própria data final e não credita juros a essas compras.".into(),
-            "O cenário usa 100% do CDI diário histórico SGS 12, estritamente depois da data estimada de cada compra, até a mesma data do mercado.".into(),
+            "Compras com data usam o dia informado no cenário CDI. Sem o dia, a compra é estimada no fim do mês; no mês da cotação, usa a própria data final e não recebe juros nesse dia.".into(),
+            "O cenário usa 100% do CDI diário histórico SGS 12, estritamente depois da data informada ou estimada de cada compra, até a mesma data do mercado.".into(),
         ],
     };
     let mut prices = BTreeMap::new();
@@ -190,12 +224,27 @@ pub fn calculate_fii_performance(
             }
             let quantity = parse_nonnegative(&entry.cotas_added, "Quantidade de cotas")?;
             let price = parse_nonnegative(&entry.price_per_cota, "Preço por cota")?;
-            held = add(held, quantity)?;
+            let purchase_date =
+                normalize_purchase_date(entry.purchase_date.as_deref(), &entry.month, quantity)?
+                    .as_deref()
+                    .map(date)
+                    .transpose()?;
+            let after_cutoff = purchase_date.is_some_and(|day| day > as_of);
+            if after_cutoff {
+                complete = false;
+                future_records = true;
+                issue(&mut output.issues, "Há compras posteriores à data das cotações; elas foram excluídas e o resultado de mercado não foi calculado.".into());
+            } else {
+                held = add(held, quantity)?;
+            }
             monthly_holdings.insert(*entry_month, held);
-            if anchor_month.is_some_and(|anchor| *entry_month <= anchor) {
+            if !after_cutoff
+                && anchor_month.is_some_and(|anchor| *entry_month <= anchor)
+                && purchase_date.is_none_or(|day| broker_date.is_some_and(|broker| day <= broker))
+            {
                 anchor_held = add(anchor_held, quantity)?;
             }
-            if !quantity.is_zero() {
+            if !quantity.is_zero() && !after_cutoff {
                 any_record = true;
                 let key = entry_month.format("%Y-%m").to_string();
                 if output.start_month.as_ref().is_none_or(|start| key < *start) {
@@ -208,7 +257,8 @@ pub fn calculate_fii_performance(
                 let cost = mul(quantity, price)?;
                 invested = add(invested, cost)?;
                 if !cost.is_zero() {
-                    let purchase_date = end_of_month(*entry_month)?.min(as_of);
+                    let purchase_date =
+                        purchase_date.unwrap_or(end_of_month(*entry_month)?.min(as_of));
                     let previous = purchases
                         .get(&purchase_date)
                         .copied()
@@ -248,7 +298,7 @@ pub fn calculate_fii_performance(
     }
     if let Some(position) = &snapshot.broker_position {
         if anchor_month.is_some() {
-            output.assumptions.push("A conciliação com a posição importada usa as cotas finais do mês, pois os lançamentos não informam os dias de compra.".into());
+            output.assumptions.push("A conciliação respeita as datas de compra informadas; compras sem dia usam as cotas finais do mês da posição importada.".into());
             let mut broker_tickers = HashSet::new();
             for holding in &position.listed_funds.holdings {
                 let ticker = normalize_ticker(&holding.ticker)?;
@@ -339,6 +389,149 @@ pub fn calculate_fii_performance(
                 .issues
                 .push(format!("Comparação CDI indisponível: {error}"));
         }
+    }
+    Ok(output)
+}
+
+/// Include only the API complement to the manual ledger. A fund/month already
+/// supplied by the user (including an explicit zero) is never added a second
+/// time. Public payments after the common market date are excluded from the
+/// valuation and from its CDI comparison, even if the cache was fetched later.
+pub fn calculate_fii_performance_with_income(
+    snapshot: &PortfolioSnapshot,
+    quotes: &[PerformanceQuote],
+    rates: &[DailyCdiRate],
+    events: &[IncomeEvent],
+    today: NaiveDate,
+) -> Result<FiiPerformance> {
+    let mut output = calculate_fii_performance(snapshot, quotes, rates, today)?;
+    let as_of = output
+        .as_of
+        .as_deref()
+        .map(date)
+        .transpose()?
+        .unwrap_or(today);
+    let end_month = as_of.format("%Y-%m").to_string();
+    let Some(start_month) = snapshot
+        .funds
+        .iter()
+        .flat_map(|fund| &fund.entries)
+        .map(|entry| entry.month.as_str())
+        .filter(|month| *month <= end_month.as_str())
+        .min()
+    else {
+        return Ok(output);
+    };
+    let monthly = calculate_monthly_income(snapshot, events, start_month, &end_month, as_of)?;
+    let mut by_fund = snapshot
+        .funds
+        .iter()
+        .map(|fund| FundIncomeBreakdown {
+            fund_id: fund.id.clone(),
+            symbol: fund.ticker.clone(),
+            recorded_amount: "0".into(),
+            api_amount: "0".into(),
+            total_amount: "0".into(),
+            missing_month_count: 0,
+            date_required_month_count: 0,
+        })
+        .collect::<Vec<_>>();
+    let mut recorded = Decimal::ZERO;
+    let mut api = Decimal::ZERO;
+    let mut missing_fund_month_count = 0;
+    let mut date_required_fund_month_count = 0;
+    for point in &monthly.months {
+        recorded = add(
+            recorded,
+            parse_nonnegative(&point.recorded_amount, "Proventos registrados")?,
+        )?;
+        // known_total includes the manual amount. Adding it here would duplicate
+        // the ledger; api_amount is precisely the missing fund/month complement.
+        api = add(
+            api,
+            parse_nonnegative(&point.api_amount, "Proventos da API")?,
+        )?;
+        for (fund, summary) in point.funds.iter().zip(&mut by_fund) {
+            match fund.status.as_str() {
+                "recorded" | "api" => {
+                    let amount = parse_nonnegative(
+                        fund.amount
+                            .as_deref()
+                            .ok_or_else(|| invalid("Rendimento conhecido sem valor."))?,
+                        "Rendimento conhecido",
+                    )?;
+                    let target = if fund.status == "api" {
+                        &mut summary.api_amount
+                    } else {
+                        &mut summary.recorded_amount
+                    };
+                    *target = decimal_string(add(
+                        parse_nonnegative(target, "Rendimento conhecido")?,
+                        amount,
+                    )?);
+                    summary.total_amount = decimal_string(add(
+                        parse_nonnegative(&summary.total_amount, "Rendimento conhecido")?,
+                        amount,
+                    )?);
+                }
+                "missing" | "date_required" => {
+                    missing_fund_month_count += 1;
+                    summary.missing_month_count += 1;
+                    if fund.status == "date_required" {
+                        date_required_fund_month_count += 1;
+                        summary.date_required_month_count += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if recorded != parse_nonnegative(&output.dividends, "Proventos registrados")? {
+        return Err(invalid(
+            "Os cálculos do histórico de rendimentos não conferem no período das cotações.",
+        ));
+    }
+    output.dividends = decimal_string(add(recorded, api)?);
+    if let Some(result) = output
+        .total_result
+        .as_deref()
+        .map(super::parse_decimal)
+        .transpose()?
+    {
+        let result = add(result, api)?;
+        output.total_result = Some(decimal_string(result));
+        output.total_return_percent = Some(decimal_string(percent(
+            result,
+            parse_nonnegative(&output.invested, "Custo dos FIIs")?,
+        )?));
+        if let Some(cdi) = &output.cdi {
+            output.difference = Some(decimal_string(subtract(
+                result,
+                super::parse_decimal(&cdi.result)?,
+            )?));
+        }
+    }
+    output.income = Some(FiiIncomeBreakdown {
+        recorded_amount: decimal_string(recorded),
+        api_amount: decimal_string(api),
+        as_of: as_of.to_string(),
+        start_month: start_month.into(),
+        end_month,
+        status: if missing_fund_month_count == 0 {
+            "complete"
+        } else {
+            "partial"
+        }
+        .into(),
+        missing_fund_month_count,
+        date_required_fund_month_count,
+        ignored_event_count: monthly.ignored_event_count,
+        by_fund,
+    });
+    output.assumptions.push("Proventos públicos complementam somente os meses de cada fundo sem rendimento informado; um valor manual, inclusive zero, tem prioridade. Os valores da API não alteram os lançamentos nem comprovam crédito na corretora.".into());
+    output.assumptions.push(format!("Os proventos da API incluem apenas pagamentos até {as_of}, a mesma data usada no resultado dos FIIs quando há cotações comuns."));
+    if date_required_fund_month_count > 0 {
+        issue(&mut output.issues, "Informe a data das compras antigas para completar os proventos da API. Os valores sem cotas confirmadas na data-com não foram presumidos.".into());
     }
     Ok(output)
 }

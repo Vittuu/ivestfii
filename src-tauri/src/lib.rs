@@ -393,16 +393,42 @@ async fn refresh_fii_performance(
         .map(|fund| fund.ticker.clone())
         .collect::<Vec<_>>();
     let quotes = QuoteService::new(state.data_directory.join("public-data/quotes.json"))?;
+    let dividends = DividendService::new(state.data_directory.join("public-data/dividends.json"))?;
     let history_service =
         CdiHistoryService::new(state.data_directory.join("public-data/cdi-history.json"))?;
     let mut errors = Vec::new();
     let (key, _) = market_settings(&state)?.brapi_key()?;
-    let panel = match ivestfii_market_data::bounded_quotes(&quotes, &symbols, key.as_deref()).await
-    {
+    // Reuse the B3 cache and its own daily cadence; opening or refreshing the
+    // result must not bypass the shared public-source request policy.
+    let (quote_result, dividend_result) = tokio::join!(
+        ivestfii_market_data::bounded_quotes(&quotes, &symbols, key.as_deref()),
+        tokio::time::timeout(
+            std::time::Duration::from_secs(45),
+            dividends.refresh_if_due(&symbols),
+        ),
+    );
+    let panel = match quote_result {
         Ok(panel) => panel,
         Err(error) => {
             errors.push(error);
             quotes.read_cache(&symbols)?
+        }
+    };
+    let dividend_panel = match dividend_result {
+        Ok(result) => {
+            if let Some(message) = result.message {
+                errors.push(message);
+            }
+            result.data.unwrap_or_default()
+        }
+        Err(_) => {
+            errors.push(
+                "A consulta de proventos demorou demais. Os eventos salvos foram mantidos.".into(),
+            );
+            dividends.read_cache(&symbols).unwrap_or_else(|error| {
+                errors.push(error);
+                DividendPanel::default()
+            })
         }
     };
     let mut history = history_service.read_cache().unwrap_or_else(|error| {
@@ -410,15 +436,28 @@ async fn refresh_fii_performance(
         None
     });
     let today = performance_today();
-    let preliminary =
-        performance::build_report(&snapshot, &panel, history.as_ref(), today, Vec::new())?;
+    let preliminary = performance::build_report_with_income(
+        &snapshot,
+        &panel,
+        history.as_ref(),
+        &dividend_panel,
+        today,
+        Vec::new(),
+    )?;
     if let Some((start, end)) = performance::cdi_range(&preliminary)? {
         match history_service.refresh(start, end).await {
             Ok(fetched) => history = Some(fetched),
             Err(error) => errors.push(error),
         }
     }
-    performance::build_report(&snapshot, &panel, history.as_ref(), today, errors)
+    performance::build_report_with_income(
+        &snapshot,
+        &panel,
+        history.as_ref(),
+        &dividend_panel,
+        today,
+        errors,
+    )
 }
 
 #[tauri::command]

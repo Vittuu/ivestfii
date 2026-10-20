@@ -163,10 +163,18 @@ pub async fn refresh_if_due(
         source("dividends", &dividends),
     ];
     let quote_panel = quotes.data.unwrap_or_default();
+    let dividend_panel = dividends.data.unwrap_or_default();
     // Use exactly the quote date used for the full FII result. Re-fetching quotes
     // through refresh_fii_performance here would waste a second brapi batch.
-    let range = crate::performance::build_report(snapshot, &quote_panel, None, today, vec![])
-        .and_then(|report| crate::performance::cdi_range(&report));
+    let range = crate::performance::build_report_with_income(
+        snapshot,
+        &quote_panel,
+        None,
+        &dividend_panel,
+        today,
+        vec![],
+    )
+    .and_then(|report| crate::performance::cdi_range(&report));
     match range {
         Ok(Some((start, end))) => {
             let result =
@@ -193,7 +201,7 @@ pub async fn refresh_if_due(
         news: news.data,
         quotes: quote_panel,
         cvm: cvm.data.unwrap_or_default(),
-        dividends: dividends.data.unwrap_or_default(),
+        dividends: dividend_panel,
         sources,
         checked_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
     })

@@ -18,7 +18,7 @@ const playwrightModule = process.env.IVESTFII_PLAYWRIGHT_PATH
     return import(pathToFileURL(bundledPlaywright).href);
   });
 const { chromium } = playwrightModule.default || playwrightModule;
-const uiVersion = 'proventos-mensais-com-cotas-acumuladas-e-lacunas-explicitas';
+const uiVersion = 'proventos-B3-conciliados-no-resultado-da-carteira-e-CDI';
 const checks = [];
 const browserErrors = [];
 const screenshots = [];
@@ -29,7 +29,8 @@ const focusedPublicData=process.env.IVESTFII_UI_FOCUS==='public-data';
 const focusedProfile=process.env.IVESTFII_UI_FOCUS==='profile';
 const focusedIncome=process.env.IVESTFII_UI_FOCUS==='income';
 const focusedIncomeApi=process.env.IVESTFII_UI_FOCUS==='income-api';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':'report.json';
+const focusedIncomePerformance=process.env.IVESTFII_UI_FOCUS==='income-performance';
+const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -153,6 +154,25 @@ const fiagroReport = {...cvmReport,cnpj:'11111111000191',fundName:'FIAGRO sinté
 const cvmPanel = {items:[{symbol:'TEST11',cnpj:cvmReport.cnpj,status:'cached',report:cvmReport,error:null},{symbol:'MOCK11',cnpj:null,status:'mapping_required',report:null,error:null}],fetchedAt:cvmReport.fetchedAt,errors:[]};
 const projection = [{month:'2020-03',projectedCotas:'12',projectedIncome:'10',cumulativeIncome:'10',reinvestedCotas:'1',combinedCotas:'13',combinedIncome:'11'},{month:'2020-04',projectedCotas:'13',projectedIncome:'12',cumulativeIncome:'22',reinvestedCotas:'2',combinedCotas:'15',combinedIncome:'14'}];
 const performance = {status:'available',asOf:'2020-02-03',startMonth:'2020-02',invested:'1040',dividends:'11',marketValue:'139.90',priceResult:'-900.10',totalResult:'-889.10',totalReturnPercent:'-85.4903846154',cdi:{endingValue:'1120',result:'80',returnPercent:'7.6923076923'},difference:'-969.10',issues:[],assumptions:['Comparação sintética, com compras no fim do mês.'],quoteSource:'brapi',quoteFetchedAt:'2020-02-04T12:00:00Z',cdiSource:'Banco Central · CDI',cdiSourceUrl:'https://api.bcb.gov.br/dados/serie/bcdata.sgs.4391/dados?formato=json',cdiFetchedAt:'2020-02-04T12:00:00Z'};
+// Literal native-contract responses: the UI must display the reconciled result,
+// not add the public panel to recorded totals or reproduce entitlement arithmetic.
+const incomePerformance={
+  ...performance,asOf:'2026-10-20',dividends:'30',totalResult:'-870.10',totalReturnPercent:'-83.6634615385',difference:'-950.10',
+  income:{recordedAmount:'11',apiAmount:'19',asOf:'2026-10-20',startMonth:'2020-02',endMonth:'2026-10',status:'complete',missingFundMonthCount:0,dateRequiredFundMonthCount:0,ignoredEventCount:0,byFund:[
+    {fundId:'fund-a',symbol:'TEST11',recordedAmount:'10',apiAmount:'15',totalAmount:'25',missingMonthCount:0,dateRequiredMonthCount:0},
+    {fundId:'fund-b',symbol:'MOCK11',recordedAmount:'1',apiAmount:'4',totalAmount:'5',missingMonthCount:0,dateRequiredMonthCount:0},
+  ]},
+  portfolio:{status:'available',invested:'2240',knownInvested:'2240',income:'64.56',knownIncome:'64.56',currentValue:'1374.46',knownCurrentValue:'1374.46',totalResult:'-835.54',knownResult:'-835.54',totalReturnPercent:'-37.3008928571',withdrawals:'0',issues:[],cash:{balance:'1234.56',invested:'1200',income:'34.56',withdrawals:'0',knownInvested:'1200',knownIncome:'34.56',count:1,missingBasisCount:0,items:[{id:'pocket-a',name:'Reserva sintética',balance:'1234.56',invested:'1200',withdrawals:'0',income:'34.56',balanceDate:'2020-02-03'}]}},
+};
+const incomePerformanceOverridden={...incomePerformance,income:{...incomePerformance.income,recordedAmount:'26',apiAmount:'4',byFund:[
+  {fundId:'fund-a',symbol:'TEST11',recordedAmount:'25',apiAmount:'0',totalAmount:'25',missingMonthCount:0,dateRequiredMonthCount:0},
+  incomePerformance.income.byFund[1],
+]}};
+const incomePerformanceZero={...incomePerformance,dividends:'15',totalResult:'-885.10',totalReturnPercent:'-85.1057692308',difference:'-965.10',
+  income:{...incomePerformance.income,apiAmount:'4',byFund:[{...incomePerformance.income.byFund[0],apiAmount:'0',totalAmount:'10'},incomePerformance.income.byFund[1]]},
+  portfolio:{...incomePerformance.portfolio,income:'49.56',knownIncome:'49.56',totalResult:'-850.54',knownResult:'-850.54',totalReturnPercent:'-37.9705357143'},
+};
+const incomePerformanceDividendPanel={items:['TEST11','MOCK11'].map(symbol=>({symbol,status:'cached',observation:{symbol,fetchedAt:'2026-10-20T12:00:00Z',source:'B3',sourceUrl:'https://sistemaswebb3-listados.b3.com.br/fundsListedPage/events-main/'+symbol.slice(0,4),events:[incomeApiEvent(symbol,'2026-03',symbol==='TEST11'?'1.5':'2',symbol==='TEST11'?'10':'2',symbol==='TEST11'?'15':'4'),incomeApiEvent(symbol,'2020-02','1','10','10'),incomeApiEvent(symbol,'2026-11','1','10','10')]},error:null})),fetchedAt:'2026-10-20T12:00:00Z',errors:[]};
 const chatFixture={
   conversations:[{id:'conversation-a',title:'Conversa sintética preservada',createdAt:'2020-02-03T12:00:00Z',updatedAt:'2020-02-03T12:02:00Z'}],
   messages:[{id:'message-a',conversationId:'conversation-a',role:'user',content:'Pergunta sintética sobre a carteira de teste.',provider:'codex',model:null,createdAt:'2020-02-03T12:00:00Z'},{id:'message-b',conversationId:'conversation-a',role:'assistant',content:'Resposta sintética preservada entre provedores.',provider:'codex',model:null,createdAt:'2020-02-03T12:02:00Z'}],
@@ -173,6 +193,7 @@ function cashPerformance(pockets) {
   return {balance:sum('balance'),invested:missingBasisCount?null:sum('invested'),income:missingBasisCount?null:sum('income'),withdrawals:missingBasisCount?null:sum('withdrawals'),knownInvested:sum('invested'),knownIncome:sum('income'),count:items.length,missingBasisCount,items};
 }
 function withPortfolio(snapshot, fii) {
+  if(fii.portfolio)return structuredClone(fii);
   const decimal = value => String(Number(value.toFixed(10)));
   const cash = cashPerformance(snapshot.cashPockets);
   const empty = fii.status==='empty';
@@ -181,7 +202,7 @@ function withPortfolio(snapshot, fii) {
   const fullCost=snapshot.funds.reduce((sum,fund)=>sum+fund.entries.reduce((cost,entry)=>cost+Number(entry.cotasAdded)*Number(entry.pricePerCota),0),0);
   const fullIncome=snapshot.funds.reduce((sum,fund)=>sum+Number(fund.dividendsReceived),0);
   const costComplete=!future&&!snapshot.funds.some(fund=>fund.entries.some(entry=>Number(entry.cotasAdded)>0&&Number(entry.pricePerCota)===0))&&(!snapshot.funds.length||Math.abs(fullCost-Number(fii.invested))<0.0000001);
-  const incomeComplete=!future&&(!snapshot.funds.length||Math.abs(fullIncome-Number(fii.dividends))<0.0000001);
+  const incomeComplete=!future&&(!snapshot.funds.length||Math.abs(fullIncome-Number(fii.income?.recordedAmount??fii.dividends))<0.0000001);
   const fiiInvested = empty?0:Number(fii.invested);
   const fiiIncome = empty?0:Number(fii.dividends);
   const market = empty?0:fii.marketValue===null?null:Number(fii.marketValue);
@@ -209,7 +230,7 @@ function bootstrap(mode) {
     initial.totals = {invested:'155',cotas:'16',dividendsReceived:'16.25',estimatedMonthlyIncome:'0'};
     initial.recordCount = ledgerEntries.length;
   }
-  if(mode.startsWith('income')){
+  if(mode.startsWith('income')&&!mode.startsWith('income-performance')){
     initial.funds=structuredClone(incomeFunds);initial.brokerPosition=null;initial.cashPockets=[];initial.cashBalance='0';
     initial.totals={invested:'310',cotas:'20',dividendsReceived:'28.95',estimatedMonthlyIncome:'0'};
     if(mode==='income-complete'){
@@ -248,7 +269,17 @@ function bootstrap(mode) {
   const automaticMode=mode.startsWith('auto-');
   const keyConfigured = mode === 'connected' || mode === 'corrupt-quotes' || (automaticMode&&mode!=='auto-no-key');
   let walletPerformance = mode === 'ledger' ? {...performance,status:'incomplete',invested:'155',dividends:'16.25',marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,issues:['Cotações ausentes no cenário sintético de lançamentos.']} : performance;
-  if(mode.startsWith('income'))walletPerformance={...performance,status:'incomplete',asOf:'2026-10-20',startMonth:'2025-10',invested:'310',dividends:initial.totals.dividendsReceived,marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,issues:['Cotações indisponíveis no cenário sintético do gráfico mensal.']};
+  if(mode.startsWith('income')&&!mode.startsWith('income-performance'))walletPerformance={...performance,status:'incomplete',asOf:'2026-10-20',startMonth:'2025-10',invested:'310',dividends:initial.totals.dividendsReceived,marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,issues:['Cotações indisponíveis no cenário sintético do gráfico mensal.']};
+  if(mode.startsWith('income-performance')){
+    walletPerformance=structuredClone(mode==='income-performance-overridden'?incomePerformanceOverridden:mode==='income-performance-zero'?incomePerformanceZero:incomePerformance);
+    if(mode==='income-performance-overridden'){
+      initial.funds[0].entries.push({...entry('entry-confirmed','0','15'),month:'2026-03',cotasAdded:'0',dividendPerCota:'0'});
+      initial.funds[0].dividendsReceived='25';initial.totals.dividendsReceived='26';initial.recordCount=3;
+    }
+    if(mode==='income-performance-zero'){
+      initial.funds[0].entries.push({...entry('entry-zero','0','0'),month:'2026-03',cotasAdded:'0',dividendPerCota:'0'});initial.recordCount=3;
+    }
+  }
   if(mode.startsWith('cash-')) {
     initial.brokerPosition=null;
     initial.funds=[{...initial.funds[0],entries:[{...entry('entry-a','10','5'),cotasAdded:'10'}],totalCotas:'10',totalInvested:'100',averagePrice:'10',dividendsReceived:'5',estimatedMonthlyIncome:'5'}];
@@ -279,7 +310,7 @@ Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformanc
 Object.assign(globalThis.__uiTest,{chat:${JSON.stringify(chatFixture)},deferChatStart:false,chatStartWaiters:[],eventSubscriptions:[],eventCalls:[]});
 Object.assign(globalThis.__uiTest,{automaticMode:${JSON.stringify(mode)},deferAutoWallets:${JSON.stringify(automaticMode?['wallet-original']:[])},autoWaiters:[],publicCache:{shared:{economics:${JSON.stringify(economics)},news:${JSON.stringify(news)}},wallets:{}},autoCheckedAt:'2026-10-20T12:00:00Z'});
 Object.assign(globalThis.__uiTest,{incomeReport:${JSON.stringify(mode==='income-api-date-required'?incomeApiUnknownReport:mode==='income-api'?incomeApiReport:{months:[]})}});
-Object.assign(globalThis.__uiTest,{dividendPanel:${JSON.stringify(mode.startsWith('income-api')?incomeApiDividendPanel:{items:[],fetchedAt:null,errors:[]})}});
+Object.assign(globalThis.__uiTest,{dividendPanel:${JSON.stringify(mode.startsWith('income-api')?incomeApiDividendPanel:mode.startsWith('income-performance')?incomePerformanceDividendPanel:{items:[],fetchedAt:null,errors:[]})}});
 ${mode.startsWith('income')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{items:[],fetchedAt:null,credentialConfigured:false,errors:[]},cvm:{items:[],fetchedAt:null,errors:[]}};`:''}
 Object.assign(globalThis.__uiTest,{profiles:{'wallet-original':${JSON.stringify(mode==='profile-stale'?{...otherProfile,riskTolerance:'aggressive',notes:'Nota da resposta antiga da carteira A.'}:null)},'wallet-other':${JSON.stringify(mode.startsWith('profile')?otherProfile:null)}},deferProfileWallets:${JSON.stringify(mode==='profile-stale'?['wallet-original']:[])},profileReadWaiters:[],deferProfileSaves:false,profileSaveWaiters:[],profileSaveError:null,profileReadError:${JSON.stringify(mode==='profile-error'?'Perfil sintético temporariamente indisponível.':null)}});
 ${mode.startsWith('profile')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{...${JSON.stringify(quotePanel)},items:[{symbol:'TEST11',status:'cached',observation:{...${JSON.stringify(quoteObservation)},quotedAt:'2026-10-20T00:30:00Z'},error:null},{symbol:'MOCK11',status:'cached',observation:{...${JSON.stringify(quoteObservation)},symbol:'MOCK11',price:'25',quotedAt:'not-a-date'},error:null}]}};`:''}
@@ -453,7 +484,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -771,7 +802,7 @@ try {
     const history=region(page,'Histórico de FIIs');
     await openExtra(history);
     await textEquals(history.locator('.group-head p'),'Não somado ao patrimônio');
-    assert.match(await tip(history,'Não somado ao patrimônio'),/não saldo em conta\.$/);
+    assert.match(await tip(history,'Não somado ao patrimônio'),/proventos acumulados.*B3.*não são somados novamente ao patrimônio importado/i);
     assert.equal(await history.locator('.figure-note, .block-foot').count(),0,'Overview history should keep explanations in tooltips');
     const result=region(page,'Resultado da carteira');
     await figureEquals(readout(result,'Total aplicado'),'R$ 2.240,00');
@@ -1696,6 +1727,97 @@ try {
     await noUnexpectedCommands(unknown.page);await unknown.context.close();
   }
 
+  async function verifyAutomaticIncomePerformance(){
+    const resultOf=page=>region(page,'Resultado da carteira');
+    const compositionOf=page=>resultOf(page).getByRole('table',{name:'Composição do resultado da carteira: FIIs e caixinhas',exact:true});
+    const breakdownOf=page=>resultOf(page).getByRole('table',{name:'Composição do resultado total dos FIIs',exact:true});
+    const fundProceeds=(page,symbol)=>page.locator('.ov-funds-table tbody tr').filter({has:page.locator('.ticker',{hasText:new RegExp('^'+symbol)})}).locator('td').last();
+    async function expectedTotals(page,{income='+R$ 64,56',result='−R$ 835,54',fiiIncome='+R$ 30,00',fiiResult='−R$ 870,10',recorded='R$ 11,00',api='R$ 19,00',difference='−R$ 950,10',alpha='R$ 25,00'}={}){
+      const section=resultOf(page),composition=compositionOf(page),breakdown=breakdownOf(page);
+      await figureEquals(readout(section,'Total aplicado'),'R$ 2.240,00');
+      await figureEquals(readout(section,'Rendimentos acumulados'),income);
+      await figureEquals(readout(section,'Resultado da carteira'),result);
+      for(const [name,values] of [['FIIs',['R$ 1.040,00',fiiIncome,fiiResult]],['Caixinhas',['R$ 1.200,00','+R$ 34,56','+R$ 34,56']],['Total',['R$ 2.240,00',income,result]]])
+        assert.deepEqual((await composition.getByRole('row',{name:new RegExp('^'+name+' ')}).locator('td').allInnerTexts()).map(normalize),values);
+      await figureEquals(breakdown.getByRole('row',{name:/^\+ Rendimentos registrados/}).locator('td'),recorded);
+      await figureEquals(breakdown.getByRole('row',{name:/^\+ Proventos B3/}).locator('td'),api);
+      await figureEquals(breakdown.getByRole('row',{name:/^= Resultado total/}).locator('td'),fiiResult);
+      await textMatches(section.locator('.performance-difference'),new RegExp(escapeRegExp(difference)));
+      await figureEquals(fundProceeds(page,'TEST11'),alpha);await figureEquals(fundProceeds(page,'MOCK11'),'R$ 5,00');
+    }
+    async function unchangedLedger(fixture,original){
+      const {page}=fixture;
+      assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.snapshot),original,'Reconciled public income must not write imported position, cash, purchases, or manual dividends');
+      const writes=await page.evaluate(()=>globalThis.__uiTest.calls.filter(({command})=>/^(?:save_|upsert_|delete_|remove_|import_|export_|start_chat_turn$|create_conversation$)/.test(command)));
+      assert.deepEqual(writes,[]);assert.deepEqual(fixture.externalRequests,[]);await noUnexpectedCommands(page);
+    }
+
+    const fixture=await openPage('income-performance',{width:1440,height:1000}),page=fixture.page;
+    const original=await page.evaluate(()=>structuredClone(globalThis.__uiTest.snapshot));
+    await expectedTotals(page);
+    assert.equal((await calls(page,'refresh_fii_performance')).length,0,'Opening the view reads the cached native calculation');
+    assert.equal(await page.locator('.ov-funds-table thead').getByText('Proventos acumulados',{exact:true}).count(),1);
+    check('automatic-income-performance-joins-reconciled-B3-and-manual-income-with-cash-income-once');
+    const section=resultOf(page),graph=section.locator('.performance-bars svg');
+    assert.match(await graph.locator('desc').textContent(),/FIIs: −R\$\s*870,10\. CDI: \+R\$\s*80,00/);
+    await graph.focus();await page.keyboard.press('Home');await textMatches(section.locator('.performance-point'),/^FIIs: −R\$ 870,10/);
+    await page.keyboard.press('End');await textMatches(section.locator('.performance-point'),/^100% do CDI: \+R\$ 80,00/);
+    await section.locator('.performance-chart-table > summary').click();
+    const comparison=section.getByRole('table',{name:'Resultados acumulados comparados com as mesmas compras',exact:true});
+    await figureEquals(comparison.getByRole('row',{name:/^FIIs /}).locator('td').first(),'−R$ 870,10');
+    await figureEquals(comparison.getByRole('row',{name:/^100% do CDI /}).locator('td').first(),'+R$ 80,00');
+    assert.match(await tip(section,'Rendimentos acumulados'),/B3/);
+    check('automatic-income-performance-CDI-chart-keyboard-table-and-difference-use-the-combined-FII-result');
+    await section.getByRole('button',{name:'Atualizar resultado',exact:true}).click();
+    await section.getByText('Consulta concluída. Confira as datas dos dados.',{exact:true}).waitFor();
+    await expectedTotals(page);
+    assert.equal((await calls(page,'refresh_fii_performance')).length,1);
+    await unchangedLedger(fixture,original);
+    check('automatic-income-performance-reloading-public-income-does-not-compound-it-or-create-records');
+    await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-other');
+    await figureEquals(readout(resultOf(page),'Rendimentos acumulados'),'+R$ 20,00');
+    await figureEquals(fundProceeds(page,'BANK11'),'R$ 0,00');
+    assert.equal(await page.locator('.ov-funds-table thead').getByText('Proventos acumulados',{exact:true}).count(),0);
+    assert.equal(await resultOf(page).locator('.performance-api-row').count(),0);
+    await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-original');
+    await expectedTotals(page);
+    check('automatic-income-performance-switching-wallets-never-reuses-another-wallets-B3-fund-totals');
+    await noOverflow(page,'automatic-income-performance-desktop-no-overflow');await sectionShot(page,'desktop-automatic-income-performance',section);
+    await page.setViewportSize({width:375,height:812});await expectedTotals(page);
+    await noOverflow(page,'automatic-income-performance-mobile375-no-overflow');
+    assert.deepEqual(await breakdownOf(page).locator('td.num').evaluateAll(cells=>cells.filter(cell=>cell.scrollWidth>cell.clientWidth+1).map(cell=>cell.textContent)),[]);
+    const note=await section.locator('.performance-api-income').evaluate(element=>{
+      const range=document.createRange();range.selectNodeContents(element.firstChild);
+      return {lineHeight:parseFloat(getComputedStyle(element).lineHeight),prefixHeight:range.getBoundingClientRect().height,dateHeight:element.querySelector('time').getBoundingClientRect().height};
+    });
+    assert.ok(note.prefixHeight<=note.lineHeight*1.5&&note.dateHeight<=note.lineHeight*1.5,`Mobile provenance must flow as a sentence, without splitting short words or dates into columns ${JSON.stringify(note)}`);
+    await sectionShot(page,'mobile-automatic-income-performance375',section);
+    check('automatic-income-performance-provenance-and-combined-totals-remain-readable-on-mobile');
+    await unchangedLedger(fixture,original);await fixture.context.close();
+
+    for(const mode of ['income-performance-overridden','income-performance-zero']){
+      const current=await openPage(mode,{width:1440,height:1000}),currentPage=current.page;
+      const saved=await currentPage.evaluate(()=>structuredClone(globalThis.__uiTest.snapshot));
+      if(mode==='income-performance-overridden'){
+        await expectedTotals(currentPage,{recorded:'R$ 26,00',api:'R$ 4,00'});
+        check('automatic-income-performance-confirmed-manual-payment-replaces-the-same-B3-month-without-changing-total');
+      }else{
+        await expectedTotals(currentPage,{income:'+R$ 49,56',result:'−R$ 850,54',fiiIncome:'+R$ 15,00',fiiResult:'−R$ 885,10',api:'R$ 4,00',difference:'−R$ 965,10',alpha:'R$ 10,00'});
+        const zero=await currentPage.evaluate(()=>globalThis.__uiTest.snapshot.funds[0].entries.find(entry=>entry.id==='entry-zero'));
+        assert.equal(zero.dividendTotal,'0');
+        assert.equal(await currentPage.evaluate(()=>globalThis.__uiTest.dividendPanel.items[0].observation.events.find(event=>event.paymentDate==='2026-03-20').amount),'15');
+        check('automatic-income-performance-explicit-manual-zero-suppresses-only-that-funds-public-payment');
+      }
+      await unchangedLedger(current,saved);await current.context.close();
+    }
+  }
+
+  if(focusedIncomePerformance){
+    await verifyAutomaticIncomePerformance();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'income-performance',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
+
   if(focusedIncomeApi){
     await verifyAutomaticMonthlyIncome();assert.deepEqual(browserErrors,[]);
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
@@ -1744,6 +1866,7 @@ try {
   }
   await verifyMonthlyIncome();
   await verifyAutomaticMonthlyIncome();
+  await verifyAutomaticIncomePerformance();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {

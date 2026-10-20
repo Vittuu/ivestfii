@@ -1,7 +1,7 @@
-import { useId } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { Plus, Upload } from 'lucide-react';
 import { desktop, money, monthShort, percent, quantity } from '../lib/bridge';
-import type { Snapshot } from '../lib/bridge';
+import type { FiiPerformance, Snapshot } from '../lib/bridge';
 import { ledgerRows } from '../lib/ledger';
 import { useMonthlyIncome } from '../lib/useMonthlyIncome';
 import { Def, Empty, PageActions, SectionHeading, ShareBar, TextLink } from '../components';
@@ -21,6 +21,10 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 export default function Overview({ walletId, snapshot, onNavigate, onImport, onImportPosition }: Props) {
   const historyId = useId();
   const { funds, totals } = snapshot;
+  const incomeScope = JSON.stringify([walletId, funds.map((fund) => [fund.id, fund.ticker, fund.entries])]);
+  const [performance, setPerformance] = useState<{ scope: string; data: FiiPerformance | null } | null>(null);
+  const receivePerformance = useCallback((data: FiiPerformance | null) => setPerformance({ scope: incomeScope, data }), [incomeScope]);
+  const income = performance?.scope === incomeScope ? performance.data?.income : null;
   const invested = Number(totals.invested);
   const sorted = [...funds].sort((a, b) => Number(b.totalInvested) - Number(a.totalInvested));
   const rows = funds.flatMap((fund) => ledgerRows(fund).map((row) => ({ ...row, ticker: fund.ticker, month: row.entry.month.slice(0, 7) })));
@@ -52,11 +56,11 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
     </PageActions>
 
     <CompletePortfolio position={snapshot.brokerPosition} onImportPosition={onImportPosition} showImportAction={false} />
-    {desktop && <FiiPerformancePanel key={walletId} walletId={walletId} snapshot={snapshot} onProjection={() => onNavigate('projections')} onCash={() => onNavigate('cash')} />}
+    {desktop && <FiiPerformancePanel key={walletId} walletId={walletId} snapshot={snapshot} onProjection={() => onNavigate('projections')} onCash={() => onNavigate('cash')} onData={receivePerformance} />}
     {desktop && <MarketSummary snapshot={snapshot} onMarket={() => onNavigate('market')} />}
 
     <section className="group ov-history" aria-labelledby={historyId}>
-      <div className="group-head"><h2 id={historyId}>Histórico de FIIs</h2>{snapshot.brokerPosition && <p><Def text="Custo de aquisição e proventos registrados nos lançamentos. Os proventos recebidos são o acumulado dos lançamentos, não saldo em conta.">Não somado ao patrimônio</Def></p>}</div>
+      <div className="group-head"><h2 id={historyId}>Histórico de FIIs</h2>{snapshot.brokerPosition && <p><Def text="Compras registradas e proventos acumulados, incluindo os dados da B3 quando disponíveis. Estes valores não são somados novamente ao patrimônio importado da corretora.">Não somado ao patrimônio</Def></p>}</div>
       {funds.length ? <div className="ov-summary">
         <div className="modular">
         <div className="block span-12 ov-funds">
@@ -71,7 +75,7 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
                 <th scope="col" className="num ov-purchase"><Def text="Soma do dinheiro usado nas compras registradas deste fundo. Não é o preço atual nem o ganho do investimento.">Valor comprado</Def></th>
                 <th scope="col"><Def text="Parte do dinheiro das compras que foi para este fundo. Exemplo: R$ 200 de R$ 1.000 comprados representam 20%. Não é preço atual nem ganho.">Parte do valor comprado</Def></th>
                 <th scope="col" className="num"><Def text="Estimativa pelas cotas atuais e pela média dos últimos 6 proventos por cota registrados. Pode variar.">Renda estimada/mês</Def></th>
-                <th scope="col" className="num ov-received"><Def text="Soma dos proventos registrados para este fundo. Não é saldo em conta.">Proventos recebidos</Def></th>
+                <th scope="col" className="num ov-received"><Def text={income ? `Proventos do histórico mais os pagamentos da B3 que faltavam, até ${income.asOf.split('-').reverse().join('/')}. Um valor informado por você tem prioridade no mesmo fundo e mês. Não é saldo em conta.` : 'Soma dos proventos registrados para este fundo. Não é saldo em conta.'}>{income ? 'Proventos acumulados' : 'Proventos recebidos'}</Def></th>
               </tr></thead>
               <tbody>{fundRows.map((fund) => <tr key={fund.id}>
                 <td className="ticker" title={[fund.name, fund.sector].filter(Boolean).join(' · ') || undefined}>{fund.ticker}{(fund.name || fund.sector) && <span className="ov-fund-name"> {fund.name || fund.sector}</span>}</td>
@@ -79,7 +83,7 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
                 <td className="num ov-purchase">{money(fund.totalInvested)}</td>
                 <td><ShareBar value={Number(fund.totalInvested) || 0} max={invested} label={percent(invested > 0 ? Number(fund.totalInvested) / invested * 100 : 0)} /></td>
                 <td className="num">{money(fund.estimatedMonthlyIncome)}</td>
-                <td className="num ov-received">{money(fund.dividendsReceived)}</td>
+                <td className="num ov-received">{money(income?.byFund.find((item) => item.fundId === fund.id)?.totalAmount ?? fund.dividendsReceived)}</td>
               </tr>)}</tbody>
             </table>
           </div>

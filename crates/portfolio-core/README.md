@@ -126,3 +126,27 @@ calculados a partir de informações públicas, sem confirmar um crédito na
 corretora. `amount: null` distingue informação ausente de zero. Um mês
 incompleto mantém `total: null`, expondo somente `knownTotal`, `recordedAmount`
 e `apiAmount` como subtotais conhecidos, além das contagens por origem.
+
+`performance::calculate_fii_performance_with_income(snapshot, quotes, rates,
+events, today)` usa o mesmo cálculo para complementar os rendimentos acumulados,
+o resultado dos FIIs e a diferença para o CDI. Soma somente `apiAmount` ao
+histórico; `knownTotal` já contém os lançamentos manuais e não deve ser somado
+novamente. Os proventos complementares entram também nos totais da carteira com
+as caixinhas conciliadas. Não alteram o extrato, os saldos ou a sincronização.
+
+O complemento usa a data comum das cotações como limite de pagamento. Um evento
+da API pago depois dela não entra em um resultado de mercado anterior. Sem
+cotações comuns, os rendimentos conhecidos podem ser apurados até `today`, mas
+o resultado de mercado e sua comparação continuam indisponíveis. Compras com
+dia informado usam essa data no CDI, com juros apenas depois do dia da compra;
+compras antigas sem dia mantêm a aproximação pelo fim do mês. Compras posteriores
+à cotação são excluídas, e impedem apresentar a parcela antiga como resultado
+completo da posição atual.
+
+`FiiPerformance.income` identifica `recordedAmount`, `apiAmount`, o período,
+a data de corte e os totais por fundo em `byFund`. Cobertura `partial` indica
+meses sem dados suficientes; `missingFundMonthCount` inclui os casos de
+`dateRequiredFundMonthCount`. Esses subtotais conhecidos não comprovam que todos
+os pagamentos históricos tenham sido encontrados. Falta de cobertura de
+proventos é independente da conciliação de custo e saldo das caixinhas.
+`calculate_fii_performance` permanece disponível para cálculos sem complemento.

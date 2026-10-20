@@ -203,6 +203,7 @@ export interface FiiPerformance {
   totalReturnPercent: string | null;
   cdi: { endingValue: string; result: string; returnPercent: string } | null;
   difference: string | null;
+  income?: FiiIncomeBreakdown | null;
   issues: string[];
   assumptions: string[];
   quoteSource: string | null;
@@ -210,7 +211,23 @@ export interface FiiPerformance {
   cdiSource: string | null;
   cdiSourceUrl: string | null;
   cdiFetchedAt: string | null;
+  dividendSource?: string | null;
+  dividendFetchedAt?: string | null;
+  dividendSources?: { symbol: string; status: string; source: string; sourceUrl: string; fetchedAt: string; coverageWarning: string }[];
   portfolio: PortfolioPerformance;
+}
+
+export interface FiiIncomeBreakdown {
+  recordedAmount: string;
+  apiAmount: string;
+  asOf: string;
+  startMonth: string | null;
+  endMonth: string | null;
+  status: 'complete' | 'partial';
+  missingFundMonthCount: number;
+  dateRequiredFundMonthCount: number;
+  ignoredEventCount: number;
+  byFund: { fundId: string; symbol: string; recordedAmount: string; apiAmount: string; totalAmount: string }[];
 }
 
 export interface CashPerformanceItem {

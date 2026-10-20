@@ -49,7 +49,7 @@ pub struct FundMonthlyIncome {
     /// `recorded`, `api`, `missing`, `date_required`, or `not_held`.
     pub status: String,
     pub amount: Option<String>,
-    /// Sum of purchases through the requested month, including that month.
+    /// Sum of purchases through the requested month and report cutoff date.
     pub holdings: String,
     /// Set when all dated events use the same known eligible quantity.
     pub eligible_shares: Option<String>,
@@ -223,6 +223,7 @@ pub fn calculate_monthly_income(
                 &month,
                 &validated,
                 unresolved_months.contains(&(fund.ticker.to_uppercase(), month.clone())),
+                today,
             )?;
             match result.status.as_str() {
                 "recorded" => {
@@ -285,10 +286,17 @@ fn fund_month(
     month: &str,
     events: &BTreeMap<(String, String, String), ValidEvent<'_>>,
     unresolved_events: bool,
+    as_of: NaiveDate,
 ) -> Result<FundMonthlyIncome> {
     let mut holdings = Decimal::ZERO;
+    let as_of = as_of.to_string();
     for entry in &fund.entries {
-        if entry.month.as_str() <= month {
+        if entry.month.as_str() <= month
+            && entry
+                .purchase_date
+                .as_deref()
+                .is_none_or(|day| day <= as_of.as_str())
+        {
             holdings = add(
                 holdings,
                 parse_nonnegative(&entry.cotas_added, "Quantidade de cotas")?,

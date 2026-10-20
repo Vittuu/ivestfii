@@ -75,15 +75,15 @@ fn fii_basis_completeness(
     snapshot: &PortfolioSnapshot,
     fii: &FiiPerformance,
 ) -> Result<(bool, bool)> {
-    let cutoff = fii
+    let cutoff_date = fii
         .as_of
         .as_deref()
         .map(|value| {
             NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                .map(|date| date.format("%Y-%m").to_string())
                 .map_err(|_| CoreError::Validation("Data dos FIIs inválida.".into()))
         })
         .transpose()?;
+    let cutoff = cutoff_date.map(|date| date.format("%Y-%m").to_string());
     let mut cost_complete = true;
     let mut future = false;
     let mut full_cost = Decimal::ZERO;
@@ -102,6 +102,13 @@ fn fii_basis_completeness(
             if cutoff.as_ref().is_some_and(|month| &entry.month > month) {
                 future = true;
             }
+            if let Some(purchase_date) = &entry.purchase_date {
+                let date = NaiveDate::parse_from_str(purchase_date, "%Y-%m-%d")
+                    .map_err(|_| CoreError::Validation("Data da compra inválida.".into()))?;
+                if cutoff_date.is_some_and(|cutoff| date > cutoff) {
+                    future = true;
+                }
+            }
             full_cost = add(full_cost, mul(quantity, price)?)?;
         }
     }
@@ -111,8 +118,22 @@ fn fii_basis_completeness(
     {
         cost_complete = false;
     }
-    let income_complete = snapshot.funds.is_empty()
-        || full_income == parse_nonnegative(&fii.dividends, "Proventos de FIIs")?;
+    let reported_income = parse_nonnegative(&fii.dividends, "Proventos de FIIs")?;
+    let recorded_income = if let Some(income) = &fii.income {
+        let recorded = parse_nonnegative(&income.recorded_amount, "Proventos registrados")?;
+        let api = parse_nonnegative(&income.api_amount, "Proventos da API")?;
+        if add(recorded, api)? != reported_income {
+            return Err(CoreError::Validation(
+                "A origem dos proventos de FIIs não confere com o total calculado.".into(),
+            ));
+        }
+        recorded
+    } else {
+        reported_income
+    };
+    // The stored ledger intentionally excludes read-only API supplements. Compare
+    // like with like so a valid complement cannot make cash totals unavailable.
+    let income_complete = snapshot.funds.is_empty() || full_income == recorded_income;
     Ok((cost_complete && !future, income_complete && !future))
 }
 
@@ -370,6 +391,7 @@ mod tests {
             start_month: Some("2026-01".into()),
             invested: "100".into(),
             dividends: "5".into(),
+            income: None,
             market_value: Some("90".into()),
             price_result: Some("-10".into()),
             total_result: Some("-5".into()),

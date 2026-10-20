@@ -73,7 +73,7 @@ impl PublicData {
             today,
         ) {
             Ok(report) => {
-                json!({"status":"calculated","report":report,"interpretation":"Resultado completo de FIIs e caixinhas calculado no núcleo Rust, sem gravações financeiras. Confira cobertura, issues, datas e aproximações; a comparação CDI é um cenário histórico bruto, não previsão."})
+                json!({"status":"calculated","report":report,"interpretation":"Resultado completo de FIIs e caixinhas calculado no núcleo Rust, sem gravações financeiras. dividends e portfolio.income já incluem os rendimentos informados e as lacunas calculadas pela B3 até income.asOf, sem duplicar fundo/mês; lançamentos do usuário prevalecem, inclusive zero explícito. income.recordedAmount e income.apiAmount separam as origens. Não some monthlyIncome novamente a estes totais. Confira income.status, cobertura, issues, datas e aproximações; API não confirma crédito na corretora. A comparação CDI usa o mesmo resultado completo e a mesma data, em um cenário histórico bruto, não previsão."})
             }
             Err(error) => json!({"status":"unavailable","report":null,"error":error}),
         }
@@ -122,7 +122,7 @@ impl PublicData {
         .map_err(|error| error.to_string());
         match result {
             Ok(report) => {
-                json!({"status":"calculated","report":report,"sourceError":source_error,"interpretation":"Rendimentos mensais: lançamentos do usuário prevalecem; lacunas podem usar eventos oficiais por cota e cotas elegíveis na data-com. O mês é o pagamento. Sem nova compra, mantêm-se as cotas anteriores. Compras sem data dentro do mês da data-com exigem confirmação. api identifica cálculo por evento público, não confirmação de crédito nem novo lançamento. total nulo significa cobertura incompleta; knownTotal soma somente valores conhecidos. Não repita a taxa do mês anterior e não some este relatório novamente aos dividendos registrados do desempenho."})
+                json!({"status":"calculated","report":report,"sourceError":source_error,"interpretation":"Rendimentos mensais: lançamentos do usuário prevalecem; lacunas podem usar eventos oficiais por cota e cotas elegíveis na data-com. O mês é o pagamento. Sem nova compra, mantêm-se as cotas anteriores. Compras sem data dentro do mês da data-com exigem confirmação. api identifica cálculo por evento público, não confirmação de crédito nem novo lançamento. total nulo significa cobertura incompleta; knownTotal soma somente valores conhecidos. Não repita a taxa do mês anterior. performance já incorpora os valores de API elegíveis até a data da cotação e os recebimentos do usuário sem duplicação; este relatório detalha os últimos 12 meses e não deve ser somado novamente a performance. Confira os cortes de datas, que podem diferir entre o gráfico mensal e o desempenho."})
             }
             Err(error) => json!({"status":"unavailable","report":null,"error":error}),
         }

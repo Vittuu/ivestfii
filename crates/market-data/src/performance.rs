@@ -1,8 +1,11 @@
 //! Read-only integration of ledger calculations and dated public observations.
-use crate::{CdiHistorySnapshot, QuotePanel};
+use crate::{CdiHistorySnapshot, DividendPanel, QuotePanel};
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use ivestfii_core::{
-    performance::{calculate_fii_performance, DailyCdiRate, FiiPerformance, PerformanceQuote},
+    performance::{
+        calculate_fii_performance, calculate_fii_performance_with_income, DailyCdiRate,
+        FiiPerformance, PerformanceQuote,
+    },
     portfolio_performance::{calculate_portfolio_performance, PortfolioPerformance},
     PortfolioSnapshot,
 };
@@ -35,7 +38,31 @@ pub fn cached_report(
             errors.push(error);
             None
         });
-    build_report(snapshot, &panel, history.as_ref(), today, errors)
+    let dividends = crate::DividendService::new(directory.join("public-data/dividends.json"))?
+        .read_cache(&symbols)
+        .unwrap_or_else(|error| {
+            errors.push(error);
+            DividendPanel::default()
+        });
+    build_report_with_income(
+        snapshot,
+        &panel,
+        history.as_ref(),
+        &dividends,
+        today,
+        errors,
+    )
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DividendPerformanceSource {
+    pub symbol: String,
+    pub status: String,
+    pub source: String,
+    pub source_url: String,
+    pub fetched_at: String,
+    pub coverage_warning: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,12 +76,39 @@ pub struct PerformanceReport {
     pub cdi_source: Option<String>,
     pub cdi_source_url: Option<String>,
     pub cdi_fetched_at: Option<String>,
+    pub dividend_source: Option<String>,
+    pub dividend_fetched_at: Option<String>,
+    pub dividend_sources: Vec<DividendPerformanceSource>,
 }
 
 pub fn build_report(
     snapshot: &PortfolioSnapshot,
     panel: &QuotePanel,
     history: Option<&CdiHistorySnapshot>,
+    today: NaiveDate,
+    errors: Vec<String>,
+) -> Result<PerformanceReport, String> {
+    build_report_inner(snapshot, panel, history, None, today, errors)
+}
+
+/// Use the same saved public events and manual precedence as the monthly chart.
+/// API income is derived for this report, never inserted into the ledger.
+pub fn build_report_with_income(
+    snapshot: &PortfolioSnapshot,
+    panel: &QuotePanel,
+    history: Option<&CdiHistorySnapshot>,
+    dividends: &DividendPanel,
+    today: NaiveDate,
+    errors: Vec<String>,
+) -> Result<PerformanceReport, String> {
+    build_report_inner(snapshot, panel, history, Some(dividends), today, errors)
+}
+
+fn build_report_inner(
+    snapshot: &PortfolioSnapshot,
+    panel: &QuotePanel,
+    history: Option<&CdiHistorySnapshot>,
+    dividends: Option<&DividendPanel>,
     today: NaiveDate,
     errors: Vec<String>,
 ) -> Result<PerformanceReport, String> {
@@ -90,9 +144,26 @@ pub fn build_report(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let mut calculation = calculate_fii_performance(snapshot, &quotes, &rates, today)
-        .map_err(|error| error.to_string())?;
-    for error in errors.into_iter().chain(panel.errors.iter().cloned()) {
+    let mut calculation = match dividends {
+        Some(dividends) => calculate_fii_performance_with_income(
+            snapshot,
+            &quotes,
+            &rates,
+            &crate::dividends::income_events(dividends),
+            today,
+        ),
+        None => calculate_fii_performance(snapshot, &quotes, &rates, today),
+    }
+    .map_err(|error| error.to_string())?;
+    for error in errors
+        .into_iter()
+        .chain(panel.errors.iter().cloned())
+        .chain(
+            dividends
+                .into_iter()
+                .flat_map(|panel| panel.errors.iter().cloned()),
+        )
+    {
         if !calculation.issues.contains(&error) {
             calculation.issues.push(error);
         }
@@ -110,6 +181,32 @@ pub fn build_report(
         });
     let quote_fetched_at = used.clone().map(|q| q.fetched_at.clone()).min();
     let quote_source = used.map(|q| q.source.clone()).next();
+    let dividend_sources = dividends
+        .into_iter()
+        .flat_map(|panel| panel.items.iter())
+        .filter(|item| {
+            snapshot
+                .funds
+                .iter()
+                .any(|fund| fund.ticker.eq_ignore_ascii_case(&item.symbol))
+        })
+        .filter_map(|item| {
+            let observation = item.observation.as_ref()?;
+            Some(DividendPerformanceSource {
+                symbol: item.symbol.clone(),
+                status: item.status.clone(),
+                source: observation.source.clone(),
+                source_url: observation.source_url.clone(),
+                fetched_at: observation.fetched_at.clone(),
+                coverage_warning: observation.coverage_warning.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let dividend_fetched_at = dividend_sources
+        .iter()
+        .map(|source| source.fetched_at.clone())
+        .min();
+    let dividend_source = dividend_sources.first().map(|source| source.source.clone());
     Ok(PerformanceReport {
         portfolio: calculate_portfolio_performance(snapshot, &calculation)
             .map_err(|e| e.to_string())?,
@@ -119,6 +216,9 @@ pub fn build_report(
         cdi_source: history.map(|h| h.source.clone()),
         cdi_source_url: history.map(|h| h.source_url.clone()),
         cdi_fetched_at: history.map(|h| h.fetched_at.clone()),
+        dividend_source,
+        dividend_fetched_at,
+        dividend_sources,
     })
 }
 
@@ -232,5 +332,96 @@ mod tests {
             report.portfolio.cash.items[0].balance_date.as_deref(),
             Some("2026-10-17")
         );
+    }
+
+    #[test]
+    fn saved_b3_income_flows_into_full_result_cash_totals_and_cdi_without_manual_duplicates() {
+        use chrono::{Days, Utc};
+        let mut value = serde_json::to_value(snapshot()).unwrap();
+        value["cashPockets"] = json!([{
+            "id":"cash", "name":"Reserva", "institution":"Teste", "balance":"220",
+            "totalDeposits":"200", "totalWithdrawals":"10", "balanceDate":"2026-10-17",
+            "cdiPercent":"120", "annualCdiRate":null, "rateDate":null, "notes":"",
+            "createdAt":"2026-08-01T12:00:00Z", "updatedAt":"2026-10-18T12:00:00Z"
+        }]);
+        let snapshot: PortfolioSnapshot = serde_json::from_value(value).unwrap();
+        let original = serde_json::to_value(&snapshot).unwrap();
+        let fetched = DateTime::parse_from_rfc3339("2026-10-20T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let observation = crate::dividends::parse_b3_dividends(
+            &serde_json::to_vec(&json!({"code":"TEST","cashDividends":[
+                {"isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"9,99",
+                    "lastDatePrior":"2026-08-01","paymentDate":"2026-08-15"},
+                {"isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"1,00",
+                    "lastDatePrior":"2026-09-01","paymentDate":"2026-09-15"},
+                {"isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"2,00",
+                    "lastDatePrior":"2026-10-01","paymentDate":"2026-10-20"}
+            ]}))
+            .unwrap(),
+            "TEST11",
+            fetched,
+        )
+        .unwrap();
+        let source_url = observation.source_url.clone();
+        let dividends = DividendPanel {
+            items: vec![crate::dividends::DividendItem {
+                symbol: "TEST11".into(),
+                status: "cached".into(),
+                observation: Some(observation),
+                error: None,
+            }],
+            fetched_at: Some(fetched.to_rfc3339()),
+            errors: vec![],
+        };
+        let today = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+        let mut day = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let mut observations = vec![];
+        while day < today {
+            observations.push(crate::cdi_history::CdiDailyObservation {
+                date: day.to_string(),
+                value: "0".into(),
+            });
+            day = day.checked_add_days(Days::new(1)).unwrap();
+        }
+        let history = CdiHistorySnapshot {
+            series_id: 12,
+            unit: "% a.d.".into(),
+            source: "BCB sintético".into(),
+            source_url: "https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados".into(),
+            requested_start_date: "2026-08-01".into(),
+            requested_end_date: "2026-10-19".into(),
+            observations,
+            fetched_at: fetched.to_rfc3339(),
+            stale: false,
+        };
+        let report = build_report_with_income(
+            &snapshot,
+            &quote("BRL", "2026-10-19T21:00:00Z"),
+            Some(&history),
+            &dividends,
+            today,
+            vec![],
+        )
+        .unwrap();
+        // August's local total wins over the API; October's payment is after
+        // the common quote cutoff, so only September's 10 eligible shares count.
+        assert_eq!(report.calculation.dividends, "15");
+        assert_eq!(report.calculation.total_result.as_deref(), Some("5"));
+        assert_eq!(report.calculation.difference.as_deref(), Some("5"));
+        assert_eq!(report.calculation.cdi.as_ref().unwrap().result, "0");
+        let income = report.calculation.income.as_ref().unwrap();
+        assert_eq!(income.recorded_amount, "5");
+        assert_eq!(income.api_amount, "10");
+        assert_eq!(income.as_of, "2026-10-19");
+        assert_eq!(report.portfolio.income.as_deref(), Some("45"));
+        assert_eq!(report.portfolio.total_result.as_deref(), Some("35"));
+        assert_eq!(report.dividend_source.as_deref(), Some("b3"));
+        assert_eq!(report.dividend_sources[0].source_url, source_url);
+        assert_eq!(
+            report.dividend_sources[0].fetched_at,
+            fetched.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        );
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), original);
     }
 }

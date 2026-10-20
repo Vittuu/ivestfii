@@ -168,7 +168,14 @@ Eventos sem datas exatas e amortizações não viram rendimentos automaticamente
 `recorded` identifica lançamento local e `api` identifica cálculo por evento
 público, sem confirmação de crédito na corretora. `total:null` indica cobertura
 incompleta; `knownTotal` soma o que foi possível apurar. Não some este relatório
-novamente aos proventos já registrados no desempenho, e não trate rendimento
-declarado como operação de compra. Tudo permanece separado dos dados financeiros;
+novamente ao desempenho: `performance.dividends`, `performance.portfolio.income`,
+o resultado completo e sua comparação CDI já combinam lançamentos locais e
+lacunas calculadas pela B3, sem duplicar fundo/mês. `performance.income` separa
+`recordedAmount` e `apiAmount`, informa o corte `asOf` (data comum das cotações)
+e explicita cobertura parcial. O gráfico mensal pode ter corte mais recente;
+somente pagamentos elegíveis até o corte do desempenho entram nesse resultado.
+Lançamentos locais, inclusive zero explícito, prevalecem sobre a API.
+`dividendSources` conserva fonte, URL e data de coleta por ativo. Não trate
+rendimento declarado como operação de compra. Tudo permanece separado dos dados financeiros;
 consultas e cálculos não gravam lançamentos, não mudam quantidades e não alteram
 a posição importada.

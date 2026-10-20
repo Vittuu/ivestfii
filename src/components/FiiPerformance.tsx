@@ -7,7 +7,7 @@ import { Def, Empty, SectionHeading, TextLink } from '../components';
 import PublicSourceLink from './PublicSourceLink';
 import { readPublicCache, usePublicData } from '../lib/publicData';
 
-interface Props { walletId: string; snapshot: Snapshot; onProjection: () => void; onCash: () => void }
+interface Props { walletId: string; snapshot: Snapshot; onProjection: () => void; onCash: () => void; onData?: (data: PerformanceData | null) => void }
 
 const number = (value: string | null | undefined) => {
   if (value == null || value.trim() === '') return null;
@@ -28,7 +28,7 @@ const signedPercent = (value: string) => {
 };
 
 /** Native commands calculate performance; this view only formats cached results and chart geometry. */
-export default function FiiPerformancePanel({ walletId, snapshot, onProjection, onCash }: Props) {
+export default function FiiPerformancePanel({ walletId, snapshot, onProjection, onCash, onData }: Props) {
   const publicData = usePublicData();
   const { invested, dividendsReceived: dividends } = snapshot.totals;
   const headingId = useId();
@@ -48,11 +48,11 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
     if (!desktop || !walletId) { setLoading(false); return; }
     setLoading(true);
     void readPublicCache<PerformanceData | null>('get_fii_performance', { walletId })
-      .then((cached) => { if (current === generation.current) setData(cached); })
+      .then((cached) => { if (current === generation.current) { setData(cached); onData?.(cached); } })
       .catch((err) => { if (current === generation.current) setError(errorMessage(err)); })
       .finally(() => { if (current === generation.current) setLoading(false); });
     return () => { generation.current += 1; };
-  }, [walletId, snapshot, publicData.revision]);
+  }, [walletId, snapshot, publicData.revision, onData]);
   const refresh = async () => {
     if (pending.current || publicData.loading || publicData.refreshing || !desktop || !walletId) return;
     pending.current = true;
@@ -61,7 +61,7 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
     try {
       const result = await call<PerformanceData>('refresh_fii_performance', { walletId });
       if (current !== generation.current) return;
-      setData(result); setNotice('Consulta concluída. Confira as datas dos dados.');
+      setData(result); onData?.(result); setNotice('Consulta concluída. Confira as datas dos dados.');
       void publicData.reloadCaches();
     } catch (err) {
       if (current === generation.current) setError(`${errorMessage(err)}${data ? ' Os dados já salvos continuam visíveis.' : ''}`);
@@ -73,6 +73,10 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
   const comparable = hasResult && number(data?.cdi?.result) !== null;
   const totalInvested = data?.invested ?? invested;
   const totalDividends = data?.dividends ?? dividends;
+  const income = data?.income;
+  const apiIncome = number(income?.apiAmount) ?? 0;
+  const hasDatedPurchases = snapshot.funds.some((fund) => fund.entries.some((entry) => entry.purchaseDate));
+  const recordedDividends = income?.recordedAmount ?? totalDividends;
   const portfolio = data?.portfolio;
   const cash = portfolio?.cash;
   const issues = portfolio?.issues ?? [];
@@ -83,12 +87,13 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
     <div className="block">
       <div className="readouts ov-essential performance-readouts">
         <div className="readout ov-purchase"><span className="figure-label"><Def text="Compras de FIIs mais todas as aplicações nas caixinhas desta carteira. Inclui dinheiro depois resgatado: os resgates não são descontados do total aplicado.">Total aplicado</Def></span><span className="figure-value lg">{portfolio?.invested == null ? '—' : money(portfolio.invested)}</span></div>
-        <div className="readout"><span className="figure-label performance-income-label"><Def text="Rendimentos registrados dos FIIs mais o ganho das caixinhas (saldo + resgates − aplicações). Nos FIIs, valores calculados pelas cotas × rendimento por cota são estimativas do Histórico.">Rendimentos acumulados</Def></span><span className={`figure-value lg ${resultClass(portfolio?.income)}`}>{signedMoney(portfolio?.income)}</span></div>
-        <div className="readout"><span className="figure-label"><Def text="Resultado completo dos FIIs (variação das cotas + rendimentos registrados) mais o ganho das caixinhas cadastradas nesta carteira. Não inclui outros valores da posição importada.">Resultado da carteira</Def></span><span className={`figure-value lg ${resultClass(portfolio?.totalResult)}`}>{signedMoney(portfolio?.totalResult)}</span>{portfolio?.totalReturnPercent != null && <span className="performance-return"><Def text="Resultado dividido pelo total aplicado, que inclui aplicações depois resgatadas. É um percentual acumulado; não é uma taxa anual nem uma rentabilidade ponderada pelo tempo.">Estimado · {signedPercent(portfolio.totalReturnPercent)} sobre o total aplicado</Def></span>}</div>
+        <div className="readout"><span className="figure-label performance-income-label"><Def text={<>Rendimentos dos FIIs mais o ganho das caixinhas (saldo + resgates − aplicações).{income && <p>FIIs: {money(income.recordedAmount)} do histórico + {money(income.apiAmount)} da B3 = {money(totalDividends)}, até {dateBR(income.asOf)}. A B3 completa os meses sem rendimento informado; um valor seu, inclusive zero, tem prioridade.</p>}</>}>Rendimentos acumulados</Def></span><span className={`figure-value lg ${resultClass(portfolio?.income)}`}>{signedMoney(portfolio?.income)}</span></div>
+        <div className="readout"><span className="figure-label"><Def text="Resultado dos FIIs (variação das cotas + rendimentos do histórico e da B3, contados uma vez) mais o ganho das caixinhas cadastradas nesta carteira. Não inclui outros valores da posição importada.">Resultado da carteira</Def></span><span className={`figure-value lg ${resultClass(portfolio?.totalResult)}`}>{signedMoney(portfolio?.totalResult)}</span>{portfolio?.totalReturnPercent != null && <span className="performance-return"><Def text="Resultado dividido pelo total aplicado, que inclui aplicações depois resgatadas. É um percentual acumulado; não é uma taxa anual nem uma rentabilidade ponderada pelo tempo.">Estimado · {signedPercent(portfolio.totalReturnPercent)} sobre o total aplicado</Def></span>}</div>
       </div>
       <p className="performance-scope">FIIs do Histórico e caixinhas cadastradas nesta carteira. Os saldos das caixinhas são informados por você.</p>
+      {apiIncome > 0 && income && <p className="performance-message performance-api-income">Inclui <strong className="num">{money(income.apiAmount)}</strong> em proventos calculados pela B3 até <time dateTime={income.asOf}>{dateBR(income.asOf)}</time>. Os valores informados por você têm prioridade.{income.status === 'partial' && <span> Há meses sem dados; o resultado usa os rendimentos disponíveis.</span>}</p>}
       {loading && <p className="performance-message" role="status"><LoaderCircle className="spin" size={15} />Lendo dados salvos…</p>}
-      {refreshing && <p className="performance-message" role="status">Consultando cotações e CDI. Os dados salvos continuam visíveis.</p>}
+      {refreshing && <p className="performance-message" role="status">Consultando cotações, proventos e CDI. Os dados salvos continuam visíveis.</p>}
       {error && <p className="performance-message form-error" role="alert">{error}</p>}
       {!desktop && <p className="performance-message">O cálculo e as consultas estão disponíveis no aplicativo Windows.</p>}
       {cash && cash.missingBasisCount > 0 && <p className="performance-message performance-warning performance-cash-pending" role="status">Complete aplicações, resgates e data do saldo em {cash.missingBasisCount} {cash.missingBasisCount === 1 ? 'caixinha' : 'caixinhas'} para fechar os totais. <TextLink onClick={onCash}>Completar caixinhas</TextLink></p>}
@@ -97,7 +102,7 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
       {portfolio?.status === 'empty' ? <Empty title="Nenhum investimento registrado">Registre compras de FIIs no Histórico ou cadastre suas caixinhas para acompanhar o resultado.</Empty> : <>
       <div className="performance-portfolio-summary">
         <div className="table-wrap"><table className="performance-portfolio-table"><caption className="sr-only">Composição do resultado da carteira: FIIs e caixinhas</caption><thead><tr>
-          <th scope="col">Investimento</th><th scope="col" className="num ov-purchase"><Def text="Compras dos FIIs e aplicações brutas das caixinhas, sem descontar resgates.">Aplicado</Def></th><th scope="col" className="num"><Def text="Rendimentos registrados dos FIIs e saldo + resgates − aplicações nas caixinhas.">Rendimentos</Def></th><th scope="col" className="num"><Def text="Nos FIIs, soma variação das cotas e rendimentos. Nas caixinhas, o próprio ganho acumulado, calculado pelos valores cadastrados.">Resultado</Def></th>
+          <th scope="col">Investimento</th><th scope="col" className="num ov-purchase"><Def text="Compras dos FIIs e aplicações brutas das caixinhas, sem descontar resgates.">Aplicado</Def></th><th scope="col" className="num"><Def text="Nos FIIs, histórico mais os proventos da B3 que faltavam, sem duplicar o mesmo fundo e mês. Nas caixinhas, saldo + resgates − aplicações.">Rendimentos</Def></th><th scope="col" className="num"><Def text="Nos FIIs, soma variação das cotas e rendimentos. Nas caixinhas, o próprio ganho acumulado, calculado pelos valores cadastrados.">Resultado</Def></th>
         </tr></thead><tbody>
           <tr><th scope="row">FIIs</th><td className="num ov-purchase">{money(totalInvested)}</td><td className={`num ${resultClass(totalDividends)}`}>{signedMoney(totalDividends)}</td><td className={`num ${resultClass(data?.totalResult)}`}>{signedMoney(data?.totalResult)}</td></tr>
           <tr><th scope="row"><TextLink onClick={onCash}>Caixinhas</TextLink></th><td className="num ov-purchase">{cash?.invested == null ? '—' : money(cash.invested)}</td><td className={`num ${resultClass(cash?.income)}`}>{signedMoney(cash?.income)}</td><td className={`num ${resultClass(cash?.income)}`}>{signedMoney(cash?.income)}</td></tr>
@@ -111,7 +116,7 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
           {fiiIssues.length > 1 && <details className="extra-details performance-issues"><summary>Ver observações dos FIIs ({fiiIssues.length})</summary><ul>{fiiIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul></details>}
           <p className="performance-estimate performance-chart-scope">Apenas FIIs. As caixinhas entram nos totais acima, sem participar deste gráfico.</p>
           <p className="performance-period">{data?.startMonth && data.asOf ? <>De {monthShort(data.startMonth)} até <time dateTime={data.asOf}>{dateBR(data.asOf)}</time></> : 'Período da comparação ainda indisponível.'}</p>
-          <p className="performance-estimate">Comparação estimada · compras no fim do mês; no mês da cotação, até a cotação.</p>
+          <p className="performance-estimate">{hasDatedPurchases ? 'Comparação estimada · compras nas datas informadas; sem dia, usa o fim do mês ou a data da cotação.' : 'Comparação estimada · compras no fim do mês; no mês da cotação, até a cotação.'}</p>
           {comparable && data?.totalResult != null && data.cdi ? <ResultBars fii={data.totalResult} cdi={data.cdi.result} fiiPercent={data.totalReturnPercent} cdiPercent={data.cdi.returnPercent} /> : <p className="performance-unavailable">{data?.status === 'empty' ? 'Sem compras de FIIs registradas para comparar com o CDI.' : hasResult ? 'O resultado dos FIIs está disponível. Falta o CDI do mesmo período para comparar.' : 'A comparação precisa do valor completo dos FIIs e do CDI no mesmo período. Atualize os dados para consultar.'}</p>}
           {data?.difference != null && comparable && <p className="performance-difference">Diferença para o CDI: <strong className={`num ${resultClass(data.difference)}`}>{signedMoney(data.difference)}</strong></p>}
         </div>
@@ -121,7 +126,8 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
             <tr><th scope="row"><Def text="Valor das cotas atuais pelas cotações usadas no cálculo. Não altera a posição importada da corretora.">Valor de mercado dos FIIs</Def></th><td className="num">{data?.marketValue == null ? '—' : money(data.marketValue)}</td></tr>
             <tr><th scope="row" className="ov-purchase">− Total investido</th><td className="num ov-purchase">{money(totalInvested)}</td></tr>
             <tr><th scope="row"><Def text="Valor de mercado das cotas menos o valor das compras registradas. Pode ser ganho ou perda.">= Variação das cotas</Def></th><td className={`num ${resultClass(data?.priceResult)}`}>{signedMoney(data?.priceResult)}</td></tr>
-            <tr><th scope="row" className="ov-received"><Def text="Totais informados e valores calculados pelas cotas × rendimento por cota, conforme o Histórico; valores calculados são estimativas.">+ Rendimentos registrados</Def></th><td className="num ov-received">{money(totalDividends)}</td></tr>
+            <tr><th scope="row" className="ov-received"><Def text="Totais informados e valores calculados pelas cotas × rendimento por cota, conforme o Histórico; valores calculados são estimativas. Estes valores têm prioridade sobre a B3.">+ Rendimentos registrados</Def></th><td className="num ov-received">{money(recordedDividends)}</td></tr>
+            {apiIncome > 0 && <tr className="performance-api-row"><th scope="row" className="ov-received"><Def text="Proventos por cota publicados na B3 multiplicados pelas cotas com direito ao pagamento. Só preenche fundos e meses sem rendimento informado. Os pagamentos são limitados à mesma data das cotações usadas na comparação.">+ Proventos B3</Def></th><td className="num ov-received">{money(income!.apiAmount)}</td></tr>}
             <tr className="performance-total"><th scope="row">= Resultado total</th><td className={`num ${resultClass(data?.totalResult)}`}>{signedMoney(data?.totalResult)}</td></tr>
           </tbody></table></div>
         </div>
@@ -131,6 +137,7 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
       <div className="performance-source">
         {data?.quoteSource && <span>{data.quoteSource}{data.quoteFetchedAt && <> · coletado em <time dateTime={data.quoteFetchedAt}>{dateBR(data.quoteFetchedAt)}</time></>}</span>}
         {data?.cdiSource && <span>{data.cdiSourceUrl ? <PublicSourceLink href={data.cdiSourceUrl}>{data.cdiSource}</PublicSourceLink> : data.cdiSource}{data.cdiFetchedAt && <> · coletado em <time dateTime={data.cdiFetchedAt}>{dateBR(data.cdiFetchedAt)}</time></>}</span>}
+        {data?.dividendSource && <span><Def text={<><p>Proventos publicados pela B3 e calculados pelas cotas com direito na data-com. Os cálculos completam os rendimentos disponíveis e conservam os lançamentos originais.</p>{data.dividendSources?.map((source) => <p key={source.symbol}><PublicSourceLink href={source.sourceUrl}>{source.symbol}</PublicSourceLink> · consultado em {dateBR(source.fetchedAt)}</p>)}</>}>Proventos B3</Def>{data.dividendFetchedAt && <> · coletados em <time dateTime={data.dividendFetchedAt}>{dateBR(data.dividendFetchedAt)}</time></>}</span>}
         {data && <span><Def text="Compara as mesmas compras com uma hipótese de rendimento a 100% do CDI. A comparação é bruta, sem impostos, e os rendimentos recebidos dos FIIs não são reinvestidos automaticamente.">CDI bruto · rendimentos não reinvestidos</Def></span>}
       </div>
       {notice && !refreshing && <p className="performance-message" role="status">{notice}</p>}
