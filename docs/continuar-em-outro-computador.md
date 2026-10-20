@@ -64,6 +64,7 @@ O fluxo completo do assistente deve ser testado no aplicativo Tauri.
 cargo test --workspace --locked
 npm run build
 npm run verify:ledger
+npm run verify:income
 npx playwright install chromium
 npm run verify:ui
 npm run tauri -- build --ci --no-bundle -- --locked

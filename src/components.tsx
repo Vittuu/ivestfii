@@ -63,7 +63,7 @@ export function SectionHeading({ title, meta, children, level = 2 }: { title: st
 }
 
 /** Rótulo com explicação acessível por mouse, teclado ou toque. */
-export function Def({ text, children }: { text: string; children: ReactNode }) {
+export function Def({ text, children }: { text: ReactNode; children: ReactNode }) {
   return <HelpTooltip text={text}>{children}</HelpTooltip>;
 }
 

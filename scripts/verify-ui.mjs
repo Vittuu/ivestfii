@@ -18,7 +18,7 @@ const playwrightModule = process.env.IVESTFII_PLAYWRIGHT_PATH
     return import(pathToFileURL(bundledPlaywright).href);
   });
 const { chromium } = playwrightModule.default || playwrightModule;
-const uiVersion = 'perfil-por-carteira-e-analise-explicita-no-assistente';
+const uiVersion = 'proventos-mensais-com-cotas-acumuladas-e-lacunas-explicitas';
 const checks = [];
 const browserErrors = [];
 const screenshots = [];
@@ -27,7 +27,8 @@ const focusedShell=process.env.IVESTFII_UI_FOCUS==='shell';
 const focusedCompact=process.env.IVESTFII_UI_FOCUS==='compact';
 const focusedPublicData=process.env.IVESTFII_UI_FOCUS==='public-data';
 const focusedProfile=process.env.IVESTFII_UI_FOCUS==='profile';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':'report.json';
+const focusedIncome=process.env.IVESTFII_UI_FOCUS==='income';
+const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -69,6 +70,34 @@ const ledgerEntries = [
   {id:'ledger-same-month-purchase',month:'2020-06',cotasAdded:'3',pricePerCota:'10',dividendPerCota:'0',dividendTotal:'0',notes:'Compra distinta no mesmo mês.'},
   {id:'ledger-price-only',month:'2020-07',cotasAdded:'0',pricePerCota:'13',dividendPerCota:'0',dividendTotal:null,notes:'Preço histórico, sem movimentação.'},
   {id:'ledger-zero-price',month:'2020-08',cotasAdded:'1',pricePerCota:'0',dividendPerCota:'0',dividendTotal:null,notes:'Quantidade registrada com preço zero.'},
+];
+const incomeEntry=(id,month,{added='0',price='10',perShare='0',received=null}={})=>({id,month,cotasAdded:added,pricePerCota:price,dividendPerCota:perShare,dividendTotal:received,notes:'Registro sintético do gráfico mensal.'});
+const incomeFunds=[
+  {id:'income-alpha',ticker:'ALFA11',name:'Fundo sintético Alfa',sector:'Teste',entries:[
+    incomeEntry('alpha-buy','2025-10',{added:'10'}),
+    incomeEntry('alpha-nov','2025-11',{perShare:'0.5'}),
+    incomeEntry('alpha-jan','2026-01',{perShare:'0.6'}),
+    incomeEntry('alpha-zero','2026-02',{perShare:'1',received:'0'}),
+    incomeEntry('alpha-buy-only','2026-03',{added:'2'}),
+    incomeEntry('alpha-apr-computed','2026-04',{perShare:'0.25'}),
+    incomeEntry('alpha-apr-extra','2026-04',{received:'1.5'}),
+    incomeEntry('alpha-may','2026-05',{received:'7'}),
+    incomeEntry('alpha-sep','2026-09',{perShare:'0.1'}),
+    incomeEntry('alpha-oct','2026-10',{received:'2'}),
+  ],totalCotas:'12',totalInvested:'120',averagePrice:'10',dividendsReceived:'25.7',estimatedMonthlyIncome:'0'},
+  {id:'income-beta',ticker:'BETA11',name:'Fundo sintético Beta',sector:'Teste',entries:[
+    incomeEntry('beta-buy','2025-10',{added:'5',price:'20'}),
+    incomeEntry('beta-nov','2025-11',{price:'20',perShare:'0.2'}),
+    incomeEntry('beta-zero','2026-02',{price:'20',received:'0'}),
+    incomeEntry('beta-apr','2026-04',{price:'20',perShare:'0.25'}),
+    incomeEntry('beta-may','2026-05',{price:'20',received:'1'}),
+    incomeEntry('beta-sep','2026-09',{price:'20',received:'0'}),
+  ],totalCotas:'5',totalInvested:'100',averagePrice:'20',dividendsReceived:'3.25',estimatedMonthlyIncome:'0'},
+  {id:'income-future',ticker:'FUTR11',name:'Fundo sintético ainda sem cotas no período',sector:'Teste',entries:[incomeEntry('future-buy','2026-11',{added:'3',price:'30'})],totalCotas:'3',totalInvested:'90',averagePrice:'30',dividendsReceived:'0',estimatedMonthlyIncome:'0'},
+];
+const incomeExpected=[
+  ['2025-11','6.00'],['2025-12',null],['2026-01','6.00'],['2026-02','0.00'],['2026-03',null],['2026-04','5.75'],
+  ['2026-05','8.00'],['2026-06',null],['2026-07',null],['2026-08',null],['2026-09','1.20'],['2026-10','2.00'],
 ];
 const importWarnings = [
   'Os horários das capturas dos fundos são diferentes.',
@@ -156,6 +185,26 @@ function bootstrap(mode) {
     initial.totals = {invested:'155',cotas:'16',dividendsReceived:'16.25',estimatedMonthlyIncome:'0'};
     initial.recordCount = ledgerEntries.length;
   }
+  if(mode.startsWith('income')){
+    initial.funds=structuredClone(incomeFunds);initial.brokerPosition=null;initial.cashPockets=[];initial.cashBalance='0';
+    initial.totals={invested:'310',cotas:'20',dividendsReceived:'28.95',estimatedMonthlyIncome:'0'};
+    if(mode==='income-complete'){
+      // A separate control proves that a real, fully observed zero month belongs
+      // in the mean, while the current partial month remains outside it.
+      for(const [month,total] of [['2025-12','4'],['2026-03','0'],['2026-06','2'],['2026-07','2'],['2026-08','2']]){
+        initial.funds[0].entries.push(incomeEntry('alpha-complete-'+month,month,{received:total}));
+        initial.funds[1].entries.push(incomeEntry('beta-complete-'+month,month,{price:'20',received:'0'}));
+      }
+      initial.funds[1].entries.push(incomeEntry('beta-complete-jan','2026-01',{price:'20',received:'0'}));
+      initial.funds[0].dividendsReceived='35.7';initial.totals.dividendsReceived='38.95';
+    }
+    if(mode==='income-unknown'||mode==='income-zero'){
+      for(const fund of initial.funds){fund.entries=fund.entries.filter(item=>Number(item.cotasAdded)>0);fund.dividendsReceived='0';}
+      if(mode==='income-zero')for(const fund of initial.funds.slice(0,2))fund.entries.push(incomeEntry(fund.id+'-zero','2026-02',{received:'0'}));
+      initial.totals.dividendsReceived='0';
+    }
+    initial.recordCount=initial.funds.reduce((sum,fund)=>sum+fund.entries.length,0);
+  }
   if (mode === 'connected') initial.funds.push({...initial.funds[0],id:'fund-fiagro',ticker:'VGIA11',name:'FIAGRO sintético VGIA11',entries:[],totalCotas:'0',totalInvested:'0',averagePrice:'0',dividendsReceived:'0',estimatedMonthlyIncome:'0'});
   const other = structuredClone(initial);
   other.brokerPosition = null; other.funds = [{...initial.funds[0],id:'fund-other',ticker:'BANK11',name:'Fundo de outra carteira',entries:[{...entry('entry-other','100','0'),cotasAdded:'2',dividendPerCota:'0'}],totalCotas:'2',totalInvested:'200',averagePrice:'100',dividendsReceived:'0',estimatedMonthlyIncome:'0'}];
@@ -165,6 +214,7 @@ function bootstrap(mode) {
   const automaticMode=mode.startsWith('auto-');
   const keyConfigured = mode === 'connected' || mode === 'corrupt-quotes' || (automaticMode&&mode!=='auto-no-key');
   let walletPerformance = mode === 'ledger' ? {...performance,status:'incomplete',invested:'155',dividends:'16.25',marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,issues:['Cotações ausentes no cenário sintético de lançamentos.']} : performance;
+  if(mode.startsWith('income'))walletPerformance={...performance,status:'incomplete',asOf:'2026-10-20',startMonth:'2025-10',invested:'310',dividends:initial.totals.dividendsReceived,marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,issues:['Cotações indisponíveis no cenário sintético do gráfico mensal.']};
   if(mode.startsWith('cash-')) {
     initial.brokerPosition=null;
     initial.funds=[{...initial.funds[0],entries:[{...entry('entry-a','10','5'),cotasAdded:'10'}],totalCotas:'10',totalInvested:'100',averagePrice:'10',dividendsReceived:'5',estimatedMonthlyIncome:'5'}];
@@ -194,6 +244,7 @@ const wallets=${JSON.stringify(wallets)};
 Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformance)},otherPerformance:{...${JSON.stringify(performance)},invested:'200',dividends:'0',marketValue:'220',priceResult:'20',totalResult:'20',totalReturnPercent:'10',cdi:{endingValue:'210',result:'10',returnPercent:'5'},difference:'10'},deferPerformance:false,performanceWaiters:[],deferPerformanceRead:${mode === 'performance-loading'},performanceReadWaiters:[],failPerformance:false});
 Object.assign(globalThis.__uiTest,{chat:${JSON.stringify(chatFixture)},deferChatStart:false,chatStartWaiters:[],eventSubscriptions:[],eventCalls:[]});
 Object.assign(globalThis.__uiTest,{automaticMode:${JSON.stringify(mode)},deferAutoWallets:${JSON.stringify(automaticMode?['wallet-original']:[])},autoWaiters:[],publicCache:{shared:{economics:${JSON.stringify(economics)},news:${JSON.stringify(news)}},wallets:{}},autoCheckedAt:'2026-10-20T12:00:00Z'});
+${mode.startsWith('income')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{items:[],fetchedAt:null,credentialConfigured:false,errors:[]},cvm:{items:[],fetchedAt:null,errors:[]}};`:''}
 Object.assign(globalThis.__uiTest,{profiles:{'wallet-original':${JSON.stringify(mode==='profile-stale'?{...otherProfile,riskTolerance:'aggressive',notes:'Nota da resposta antiga da carteira A.'}:null)},'wallet-other':${JSON.stringify(mode.startsWith('profile')?otherProfile:null)}},deferProfileWallets:${JSON.stringify(mode==='profile-stale'?['wallet-original']:[])},profileReadWaiters:[],deferProfileSaves:false,profileSaveWaiters:[],profileSaveError:null,profileReadError:${JSON.stringify(mode==='profile-error'?'Perfil sintético temporariamente indisponível.':null)}});
 ${mode.startsWith('profile')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{...${JSON.stringify(quotePanel)},items:[{symbol:'TEST11',status:'cached',observation:{...${JSON.stringify(quoteObservation)},quotedAt:'2026-10-20T00:30:00Z'},error:null},{symbol:'MOCK11',status:'cached',observation:{...${JSON.stringify(quoteObservation)},symbol:'MOCK11',price:'25',quotedAt:'not-a-date'},error:null}]}};`:''}
 globalThis.__uiTest.readQuotes=(walletId)=>{
@@ -364,7 +415,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -437,12 +488,13 @@ try {
   async function revealInViewport(locator){
     await locator.evaluate(element=>{element.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return new Promise(resolve=>requestAnimationFrame(resolve));});
   }
-  async function openPage(mode,viewport,{reducedMotion='reduce',expandedSidebar=true,sidebarPreference}={}){
-    const context=await browser.newContext({viewport,reducedMotion,...(mode.includes('zoom-200')?{deviceScaleFactor:2}:{})});
+  async function openPage(mode,viewport,{reducedMotion='reduce',expandedSidebar=true,sidebarPreference,touch=false}={}){
+    const context=await browser.newContext({viewport,reducedMotion,hasTouch:touch,...(mode.includes('zoom-200')?{deviceScaleFactor:2}:{})});
+    if(mode.startsWith('income'))await context.addInitScript(()=>{const NativeDate=Date;const fixed=NativeDate.parse('2026-10-20T12:00:00Z');globalThis.Date=class extends NativeDate{constructor(...args){super(...(args.length?args:[fixed]));}static now(){return fixed;}};});
     if(sidebarPreference!==undefined)await context.addInitScript(value=>localStorage.setItem('ivestfii.sidebarCollapsed',value),sidebarPreference);
     const page=await context.newPage();page.setDefaultTimeout(12000);
     const externalRequests=[];
-    if(mode==='web')await page.route('**/*',route=>{
+    if(mode==='web'||mode.startsWith('income'))await page.route('**/*',route=>{
       const url=new URL(route.request().url());
       if(/^https?:$/.test(url.protocol)&&url.origin!==base){externalRequests.push(url.href);return route.fulfill({status:503,contentType:'text/plain',body:'External requests are blocked in the synthetic web preview.'});}
       return route.fallback();
@@ -1349,6 +1401,154 @@ try {
     }
   }
 
+  async function verifyMonthlyIncome(){
+    const currency=value=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(value));
+    const readOnly=async fixture=>{
+      const mutations=await fixture.page.evaluate(()=>globalThis.__uiTest.calls.filter(({command})=>/^(?:save_|upsert_|delete_|remove_|import_|export_|start_chat_turn$|create_conversation$)/.test(command)));
+      assert.deepEqual(mutations,[],'Viewing the chart must not call save_record/upsert_fund, import financial data, or start AI');
+      assert.deepEqual(fixture.externalRequests,[],'The synthetic income scenarios must not make external HTTP requests');
+      await noUnexpectedCommands(fixture.page);
+    };
+    const chartOf=page=>page.locator('.ov-income');
+    const monthButton=(page,month)=>chartOf(page).locator(`.ov-income-month[data-month="${month}"] .def`);
+    const monthRows=page=>chartOf(page).getByRole('table',{name:'Proventos por mês',exact:true}).locator('tbody > tr');
+    async function prepare(page){
+      await openExtra(region(page,'Histórico de FIIs'));
+      await chartOf(page).locator('.ov-chart').waitFor({state:'visible'});
+      await revealInViewport(chartOf(page).getByRole('heading',{name:'Proventos por mês',exact:true}));
+      assert.deepEqual(await chartOf(page).locator('.ov-income-month').evaluateAll(items=>items.map(item=>item.dataset.month)),incomeExpected.map(([month])=>month));
+      assert.equal(await chartOf(page).locator('.ov-income-month [role="button"][tabindex="0"]').count(),12);
+    }
+    async function dismiss(page){await page.keyboard.press('Escape');await page.getByRole('tooltip').waitFor({state:'hidden'});await page.mouse.move(1,1);}
+    async function explain(page,month,method='hover'){
+      await dismiss(page);
+      const trigger=monthButton(page,month);await revealInViewport(trigger);
+      if(method==='tap')await trigger.tap();else if(method==='focus')await trigger.focus();else await trigger.hover();
+      const bubble=page.getByRole('tooltip');await bubble.waitFor({state:'visible'});
+      assert.equal(await trigger.getAttribute('aria-expanded'),'true');assert.equal(await trigger.getAttribute('aria-describedby'),await bubble.getAttribute('id'));
+      assert.equal(await trigger.getAttribute('title'),null,'Month detail uses the accessible shared tooltip, rather than a native title');
+      const boxes=await bubble.evaluate(element=>{const b=element.getBoundingClientRect();return {x:b.x,y:b.y,right:b.right,bottom:b.bottom,width:innerWidth,height:innerHeight};});
+      assert.ok(boxes.x>=11.5&&boxes.y>=11.5&&boxes.right<=boxes.width-11.5&&boxes.bottom<=boxes.height-11.5,`Monthly explanation stays inside the viewport: ${JSON.stringify(boxes)}`);
+      assert.equal(await bubble.getByRole('rowheader',{name:'FUTR11',exact:true}).count(),0,'A fund first bought after the visible period is not treated as missing in earlier months');
+      assert.deepEqual(await bubble.locator('thead th').allTextContents(),['Fundo','Cotas no histórico','Rendimento']);
+      return {trigger,bubble};
+    }
+    async function fundEquals(bubble,ticker,held,income,{computed=false}={}){
+      const row=bubble.getByRole('row',{name:new RegExp('^'+ticker+' ')}),cells=row.locator('td');
+      assert.equal(normalize(await cells.nth(0).innerText()),held);
+      assert.equal(compact(await cells.nth(1).innerText()),income===null?'Semregistro':compact(currency(income))+(computed?'calculado':''));
+    }
+    async function captureOpen(page,name){const filename=name+'.png';await page.screenshot({path:path.join(output,filename),fullPage:false,animations:'disabled'});screenshots.push(filename);}
+    const fixture=await openPage('income',{width:1440,height:1000},{expandedSidebar:false}),page=fixture.page;
+    await prepare(page);
+    const chart=chartOf(page),rows=monthRows(page);
+    assert.equal(await rows.count(),12);
+    for(let index=0;index<incomeExpected.length;index++){
+      const [month,value]=incomeExpected[index],cells=rows.nth(index).locator('td');
+      const monthLabel=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(month.slice(5))-1]+'/'+month.slice(2,4);
+      assert.equal(normalize(await cells.nth(0).textContent()),monthLabel+(month==='2026-10'?' (parcial, até 20/10)':''));
+      assert.equal(normalize(await cells.nth(1).textContent()),value===null?(month==='2026-03'?'Sem rendimento registrado':'Sem registros'):normalize(currency(value)));
+    }
+    await figureEquals(chart.locator('.ov-head-figure > .num'),'R$ 28,95');
+    assert.equal(await page.evaluate(()=>globalThis.__uiTest.snapshot.totals.dividendsReceived),'28.95');
+    assert.equal(await chart.locator('.ov-income-average, svg .avg').count(),0,'A mean must not turn gaps or partial fund coverage into zero months');
+    assert.equal(await chart.locator('svg .cap-zero').count(),1,'Only the explicit February zero is a numeric zero cap');
+    assert.equal(await chart.locator('svg .cap-missing').count(),5,'December, March and June–August are gaps, not recorded zero payouts');
+    assert.equal(await chart.locator('svg .bar-partial').count(),1,'Current October remains partial and hatched');
+    assert.ok((await rows.nth(2).locator('td').nth(3).textContent()).includes('BETA11'));
+    assert.equal(normalize(await rows.nth(5).locator('td').nth(4).textContent()),'ALFA11: 12; BETA11: 5','The screen-reader table exposes the same historical holdings as the visual explanation');
+    check('monthly-income-12-months-preserve-recorded-sum-distinguish-gaps-zero-and-partial-coverage');
+    await noOverflow(page,'monthly-income-desktop-no-outer-overflow');await sectionShot(page,'desktop-monthly-income',chart);
+
+    let opened=await explain(page,'2025-11');
+    await fundEquals(opened.bubble,'ALFA11','10','5',{computed:true});await fundEquals(opened.bubble,'BETA11','5','1',{computed:true});
+    assert.match(await opened.bubble.innerText(),/Sem novas compras: as cotas anteriores continuam no saldo/);
+    assert.match(await opened.bubble.innerText(),/2 de 2 fundos com rendimento registrado/);
+    await opened.bubble.hover();assert.equal(await opened.bubble.isVisible(),true,'Moving from the month to its explanation keeps it open');
+    check('monthly-income-carries-existing-holdings-without-requiring-a-new-purchase');
+
+    opened=await explain(page,'2025-12');
+    await fundEquals(opened.bubble,'ALFA11','10',null);await fundEquals(opened.bubble,'BETA11','5',null);
+    assert.match(await opened.bubble.innerText(),/Sem registros/);assert.match(await opened.bubble.innerText(),/Isso não confirma rendimento zero/);
+    assert.match(await opened.bubble.innerText(),/Não repetimos automaticamente o pagamento do mês anterior/);
+    await captureOpen(page,'desktop-monthly-income-gap');check('monthly-income-missing-month-keeps-cotas-and-does-not-repeat-a-prior-payment');
+
+    opened=await explain(page,'2026-01','focus');
+    await fundEquals(opened.bubble,'ALFA11','10','6',{computed:true});await fundEquals(opened.bubble,'BETA11','5',null);
+    assert.match(await opened.bubble.innerText(),/1 de 2 fundos com rendimento registrado/);
+    await captureOpen(page,'desktop-monthly-income-partial-funds');await dismiss(page);assert.equal(await opened.trigger.evaluate(element=>element===document.activeElement),true,'Escape dismisses only the explanation and retains keyboard focus');
+    check('monthly-income-keyboard-focus-explains-partial-fund-coverage-and-Escape-preserves-focus');
+
+    opened=await explain(page,'2026-02');
+    await fundEquals(opened.bubble,'ALFA11','10','0');await fundEquals(opened.bubble,'BETA11','5','0');
+    assert.match(await opened.bubble.innerText(),/R\$ 0 informado no lançamento é diferente de falta de registro/);
+    assert.doesNotMatch(await opened.bubble.innerText(),/Falta o rendimento/);
+    await captureOpen(page,'desktop-monthly-income-explicit-zero');check('monthly-income-explicit-zero-overrides-a-positive-per-share-value-without-becoming-missing');
+
+    opened=await explain(page,'2026-03');
+    await fundEquals(opened.bubble,'ALFA11','12',null);await fundEquals(opened.bubble,'BETA11','5',null);
+    assert.match(await opened.bubble.innerText(),/Sem rendimento registrado/);assert.match(await opened.bubble.innerText(),/Há lançamentos, mas nenhum rendimento informado/);
+    check('monthly-income-purchase-only-month-updates-held-shares-without-inventing-income');
+    opened=await explain(page,'2026-04');
+    await fundEquals(opened.bubble,'ALFA11','12','4.5',{computed:true});await fundEquals(opened.bubble,'BETA11','5','1.25',{computed:true});
+    assert.equal(await opened.bubble.locator('tbody > tr').count(),2,'Repeated month records aggregate once per fund');
+    assert.match(compact(await opened.bubble.locator('.ov-income-tooltip-title').innerText()),/R\$5,75/);
+    check('monthly-income-same-month-records-sum-without-counting-the-held-shares-twice');
+    opened=await explain(page,'2026-10');await fundEquals(opened.bubble,'ALFA11','12','2');await fundEquals(opened.bubble,'BETA11','5',null);
+    assert.match(await opened.bubble.innerText(),/Parcial até 20\/10/);await dismiss(page);
+    await readOnly(fixture);await fixture.context.close();
+
+    for(const [width,height,touch] of [[720,900,false],[375,812,true]]){
+      const responsive=await openPage('income-'+width,{width,height},{expandedSidebar:false,touch}),small=responsive.page;
+      await prepare(small);const scroll=chartOf(small).locator('.ov-income-scroll');
+      const geometry=await scroll.evaluate(element=>({scrollWidth:element.scrollWidth,clientWidth:element.clientWidth,chartWidth:element.querySelector('.ov-chart').getBoundingClientRect().width}));
+      assert.ok(geometry.chartWidth>=720&&geometry.scrollWidth>geometry.clientWidth,'Narrow screens retain legible month slots and local chart scrolling');
+      await noOverflow(small,'monthly-income-'+width+'-no-outer-overflow');await sectionShot(small,'monthly-income-'+width,chartOf(small));
+      const {trigger,bubble}=await explain(small,'2026-04',touch?'tap':'focus');
+      await fundEquals(bubble,'ALFA11','12','4.5',{computed:true});await fundEquals(bubble,'BETA11','5','1.25',{computed:true});
+      await captureOpen(small,'monthly-income-'+width+'-explanation');
+      if(touch){await trigger.tap();await bubble.waitFor({state:'hidden'});await trigger.tap();await bubble.waitFor({state:'visible'});await chartOf(small).getByRole('heading',{name:'Proventos por mês',exact:true}).tap();await bubble.waitFor({state:'hidden'});}
+      else{await dismiss(small);assert.equal(await trigger.evaluate(element=>element===document.activeElement),true);}
+      check('monthly-income-'+width+(touch?'-touch-toggle-and-outside-dismiss':'-keyboard-focus-and-Escape')+'-with-local-scroll-and-viewport-clamped-explanation');
+      await readOnly(responsive);await responsive.context.close();
+    }
+    const short=await openPage('income-short',{width:720,height:320},{expandedSidebar:false});await prepare(short.page);
+    const shortTip=await explain(short.page,'2026-01','focus');
+    const before=await shortTip.bubble.evaluate(element=>({scroll:element.scrollTop,height:element.clientHeight,content:element.scrollHeight,pageY:scrollY}));
+    assert.ok(before.content>before.height,'The short viewport genuinely exercises an overflowing explanation');
+    await short.page.keyboard.press('PageDown');
+    const after=await shortTip.bubble.evaluate(element=>({scroll:element.scrollTop,pageY:scrollY}));
+    assert.ok(after.scroll>before.scroll);assert.equal(after.pageY,before.pageY,'PageDown scrolls the explanation without scrolling the underlying page');
+    await short.page.keyboard.press('End');assert.equal(await shortTip.bubble.evaluate(element=>Math.abs(element.scrollTop+element.clientHeight-element.scrollHeight)<=1),true);
+    await short.page.keyboard.press('Home');assert.equal(await shortTip.bubble.evaluate(element=>element.scrollTop),0);
+    assert.equal(await shortTip.trigger.evaluate(element=>element===document.activeElement),true);
+    await captureOpen(short.page,'monthly-income-720-short-keyboard-explanation');await dismiss(short.page);
+    check('monthly-income-short-viewport-PageDown-Home-End-scroll-the-explanation-and-Escape-retains-anchor-focus');
+    await readOnly(short);await short.context.close();
+    for(const mode of ['income-unknown','income-zero']){
+      const evidence=await openPage(mode,{width:1440,height:1000},{expandedSidebar:false});await prepare(evidence.page);
+      await figureEquals(chartOf(evidence.page).locator('.ov-head-figure > .num'),mode==='income-zero'?'R$ 0,00':'—');
+      assert.equal(await chartOf(evidence.page).locator('svg .avg,.ov-income-average').count(),0);
+      const feb=monthRows(evidence.page).nth(3).locator('td').nth(1);
+      assert.equal(normalize(await feb.textContent()),mode==='income-zero'?normalize(currency(0)):'Sem registros');
+      check(mode==='income-zero'?'monthly-income-zero-recorded-evidence-shows-a-known-zero-total':'monthly-income-no-income-evidence-remains-unknown-instead-of-showing-a-false-zero-total');
+      await readOnly(evidence);await evidence.context.close();
+    }
+    const complete=await openPage('income-complete',{width:1440,height:1000},{expandedSidebar:false});await prepare(complete.page);
+    const completeChart=chartOf(complete.page);await figureEquals(completeChart.locator('.ov-head-figure > .num'),'R$ 38,95');
+    await textMatches(completeChart.locator('.ov-income-average'),/^Média dos valores registrados em 11 meses fechados: R\$\s*3,36\.$/);
+    assert.equal(await completeChart.locator('svg .avg').count(),1);
+    const completeRows=monthRows(complete.page);assert.equal(normalize(await completeRows.nth(4).locator('td').nth(1).textContent()),normalize(currency(0)));
+    await sectionShot(complete.page,'desktop-monthly-income-complete-average',completeChart);
+    check('monthly-income-mean-includes-known-zero-months-and-excludes-current-partial-month-only-when-closed-coverage-is-complete');
+    await readOnly(complete);await complete.context.close();
+  }
+
+  if(focusedIncome){
+    await verifyMonthlyIncome();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'income',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
   if(focusedRowMotion){
     const fixture=await openPage('cash-motion',{width:1440,height:1000},{reducedMotion:'no-preference'});
     assert.equal(await fixture.page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches),false);
@@ -1385,6 +1585,7 @@ try {
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
     console.log(JSON.stringify({status:'PASS',mode:'shell',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
   }
+  await verifyMonthlyIncome();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {

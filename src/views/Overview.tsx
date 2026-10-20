@@ -1,17 +1,17 @@
 import { useId } from 'react';
 import { Plus, Upload } from 'lucide-react';
-import { amount, desktop, money, monthShort, percent, quantity } from '../lib/bridge';
+import { desktop, money, monthShort, percent, quantity } from '../lib/bridge';
 import type { Snapshot } from '../lib/bridge';
 import { ledgerRows } from '../lib/ledger';
+import { buildMonthlyIncome } from '../lib/monthlyIncome';
 import { Def, Empty, PageActions, SectionHeading, ShareBar, TextLink } from '../components';
 import CompletePortfolio from './CompletePortfolio';
 import FiiPerformancePanel from '../components/FiiPerformance';
 import MarketSummary from '../components/MarketSummary';
+import MonthlyIncomeChart from '../components/MonthlyIncomeChart';
 
 type Target = 'portfolio' | 'assistant' | 'projections' | 'cash' | 'market';
 interface Props { walletId: string; snapshot: Snapshot; onNavigate: (page: Target, portfolioTab?: 'position' | 'history') => void; onImport: () => void; onImportPosition?: () => void }
-
-interface MonthPoint { key: string; value: number; recorded: boolean }
 
 const cents = (value: number) => Math.round(value * 100) / 100;
 const monthKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -28,17 +28,16 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
   const today = new Date();
   const currentKey = monthKey(today);
   const untilLabel = today.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-  const points: MonthPoint[] = Array.from({ length: 12 }, (_, index) => {
-    const key = monthKey(new Date(today.getFullYear(), today.getMonth() - 11 + index, 1));
-    const inMonth = rows.filter((row) => row.month === key);
-    return { key, value: cents(inMonth.reduce((sum, row) => sum + Number(row.dividend), 0)), recorded: inMonth.length > 0 };
-  });
+  const monthKeys = Array.from({ length: 12 }, (_, index) => monthKey(new Date(today.getFullYear(), today.getMonth() - 11 + index, 1)));
+  const points = buildMonthlyIncome(funds, monthKeys);
   const period = `${monthShort(points[0].key)} a ${monthShort(currentKey)}`;
   const total12 = cents(points.reduce((sum, point) => sum + point.value, 0));
+  const hasIncome = points.some((point) => point.incomeRecorded > 0);
   // Yield on cost sobre os 12 meses fechados: o mês corrente parcial não derruba o indicador no início de cada mês.
   const closedKeys = Array.from({ length: 12 }, (_, index) => monthKey(new Date(today.getFullYear(), today.getMonth() - 12 + index, 1)));
-  const closed12 = cents(rows.filter((row) => closedKeys.includes(row.month)).reduce((sum, row) => sum + Number(row.dividend), 0));
-  const yieldOnCost = invested > 0 ? closed12 / invested * 100 : null;
+  const closedPoints = buildMonthlyIncome(funds, closedKeys);
+  const closed12 = cents(closedPoints.reduce((sum, point) => sum + point.value, 0));
+  const yieldOnCost = invested > 0 && closedPoints.some((point) => point.incomeRecorded > 0) ? closed12 / invested * 100 : null;
 
   const fundRows = sorted.slice(0, 6);
   const others = sorted.slice(6);
@@ -111,11 +110,11 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
           <div className="modular">
             <div className="block span-4 ov-readouts-block">
               <p className="block-body ov-method-note">Compras mostram o dinheiro usado nos lançamentos. Rendimentos mostram o que foi recebido. Esses registros não atualizam a posição importada da corretora.</p>
-              <div className="readouts ov-readouts"><div className="readout"><span className="figure-label"><Def text={`Proventos de ${monthShort(closedKeys[0])} a ${monthShort(closedKeys[11])}, meses fechados, divididos pelo custo de aquisição. Não inclui a variação do preço dos fundos.`}>Proventos sobre o custo (12 meses)</Def></span><span className="figure-value">{yieldOnCost === null ? '—' : percent(yieldOnCost)}</span></div></div>
+              <div className="readouts ov-readouts"><div className="readout"><span className="figure-label"><Def text={`Soma dos proventos registrados de ${monthShort(closedKeys[0])} a ${monthShort(closedKeys[11])}, meses fechados, dividida pelo custo de aquisição. Meses ou fundos sem registros não confirmam rendimento zero. Não inclui a variação do preço dos fundos.`}>Proventos sobre o custo (12 meses)</Def></span><span className="figure-value">{yieldOnCost === null ? '—' : percent(yieldOnCost)}</span></div></div>
             </div>
             <div className="block span-8 ov-income">
-              <SectionHeading title="Proventos por mês" level={3}><span className="ov-head-figure"><Def text={`Soma de ${period}; ${monthShort(currentKey)} parcial, até ${untilLabel}, aparece hachurado`}>em 12 meses</Def><span className="num">{money(total12)}</span></span></SectionHeading>
-              {points.some((point) => point.value > 0) ? <IncomeChart points={points} until={untilLabel} /> : <p className="block-body ov-chart-empty">Nenhum provento registrado de {period}.</p>}
+              <SectionHeading title="Proventos por mês" level={3}><span className="ov-head-figure"><Def text={`Soma apenas dos valores registrados de ${period}. As cotas anteriores continuam acumuladas mesmo sem novas compras; é preciso informar o rendimento de cada mês. ${monthShort(currentKey)} parcial, até ${untilLabel}, aparece hachurado.`}>em 12 meses</Def><span className="num">{hasIncome ? money(total12) : '—'}</span></span></SectionHeading>
+              <MonthlyIncomeChart points={points} until={untilLabel} />
             </div>
           </div>
         </details>
@@ -125,69 +124,5 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
         </Empty>
       </div>}
     </section>
-  </div>;
-}
-
-const chartHeight = 192;
-const plotBottom = 148;
-const plotTop = 34;
-
-/** Barras dos últimos 12 meses: último mês fechado em destaque, mês corrente parcial com hachura e média tracejada. */
-function IncomeChart({ points, until }: { points: MonthPoint[]; until: string }) {
-  const hatchId = `ov-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
-  const count = points.length;
-  const slot = 100 / count;
-  const barWidth = slot * 0.62;
-  const left = (index: number) => slot * index + (slot - barWidth) / 2;
-  const center = (index: number) => slot * (index + 0.5);
-  const pct = (value: number) => `${value.toFixed(3)}%`;
-  const max = Math.max(0, ...points.map((point) => point.value));
-  const barTop = (value: number) => max > 0 ? plotBottom - value / max * (plotBottom - plotTop) : plotBottom;
-
-  const partial = count - 1;
-  const highlight = count - 2;
-  const closed = points.slice(0, partial);
-  const start = closed.findIndex((point) => point.recorded);
-  const range = start >= 0 ? closed.slice(start) : [];
-  const average = range.length >= 2 ? range.reduce((sum, point) => sum + point.value, 0) / range.length : null;
-  const averageRange = start >= 0 ? `${monthShort(points[start].key)} a ${monthShort(points[highlight].key)}` : '';
-  const labelInside = average !== null && start >= 2;
-  const partialName = monthShort(points[partial].key);
-
-  return <div className="ov-chart">
-    <svg width="100%" height={chartHeight} role="img" aria-label={`Proventos por mês, de ${monthShort(points[0].key)} a ${partialName}`}>
-      <defs>
-        <pattern id={hatchId} width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect className="hatch-bg" width="5" height="5" />
-          <line className="hatch-line" x1="1" y1="0" x2="1" y2="5" />
-        </pattern>
-      </defs>
-      {average !== null && <g>
-        <title>{`Média de ${averageRange}: ${money(average)}`}</title>
-        <line className="avg" x1={pct(left(start))} x2={pct(left(highlight) + barWidth)} y1={barTop(average)} y2={barTop(average)} />
-        {labelInside && <text className="avg-label" x={pct(left(start))} dx={-8} y={barTop(average) + 4} textAnchor="end">{`média ${amount(average)}`}</text>}
-      </g>}
-      <line className="base" x1="0" x2="100%" y1={plotBottom + 0.5} y2={plotBottom + 0.5} />
-      {points.map((point, index) => {
-        const isPartial = index === partial;
-        const isHighlight = index === highlight;
-        const height = point.value > 0 ? Math.max(1, plotBottom - barTop(point.value)) : 0;
-        const january = point.key.endsWith('-01');
-        const note = isPartial ? ` (parcial, até ${until})` : isHighlight ? ' (último mês fechado)' : '';
-        return <g key={point.key}>
-          <title>{`${monthShort(point.key)} · ${money(point.value)}${note}`}</title>
-          {height > 0 && <rect className={isPartial ? 'bar-partial' : isHighlight ? 'bar bar-current' : 'bar'} x={pct(left(index))} y={plotBottom - height} width={pct(barWidth)} height={height} fill={isPartial ? `url(#${hatchId})` : undefined} />}
-          <text className={`cap${height > 0 ? '' : ' cap-zero'}${isHighlight ? ' cap-current' : ''}`} x={pct(center(index))} y={plotBottom - height - 7} textAnchor="middle">{amount(point.value)}</text>
-          <text className={`month${isHighlight ? ' month-current' : ''}`} x={pct(center(index))} y={168} textAnchor="middle">{monthShort(point.key).split('/')[0]}</text>
-          {(index === 0 || january) && <text className="year" x={pct(left(index))} y={186}>{point.key.slice(0, 4)}</text>}
-          {index > 0 && january && <line className="sep" x1={pct(slot * index)} x2={pct(slot * index)} y1={154} y2={190} />}
-        </g>;
-      })}
-    </svg>
-    <table className="sr-only">
-      <caption>Proventos por mês</caption>
-      <thead><tr><th scope="col">Mês</th><th scope="col">Proventos</th></tr></thead>
-      <tbody>{points.map((point, index) => <tr key={point.key}><td>{monthShort(point.key)}{index === partial ? ` (parcial, até ${until})` : ''}</td><td>{money(point.value)}</td></tr>)}</tbody>
-    </table>
   </div>;
 }

@@ -188,7 +188,8 @@
 .overview-page .ov-head-figure .num { font-size: var(--fs-14); font-weight: 500; color: var(--text-1); }
 
 /* Gráfico de proventos */
-.overview-page .ov-chart { padding: var(--sp-4) var(--sp-4) var(--sp-2); }
+.overview-page .ov-income-scroll { max-width: 100%; overflow-x: auto; }
+.overview-page .ov-chart { position: relative; min-width: 720px; padding: var(--sp-4) var(--sp-4) var(--sp-2); }
 .overview-page .ov-chart svg { display: block; width: 100%; overflow: visible; }
 .overview-page .ov-chart text { font-family: var(--font-num); font-size: var(--fs-12); }
 .overview-page .ov-chart .bar { fill: var(--accent-dim); }
@@ -198,12 +199,35 @@
 .overview-page .ov-chart .cap { fill: var(--text-2); }
 .overview-page .ov-chart .cap-zero { fill: var(--text-3); }
 .overview-page .ov-chart .cap-current { fill: var(--text-1); font-weight: 500; }
+.overview-page .ov-chart .cap-missing { fill: var(--text-3); font-family: var(--font-ui); font-size: 11px; }
+.overview-page .ov-chart .coverage { fill: var(--text-3); font-family: var(--font-ui); font-size: 10px; }
+.overview-page .ov-chart .coverage-missing { fill: var(--warn); }
 .overview-page .ov-chart .month, .overview-page .ov-chart .year { fill: var(--text-3); }
 .overview-page .ov-chart .month-current { fill: var(--text-2); }
 .overview-page .ov-chart .base, .overview-page .ov-chart .sep { stroke: var(--line-strong); stroke-width: 1; }
 .overview-page .ov-chart .avg { stroke: var(--text-3); stroke-width: 1; stroke-dasharray: 3 3; }
 .overview-page .ov-chart .avg-label { fill: var(--text-3); }
 .overview-page .ov-chart-empty { color: var(--text-2); }
+.overview-page .ov-income-targets { position: absolute; inset: var(--sp-4) var(--sp-4) var(--sp-2); display: grid; }
+.overview-page .ov-income-month { min-width: 0; }
+.overview-page .ov-income-month > .def { display: block; width: 100%; height: 100%; border-radius: 0; text-decoration: none; }
+.overview-page .ov-income-month > .def:is(:hover, :focus-visible) { box-shadow: inset 0 0 0 1px var(--line-control); outline: none; }
+.overview-page :is(.ov-income-hint, .ov-income-average) { padding: var(--sp-2) var(--sp-4); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.overview-page .ov-income-hint > span { color: var(--text-3); }
+.overview-page .ov-income-average { padding-top: 0; }
+.ov-income-tooltip { width: 280px; max-width: 100%; }
+.ov-income-tooltip p + p { margin-top: var(--sp-2); }
+.ov-income-tooltip .ov-income-tooltip-title { margin-bottom: var(--sp-2); }
+.ov-income-tooltip .ov-income-tooltip-title > span { display: block; color: var(--text-2); }
+.ov-income-tooltip table { width: 100%; margin-block: var(--sp-2); border-collapse: collapse; table-layout: fixed; }
+.ov-income-tooltip :is(th, td) { height: auto; padding: var(--sp-1); border-bottom: 1px solid var(--line); font-size: var(--fs-12); white-space: normal; vertical-align: middle; }
+.ov-income-tooltip thead th { color: var(--text-2); font-weight: 400; }
+.ov-income-tooltip th:first-child { width: 66px; padding-left: 0; }
+.ov-income-tooltip th:nth-child(2) { width: 62px; }
+.ov-income-tooltip tbody th { text-align: left; font-weight: 500; }
+.ov-income-tooltip .ov-income-missing { color: var(--warn); text-align: right; }
+.ov-income-tooltip .ov-income-known { color: var(--pos); }
+.ov-income-tooltip .ov-income-origin { display: block; color: var(--text-3); font-family: var(--font-ui); font-size: 11px; }
 /* Entrada: as barras sobem da base e os valores aparecem logo depois. */
 .overview-page .ov-chart :is(.bar, .bar-partial) { transform-box: fill-box; transform-origin: center bottom; animation: grow-y var(--dur-3) var(--ease-out) backwards; }
 .overview-page .ov-chart :is(.cap, .avg-label, .avg) { animation: enter-fade var(--dur-2) var(--ease-out) 140ms backwards; }
@@ -291,8 +315,4 @@
   .overview-page .ov-readouts .readout.lead { grid-column: 1 / -1; }
   .overview-page .ov-lead-row { width: 100%; }
   .overview-page .ov-essential { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 520px) {
-  .overview-page .ov-chart .cap:not(.cap-current),
-  .overview-page .ov-chart .avg-label { display: none; }
 }

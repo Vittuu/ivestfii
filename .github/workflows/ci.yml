@@ -57,6 +57,8 @@ jobs:
         run: |
           npm run verify:ledger
           if ($LASTEXITCODE -ne 0) { throw 'Verificação do histórico falhou.' }
+          npm run verify:income
+          if ($LASTEXITCODE -ne 0) { throw 'Verificação dos rendimentos mensais falhou.' }
       - name: Verificar interface
         shell: pwsh
         run: |

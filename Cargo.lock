@@ -1941,7 +1941,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "ivestfii-assistant"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -1953,7 +1953,7 @@ dependencies = [
 
 [[package]]
 name = "ivestfii-core"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -1968,7 +1968,7 @@ dependencies = [
 
 [[package]]
 name = "ivestfii-desktop"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1994,7 +1994,7 @@ dependencies = [
 
 [[package]]
 name = "ivestfii-market-data"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "chrono",
  "csv",
@@ -2014,7 +2014,7 @@ dependencies = [
 
 [[package]]
 name = "ivestfii-mcp"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "chrono",
  "ivestfii-assistant",
@@ -2027,7 +2027,7 @@ dependencies = [
 
 [[package]]
 name = "ivestfii-runtime"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "chrono",
  "ivestfii-assistant",

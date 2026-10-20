@@ -6,7 +6,7 @@ import '../styles/help.css';
 let closeActiveHelp: (() => void) | null = null;
 
 /** Explicação de um rótulo, disponível com mouse, teclado e toque. */
-export default function HelpTooltip({ text, children }: { text: string; children: ReactNode }) {
+export default function HelpTooltip({ text, children }: { text: ReactNode; children: ReactNode }) {
   const id = useId();
   const anchor = useRef<HTMLSpanElement>(null);
   const bubble = useRef<HTMLDivElement>(null);
@@ -99,6 +99,16 @@ export default function HelpTooltip({ text, children }: { text: string; children
       onBlur={() => { focused.current = false; closeWhenIdle(); }}
       onClick={(event) => { event.preventDefault(); event.stopPropagation(); if (pinned.current) { close(); dismissed.current = true; } else { pinned.current = true; show(); } }}
       onKeyDown={(event) => {
+        const element = bubble.current;
+        if (open && element && element.scrollHeight > element.clientHeight) {
+          const distance = event.key === 'ArrowDown' ? 40 : event.key === 'ArrowUp' ? -40 : event.key === 'PageDown' ? element.clientHeight * 0.8 : event.key === 'PageUp' ? -element.clientHeight * 0.8 : null;
+          if (distance !== null || event.key === 'Home' || event.key === 'End') {
+            event.preventDefault(); event.stopPropagation();
+            if (distance !== null) element.scrollBy({ top: distance, behavior: 'instant' });
+            else element.scrollTo({ top: event.key === 'Home' ? 0 : element.scrollHeight, behavior: 'instant' });
+            return;
+          }
+        }
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault(); event.stopPropagation();
         if (pinned.current) { close(); dismissed.current = true; } else { pinned.current = true; show(); }
