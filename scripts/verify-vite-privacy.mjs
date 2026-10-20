@@ -46,15 +46,18 @@ export async function verifyVitePrivacy() {
       const fixturePath = path.join(root, requestPath.slice(1));
       await fs.mkdir(path.dirname(fixturePath), { recursive: true });
       await fs.writeFile(fixturePath, JSON.stringify({ syntheticPrivateValue: marker }));
-      for (const [route, accept] of [
-        [requestPath, 'application/json'],
-        [requestPath + '?download=1', 'text/html'],
-        [requestPath + '?raw', '*/*'],
-        ['/@fs/' + fixturePath.replaceAll('\\', '/'), 'application/json'],
+      for (const [route, accept, allowedStatuses] of [
+        [requestPath, 'application/json', [403]],
+        [requestPath + '?download=1', 'text/html', [403]],
+        [requestPath + '?raw', '*/*', [403]],
+        // Vite's Windows raw-filesystem handler may not resolve a fixture on
+        // another drive. Both refusal (403) and an unreachable path (404) must
+        // keep its contents private; normal routes above still require 403.
+        ['/@fs/' + fixturePath.replaceAll('\\', '/'), 'application/json', [403, 404]],
       ]) {
         const response = await fetch(base + route, { headers: { Accept: accept } });
         const body = await response.text();
-        assert.equal(response.status, 403, `Existing synthetic private file ${route}`);
+        assert.ok(allowedStatuses.includes(response.status), `Existing synthetic private file ${route} returned ${response.status}`);
         assert.equal(body.includes(marker), false, 'Private fixture contents must never be returned');
         results.push({ path: requestPath, state: 'present', accept, status: response.status });
       }
