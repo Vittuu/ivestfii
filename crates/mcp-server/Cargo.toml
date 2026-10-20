@@ -1,0 +1,16 @@
+[package]
+name = "ivestfii-mcp"
+version.workspace = true
+edition = "2021"
+description = "Ferramentas MCP locais do IvestFII via stdio"
+
+[dependencies]
+ivestfii-core = { path = "../portfolio-core" }
+ivestfii-assistant = { path = "../assistant-core" }
+ivestfii-market-data = { path = "../market-data" }
+tokio = { version = "1", features = ["rt", "time", "net"] }
+chrono = "0.4"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

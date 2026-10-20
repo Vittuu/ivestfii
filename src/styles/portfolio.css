@@ -1,0 +1,171 @@
+/* Tela: FIIs e posições. Tudo escopado em .portfolio-page e nas tabelas da
+   própria tela (fundos, compras e rendimentos), para não alterar o
+   CompletePortfolio, que também aparece na Visão geral. Usa apenas tokens de
+   tokens.css e as classes de base.css. */
+
+/* ---------- Cabeçalho dos blocos ----------
+   Controles de 28 px + 7 px de respiro: o cabeçalho fica nos 44 px
+   (--block-head-h) dos demais blocos. */
+.portfolio-page :is(.funds-block, .entries-block) > .block-head { padding-block: 7px; }
+.portfolio-page :is(.funds-block, .entries-block) .block-actions .search-field { width: 248px; min-height: 28px; }
+.portfolio-page :is(.funds-block, .entries-block) .block-actions .search-field input { min-height: 26px; font-size: var(--fs-13); }
+.portfolio-page .fund-select { position: relative; display: inline-flex; align-items: center; }
+.portfolio-page .fund-select select {
+  min-height: 28px; min-width: 104px;
+  padding: 0 28px 0 var(--sp-3);
+  appearance: none; -webkit-appearance: none;
+  background: var(--surface-inset);
+  font-family: var(--font-num); font-weight: 500; letter-spacing: -0.01em;
+}
+.portfolio-page .fund-select > svg {
+  position: absolute; right: var(--sp-2);
+  width: 14px; height: 14px;
+  color: var(--text-3); pointer-events: none;
+}
+.portfolio-page .entries-block > .block-head h3 .ticker { font-size: var(--fs-14); }
+
+/* ---------- Tabelas ---------- */
+/* Contém o texto .sr-only (absoluto) dentro da área rolável; sem isso ele
+   escapa do recorte e cria rolagem horizontal na página. */
+.portfolio-page :is(.funds-block, .entries-block) .table-wrap { position: relative; }
+.portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) :is(th, td).col-action {
+  width: 48px; padding: 0 var(--sp-2) 0 0; text-align: right;
+}
+.portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) td.col-action .icon-button { vertical-align: middle; color: var(--text-3); }
+.portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) td.col-action .icon-button:hover:not(:disabled),
+.portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) tr:focus-within td.col-action .icon-button { color: var(--text-1); }
+.portfolio-page :is(.purchases-table, .income-table, .other-records-table) :is(th, td).col-action { width: 128px; }
+.portfolio-page .record-actions { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+
+/* Total do histórico: o rótulo é um th de linha, com o peso das células. */
+.portfolio-page .funds-table tfoot :is(th, td) {
+  height: var(--row-h);
+  background: var(--surface);
+  border-top: 1px solid var(--line); border-bottom: 0;
+}
+.portfolio-page .funds-table tfoot th {
+  padding: var(--sp-1) var(--sp-4);
+  font-size: var(--fs-13); font-weight: 500; color: var(--text-1);
+}
+
+/* Fundos: o ticker seleciona o fundo; a linha ativa leva o filete âmbar,
+   como o item ativo da navegação. O respiro do botão afasta o anel de foco
+   das letras sem mudar o alinhamento da coluna. */
+.portfolio-page .fund-button {
+  display: flex; align-items: baseline; gap: var(--sp-2);
+  width: fit-content; max-width: calc(100% + 8px); min-width: 0;
+  margin: -2px -4px; padding: 2px 4px;
+  border: 0; border-radius: var(--r-1); background: none;
+  line-height: var(--lh-ui);
+  color: inherit; text-align: left;
+}
+.portfolio-page .fund-button .ticker { flex: none; }
+.portfolio-page .fund-name {
+  min-width: 0; max-width: 160px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-12); color: var(--text-3);
+}
+.portfolio-page .fund-button:hover .ticker {
+  text-decoration: underline; text-decoration-color: var(--text-3); text-underline-offset: 3px;
+}
+.portfolio-page .fund-button:focus-visible { outline-offset: 1px; }
+.portfolio-page .fund-sector { color: var(--text-2); white-space: nowrap; }
+.portfolio-page .fund-sector.muted { color: var(--text-3); }
+.portfolio-page .funds-table tbody tr.is-selected > td { background: var(--surface-2); }
+.portfolio-page .funds-table tbody tr.is-selected > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.portfolio-page .funds-table .share-cell { width: 22%; min-width: 168px; }
+.portfolio-page :is(.portfolio-cost-summary, .portfolio-entry-details) { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.portfolio-page .portfolio-entry-details > .table-wrap { padding: 0; }
+.portfolio-page .funds-table { min-width: 480px; }
+.portfolio-page .fund-costs-table { min-width: 620px; }
+.portfolio-page .fund-costs-table .share-cell { width: 24%; min-width: 160px; }
+.portfolio-page .fund-costs-table tfoot { border-top: 1px solid var(--line); }
+.portfolio-page .fund-costs-table tfoot th { font-weight: 500; }
+
+/* Compras e recebimentos ficam em listas próprias e sempre visíveis. */
+.portfolio-page .ledger-intro { padding: var(--sp-3) var(--sp-4); font-size: var(--fs-13); color: var(--text-2); }
+.portfolio-page .ledger-section { border-top: 1px solid var(--line); }
+.portfolio-page .ledger-section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); padding: var(--sp-3) var(--sp-4); }
+.portfolio-page .ledger-section-head h4 { font-size: var(--fs-14); font-weight: 500; }
+.portfolio-page .ledger-section-head p { font-size: var(--fs-12); color: var(--text-2); }
+.portfolio-page :is(.ledger-purchases, .portfolio-cost-summary) .ledger-section-head h4 { color: var(--accent); }
+.portfolio-page .ledger-receipts .ledger-section-head h4 { color: var(--pos); }
+.portfolio-page .purchases-table { min-width: 620px; }
+.portfolio-page .income-table { min-width: 340px; }
+.portfolio-page .other-records-table { min-width: 460px; }
+.portfolio-page :is(.purchases-table, .income-table) .month-cell { width: 108px; }
+.portfolio-page :is(.purchases-table, .income-table) .month-cell time { color: var(--text-2); }
+.portfolio-page .purchases-table tbody td.num { color: var(--accent); }
+.portfolio-page .income-table tbody td.ledger-received { color: var(--pos); }
+.portfolio-page .ledger-empty { padding: var(--sp-2) var(--sp-4) var(--sp-4); font-size: var(--fs-13); color: var(--text-2); }
+.portfolio-page .record-facts > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-2) var(--sp-4); padding-block: var(--sp-2); border-bottom: 1px solid var(--line); }
+.portfolio-page .record-facts dt { font-size: var(--fs-13); color: var(--text-2); }
+.portfolio-page .record-facts dd { margin: 0; min-width: 0; text-align: right; font-size: var(--fs-13); overflow-wrap: anywhere; white-space: normal; }
+.portfolio-page .record-facts .ledger-paid { color: var(--accent); }
+.portfolio-page .record-facts .ledger-received { color: var(--pos); }
+.portfolio-page .record-source p { font-size: var(--fs-12); color: var(--text-2); }
+.portfolio-page .record-source pre { margin: 0; max-height: 200px; overflow-y: auto; font-family: var(--font-ui); font-size: var(--fs-13); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Formulários (os modais são filhos da tela): valores em mono, dicas em texto comum. */
+.portfolio-page input.num::placeholder { font-family: var(--font-ui); letter-spacing: 0; }
+.portfolio-page .ledger-form-fields { min-width: 0; padding: 0; margin: 0; border: 0; }
+.portfolio-page .ledger-form-section { min-width: 0; margin: var(--sp-4) 0; padding: var(--sp-3) 0 0; border: 0; border-top: 1px solid var(--line); }
+.portfolio-page .ledger-form-section legend { padding: 0 var(--sp-2) 0 0; font-size: var(--fs-14); font-weight: 500; color: var(--text-1); }
+.portfolio-page .ledger-form-guide { margin-bottom: var(--sp-3); font-size: var(--fs-13); color: var(--text-2); line-height: 1.5; }
+.portfolio-page .ledger-form-section .field { margin-bottom: 0; }
+
+/* ---------- Responsivo ----------
+   As tabelas reagem à largura do próprio bloco, não da janela: com a barra
+   lateral, a largura útil entre 1180 e 1320 px de janela já não comporta a
+   versão completa. Abaixo de 1080 px de bloco entra a versão compacta. */
+.portfolio-page :is(.funds-block, .entries-block) { container-type: inline-size; }
+/* Permite saber se a tabela de fato rola (divisor da coluna fixa). */
+.portfolio-page :is(.funds-block, .entries-block) .table-wrap { container-type: scroll-state; }
+
+@container (max-width: 1080px) {
+  .portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) :is(th, td) { padding-inline: var(--sp-3); }
+  .portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) :is(th, td):first-child { padding-left: var(--sp-4); }
+  .portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) :is(th, td).col-action { padding: 0 var(--sp-2) 0 0; }
+  /* O nome do fundo continua no título do botão e no cabeçalho dos lançamentos. */
+  .portfolio-page .fund-name { display: none; }
+  /* Cabeçalhos podem quebrar em duas linhas quando falta largura (só então:
+     o layout automático usa a largura natural enquanto ela couber). Alinhados
+     pela base, os de uma linha ficam na altura da segunda. */
+  .portfolio-page .funds-table thead th {
+    white-space: normal; vertical-align: bottom;
+    padding-block: 6px; line-height: 1.3;
+  }
+  /* A coluna de participação passa a ter a largura do cabeçalho; a barra
+     ocupa o que sobrar ao lado do percentual. */
+  .portfolio-page .funds-table .share-cell { width: auto; min-width: 0; }
+  /* Colunas numéricas encolhem até o conteúdo; a sobra vai para as observações. */
+  .portfolio-page :is(.purchases-table, .income-table) :is(th, td).num { width: 1%; }
+  .portfolio-page :is(.funds-block, .entries-block) .block-actions .search-field { width: 200px; }
+
+  /* Rede de segurança: se a tabela rolar, a primeira coluna (fundo ou mês)
+     fica fixa. O total ocupa duas colunas e não fica fixo, para não
+     desalinhar o divisor. */
+  .portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) :is(thead, tbody) :is(th, td):first-child {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--surface);
+  }
+  .portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) tbody tr:nth-child(even) > td:first-child { background: var(--surface-zebra); }
+  .portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) tbody tr:hover > td:first-child,
+  .portfolio-page .funds-table tbody tr.is-selected > td:first-child { background: var(--surface-2); }
+  /* Sem espaço para a barra, a participação fica só no percentual. */
+  @container (max-width: 780px) {
+    .portfolio-page .funds-table .share-cell .share-track { display: none; }
+  }
+  /* O divisor da coluna fixa só aparece quando a tabela rola. */
+  @container scroll-state(scrollable: x) {
+    .portfolio-page :is(.funds-table, .purchases-table, .income-table, .other-records-table) :is(thead, tbody) :is(th, td):first-child { box-shadow: inset -1px 0 0 var(--line); }
+    .portfolio-page .funds-table tbody tr.is-selected > td:first-child { box-shadow: inset 2px 0 0 var(--accent), inset -1px 0 0 var(--line); }
+  }
+}
+@media (max-width: 760px) {
+  .portfolio-page :is(.funds-block, .entries-block) .block-actions { width: 100%; margin-left: 0; }
+  .portfolio-page :is(.funds-block, .entries-block) .block-actions .search-field { flex: 1; width: auto; min-height: 44px; }
+  .portfolio-page :is(.funds-block, .entries-block) .block-actions .search-field input { min-height: 42px; font-size: var(--fs-16); }
+  .portfolio-page .fund-select select { min-height: 44px; font-size: var(--fs-16); }
+  .portfolio-page .entries-block .block-actions .button.small { flex: 1; }
+}

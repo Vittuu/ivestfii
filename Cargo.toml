@@ -1,0 +1,21 @@
+[workspace]
+members = ["crates/portfolio-core", "crates/assistant-core", "crates/assistant-runtime", "crates/market-data", "crates/mcp-server", "src-tauri"]
+default-members = ["crates/portfolio-core", "crates/assistant-core", "crates/assistant-runtime", "crates/market-data", "crates/mcp-server"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.11"
+edition = "2021"
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

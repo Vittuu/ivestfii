@@ -1,0 +1,94 @@
+name: Distribuicao Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag existente da versao, por exemplo v0.1.1'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Validar tag
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw 'Informe uma tag de versao valida, como v0.1.1.'
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Instalar dependencias fixadas
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci falhou.' }
+          cargo fetch --locked
+          if ($LASTEXITCODE -ne 0) { throw 'cargo fetch --locked falhou.' }
+
+      - name: Testar componentes Rust
+        shell: pwsh
+        run: |
+          cargo test --workspace --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Os testes Rust falharam.' }
+
+      - name: Gerar instalador e assinatura Tauri
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw 'Cadastre TAURI_SIGNING_PRIVATE_KEY nos secrets de Actions antes de gerar releases.'
+          }
+          ./scripts/build-windows-release.ps1 -ExpectedVersion $env:RELEASE_TAG
+
+      - name: Guardar artefatos para revisao
+        uses: actions/upload-artifact@v4
+        with:
+          name: IvestFII-Windows-${{ env.RELEASE_TAG }}
+          if-no-files-found: error
+          path: |
+            dist/IvestFII-Setup.exe
+            dist/release/IvestFII-Setup.exe.sig
+            dist/release/latest.json
+            dist/release/SHA256SUMS.txt
+
+      - name: Preparar release em rascunho
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $existing = gh release view $env:RELEASE_TAG --json isDraft --jq '.isDraft' 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if ($existing -ne 'true') { throw 'Esta versao ja foi publicada; gere outra versao, sem substituir um instalador em uso.' }
+          } else {
+            gh release create $env:RELEASE_TAG --verify-tag --draft --title "IvestFII $env:RELEASE_TAG" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw 'Nao foi possivel criar o rascunho da release.' }
+          }
+          gh release upload $env:RELEASE_TAG dist/IvestFII-Setup.exe dist/release/IvestFII-Setup.exe.sig dist/release/latest.json dist/release/SHA256SUMS.txt --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao anexar os artefatos ao rascunho.' }

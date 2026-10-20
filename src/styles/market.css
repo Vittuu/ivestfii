@@ -1,0 +1,132 @@
+/* Tela: market. Usa apenas tokens de tokens.css e classes de base.css. */
+
+/* Aviso de conclusão no cabeçalho do grupo, à direita da origem (e antes do botão, se houver). */
+.market-page .group-head .market-status { margin-left: auto; color: var(--text-2); }
+.market-page .group-head .market-status + .group-actions { margin-left: 0; }
+
+/* Linha de origem: "Banco Central · SGS 4389 · ref. 15/10/2026", num tom só. */
+.market-page .market-src { font-size: var(--fs-12); color: var(--text-3); }
+/* "ref. 15/10/2026" e "16/10 09:00" não se partem; a linha só quebra entre os trechos. */
+.market-page .market-keep { white-space: nowrap; }
+.market-page .market-source-link {
+  color: var(--text-2);
+  text-decoration: underline; text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+.market-page .market-source-link:hover { color: var(--text-1); text-decoration-color: var(--text-3); }
+.market-page a[aria-busy='true'] { cursor: progress; color: var(--text-3); }
+.market-page .public-source-error { display: block; margin-top: var(--sp-1); font-size: var(--fs-12); color: var(--neg); }
+
+/* Cotações e informes usam a mesma grade de dados da carteira; nenhum valor entra no patrimônio. */
+.market-page .market-data-block .block-foot { font-size: var(--fs-12); color: var(--text-3); }
+.market-page .market-data-guidance,
+.market-page .market-data-message { padding: var(--sp-3) var(--sp-4); font-size: var(--fs-13); }
+.market-page .market-data-guidance { border-bottom: 1px solid var(--line); color: var(--text-2); }
+.market-page .market-panel-errors { list-style: disc; padding-left: calc(var(--sp-4) + 16px); color: var(--warn); }
+.market-page .market-panel-errors > li + li { margin-top: var(--sp-1); }
+.market-page .market-quotes-table { min-width: 580px; }
+.market-page .market-cvm-table { min-width: 460px; }
+.market-page .market-quotes-details-table { min-width: 560px; }
+.market-page .market-cvm-details-table { min-width: 1040px; }
+.market-page :is(.market-quotes-table, .market-cvm-table, .market-quotes-details-table, .market-cvm-details-table) :is(td, th) { vertical-align: top; padding-block: var(--sp-3); }
+.market-page :is(.market-quotes-table, .market-cvm-table, .market-quotes-details-table, .market-cvm-details-table) th[scope='row'] { max-width: 280px; font-weight: 500; text-align: left; }
+.market-page :is(.market-quotes-table, .market-cvm-table, .market-quotes-details-table, .market-cvm-details-table) tbody tr:nth-child(even) > th { background: var(--surface-zebra); }
+.market-page :is(.market-quotes-table, .market-cvm-table, .market-quotes-details-table, .market-cvm-details-table) tbody tr:hover > th { background: var(--surface-2); }
+.market-page .market-data-details { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.market-page .group > .market-data-details { border: 1px solid var(--line); border-radius: var(--r-2); margin-top: var(--sp-2); }
+.market-page .market-data-details > .table-wrap { padding: 0; }
+.market-page .market-data-details > .market-detail-note { padding: var(--sp-3) var(--sp-4); font-size: var(--fs-12); color: var(--text-3); }
+.market-page .market-source-list { display: grid; gap: var(--sp-3); font-size: var(--fs-13); }
+.market-page .market-source-list strong { font-weight: 500; }
+.market-page .market-source-list .market-src { margin-top: var(--sp-1); }
+.market-page .market-cell-note { display: block; margin-top: 3px; font-family: var(--font-ui); font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+.market-page .market-cell-error { display: block; max-width: 40ch; margin-top: var(--sp-1); font-family: var(--font-ui); font-size: var(--fs-12); font-weight: 400; color: var(--warn); }
+.market-page .market-cell-status { font-size: var(--fs-12); }
+.market-page .market-mapping { padding: var(--sp-4); border-top: 1px solid var(--line); }
+.market-page .market-mapping .field { max-width: 640px; }
+.market-page .market-mapping input { max-width: 320px; font-family: var(--font-num); }
+.market-page .market-mapping-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.market-page .market-mapping > .form-error { margin-bottom: var(--sp-3); }
+
+/* ---------- Indicadores: CDI em destaque, Selic e IPCA subordinados ---------- */
+.market-page .market-panel > .market-indicator { grid-column: span 3; }
+.market-page .market-panel > .market-indicator.is-lead { grid-column: span 6; }
+.market-page .market-panel > .market-panel-note,
+.market-page .market-panel > .market-panel-empty { grid-column: 1 / -1; }
+
+.market-page .market-indicator .block-body { flex: 1; display: flex; flex-direction: column; gap: var(--sp-1); }
+.market-page .market-indicator .figure-label { margin-bottom: var(--sp-3); }
+/* Os três valores na mesma fonte (mono), para 14,90 e 15,00 se compararem direto; o CDI continua maior. */
+.market-page .market-indicator .figure-hero {
+  font-family: var(--font-num); font-weight: 500; letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+/* Unidade em texto de interface: "% a.a." em mono fica espaçado demais. */
+.market-page .market-indicator .unit { font-family: var(--font-ui); }
+.market-page .market-indicator .figure-value .unit { font-size: var(--fs-13); }
+.market-page .market-indicator .is-empty { color: var(--text-3); font-weight: 400; }
+.market-page .market-indicator .figure-hero.is-empty { font-size: var(--fs-28); }
+.market-page .market-indicator .figure-note { max-width: 56ch; }
+/* A origem fica sempre no pé do bloco, alinhada entre os três, com ou sem dado. */
+.market-page .market-indicator .market-src { margin-top: auto; padding-top: var(--sp-2); }
+
+.market-page .market-issue {
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--warn);
+  background: var(--warn-wash);
+  font-size: var(--fs-12); color: var(--text-1);
+}
+.market-page .market-panel-note {
+  display: flex; align-items: center;
+  min-height: var(--row-h);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--surface);
+  font-size: var(--fs-12); color: var(--text-3);
+}
+
+/* ---------- Notícias ---------- */
+.market-page .market-news-table { table-layout: fixed; }
+.market-page .market-col-date { width: 128px; }
+.market-page .market-col-date.with-year { width: 168px; }
+.market-page .market-col-source { width: 200px; }
+/* Data e fonte acompanham a primeira linha da manchete quando ela quebra. */
+.market-page .market-news-table td { vertical-align: baseline; padding-block: var(--sp-2); }
+.market-page .market-news-date {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  color: var(--text-3); white-space: nowrap;
+}
+.market-page .market-news-nodate { font-family: var(--font-ui); }
+.market-page .market-news-source { color: var(--text-3); overflow-wrap: anywhere; }
+.market-page .market-news-source-inline { display: none; color: var(--text-3); }
+.market-page .market-headline { color: var(--text-1); text-decoration: none; }
+.market-page .market-headline:hover { text-decoration: underline; text-decoration-color: var(--text-3); text-underline-offset: 3px; }
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 1180px) {
+  .market-page .market-panel > .market-indicator,
+  .market-page .market-panel > .market-indicator.is-lead { grid-column: span 4; }
+}
+@media (max-width: 760px) {
+  .market-page .market-panel > .market-indicator { grid-column: span 6; }
+  .market-page .market-panel > .market-indicator.is-lead { grid-column: 1 / -1; }
+  .market-page .group-head .market-status { margin-left: 0; flex-basis: 100%; }
+  .market-page .group-head .market-status + .group-actions { margin-left: auto; }
+}
+/* Cabeçalho de Notícias: título e botão na primeira linha, a origem embaixo. */
+@media (max-width: 640px) {
+  .market-page .market-news-head > p { order: 1; flex-basis: 100%; }
+}
+@media (max-width: 560px) {
+  .market-page .market-panel > .market-indicator { grid-column: 1 / -1; }
+  /* A manchete fica com a largura; a fonte (quando difere) passa para depois do título. */
+  /* Data em duas linhas (dia e, abaixo, hora) para a manchete ganhar largura. */
+  .market-page .market-col-date { width: 72px; }
+  .market-page .market-col-date.with-year { width: 104px; }
+  .market-page .market-news-date .market-stamp-time { display: block; }
+  .market-page .market-news-nodate { white-space: normal; }
+  .market-page .market-news-table td.market-news-date { padding-right: var(--sp-2); }
+  .market-page .market-col-source { width: 0; }
+  .market-page .market-news-table .market-news-source { display: none; }
+  .market-page .market-news-source-inline { display: inline; }
+}

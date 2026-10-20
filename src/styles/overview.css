@@ -1,0 +1,298 @@
+/* Tela: Visão geral (.overview-page) e posição da corretora (.complete-portfolio,
+   também usada em FIIs e posições). Usa apenas tokens de tokens.css e classes de base.css. */
+
+/* ---------- Posição na corretora ---------- */
+.complete-portfolio .cp-hero { min-height: 180px; padding: var(--sp-4); gap: var(--sp-3); }
+.complete-portfolio .cp-hero-value { margin-block: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
+/* Sinal antes da moeda nos indicadores de resultado ("−R$ 117,12"), como em money(). */
+.complete-portfolio .cp-signed { display: inline-flex; align-items: baseline; gap: 1px; }
+.complete-portfolio .cp-source { font-size: var(--fs-12); color: var(--text-3); }
+.complete-portfolio .cp-position-note { margin: calc(var(--sp-1) * -1) 0 var(--sp-3); font-size: var(--fs-12); color: var(--text-2); }
+
+.complete-portfolio .cp-table td { white-space: nowrap; }
+.complete-portfolio .cp-composition { table-layout: fixed; }
+.complete-portfolio .cp-composition td { overflow: hidden; text-overflow: ellipsis; }
+.complete-portfolio .cp-composition .cp-col-value { width: 26%; }
+.complete-portfolio .cp-composition .cp-col-share { width: 40%; }
+.complete-portfolio .share > .num,
+.overview-page .share > .num { min-width: 7ch; }
+
+/* Observações e fonte: faixa discreta colada ao painel */
+.complete-portfolio .cp-note { min-width: 0; border: 0; border-radius: 0; background: var(--surface); }
+.complete-portfolio .cp-note > summary { font-size: var(--fs-12); color: var(--text-3); }
+.complete-portfolio .cp-note > summary:hover { color: var(--text-1); }
+.complete-portfolio .cp-import-notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--surface); border-left: 2px solid var(--warn); }
+.complete-portfolio .cp-import-notice > span { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-12); color: var(--text-2); }
+.complete-portfolio .cp-import-notice strong { color: var(--text-1); font-weight: 500; }
+.complete-portfolio .cp-field-target { scroll-margin-block: calc(var(--topbar-h) + var(--sp-6)); }
+.complete-portfolio .cp-field-target:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+.complete-portfolio .cp-value-note { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--line); font-size: var(--fs-12); color: var(--warn); }
+.complete-portfolio .cp-value-note .text-link { font-size: var(--fs-12); }
+.complete-portfolio .cp-inline-note { display: block; margin-top: var(--sp-1); font-family: var(--font-ui); font-size: var(--fs-12); font-weight: 400; color: var(--warn); }
+.complete-portfolio .cp-fixed .facts > .cp-fact-full { grid-column: 1 / -1; border-right: 0; }
+.complete-portfolio .cp-observations { overflow-x: auto; }
+.complete-portfolio .cp-observations-table { table-layout: fixed; }
+.complete-portfolio .cp-observations-table th:first-child { width: 60%; }
+.complete-portfolio .cp-observations-table td { white-space: normal; vertical-align: top; padding-block: var(--sp-4); overflow-wrap: anywhere; }
+.complete-portfolio .cp-observations-table h3 { margin-bottom: var(--sp-2); font-size: var(--fs-14); color: var(--text-1); }
+.complete-portfolio .cp-observations-table p { margin-bottom: var(--sp-2); line-height: 1.5; color: var(--text-2); }
+.complete-portfolio .cp-affected-value { display: block; margin-bottom: var(--sp-2); font-size: var(--fs-13); font-weight: 500; color: var(--warn); }
+.complete-portfolio .cp-original-notes { margin-top: var(--sp-3); }
+.complete-portfolio .cp-original-notes summary { font-size: var(--fs-12); }
+.complete-portfolio .cp-original-notes ul { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.complete-portfolio .cp-source-list {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-1) var(--sp-4);
+  font-size: var(--fs-12);
+}
+.complete-portfolio .cp-source-list dt { color: var(--text-3); }
+.complete-portfolio .cp-source-list dd { min-width: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.complete-portfolio .cp-source-list code { white-space: normal; overflow-wrap: anywhere; }
+
+/* Detalhe (aba Posição de FIIs e posições) */
+.complete-portfolio .cp-readouts {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+}
+.complete-portfolio .cp-holdings { min-width: 360px; }
+.complete-portfolio .cp-holding-costs { min-width: 480px; }
+.complete-portfolio :is(.cp-fund-extra, .cp-fixed-extra) { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.complete-portfolio :is(.cp-fund-extra, .cp-fixed-extra) > :not(summary) { padding: 0; }
+.complete-portfolio .cp-empty-line { padding: var(--sp-4); color: var(--text-2); }
+.complete-portfolio .cp-product { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); font-weight: 500; }
+.complete-portfolio .cp-fixed .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.complete-portfolio .cp-fixed .facts > div:nth-child(odd) { border-right: 1px solid var(--line); }
+.complete-portfolio .cp-fixed .facts > div:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
+/* Valores em texto corrido (D+0 (dias úteis)) ficam na fonte da interface, não em mono. */
+.complete-portfolio .facts dd.text { font-family: var(--font-ui); }
+
+/* ---------- Histórico de FIIs ---------- */
+/* Quando o App põe outra seção logo depois da tela (Carteiras), mantém o ritmo de 24px entre grupos. */
+.overview-page:not(:last-child) { margin-bottom: var(--sp-6); }
+.overview-page .ov-summary { display: flex; flex-direction: column; gap: var(--sp-2); }
+.overview-page .ov-essential { grid-template-columns: repeat(3, minmax(0, 1fr)); border: 0; border-radius: 0; }
+.overview-page .ov-essential .readout { gap: var(--sp-2); }
+.overview-page .ov-extra > .modular { padding: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.overview-page .ov-method-note { font-size: var(--fs-13); line-height: 1.6; color: var(--text-2); }
+.overview-page :is(th, td).ov-purchase,
+.overview-page .ov-essential .ov-purchase :is(.figure-label, .figure-value) { color: var(--accent); }
+.overview-page :is(th, td).ov-received,
+.overview-page .ov-essential .ov-received :is(.figure-label, .figure-value) { color: var(--pos); }
+.overview-page .ov-purchase-quantity { display: block; margin-top: var(--sp-1); font-family: var(--font-ui); font-size: var(--fs-12); color: var(--text-3); }
+
+/* Resultado da carteira; o gráfico compara somente as compras dos FIIs com CDI. */
+.overview-page .performance-readouts { border-bottom: 1px solid var(--line); }
+.overview-page .performance-income-label { color: var(--pos); }
+.overview-page .performance-scope { padding: var(--sp-2) var(--sp-4); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.overview-page .performance-cash-pending { flex-wrap: wrap; }
+.overview-page .performance-cash-pending .text-link { font-size: inherit; }
+.overview-page .performance-portfolio-summary { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.overview-page .performance-portfolio-table { table-layout: auto; min-width: 560px; }
+.overview-page .performance-portfolio-table :is(th, td) { font-size: var(--fs-13); }
+.overview-page .performance-portfolio-table th:first-child { width: 25%; }
+.overview-page .performance-portfolio-table :is(th, td).num { white-space: nowrap; overflow: visible; text-overflow: clip; }
+.overview-page .performance-cash-dates { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.overview-page .performance-cash-dates > p { font-size: var(--fs-12); line-height: 1.6; color: var(--text-2); }
+.overview-page .performance-cash-dates > .table-wrap { padding: 0; }
+.overview-page .performance-cash-dates table { min-width: 440px; }
+.overview-page .performance-cash-dates th { white-space: normal; }
+.overview-page .performance-cash-dates td.num { white-space: nowrap; }
+.overview-page .performance-return { font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .performance-message { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .performance-message.form-error { color: var(--neg); }
+.overview-page .performance-warning { color: var(--warn); }
+.overview-page .performance-issues { margin: var(--sp-2) var(--sp-4); }
+.overview-page .performance-issues ul { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .performance-comparison { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+.overview-page :is(.performance-chart-block, .performance-breakdown) { min-width: 0; }
+.overview-page .performance-breakdown { border-left: 1px solid var(--line); }
+.overview-page .performance-period { padding: var(--sp-2) var(--sp-4) 0; font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .performance-estimate { padding: var(--sp-2) var(--sp-4) 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.overview-page .performance-unavailable { padding: var(--sp-4); max-width: 60ch; font-size: var(--fs-13); line-height: 1.6; color: var(--text-2); }
+.overview-page .performance-bars { padding: 0 var(--sp-4) var(--sp-3); }
+.overview-page .performance-bars svg { display: block; max-width: 100%; outline-offset: -2px; }
+.overview-page .performance-bars svg:focus-visible { outline: 1px solid var(--text-2); }
+.overview-page .performance-bars text { font-family: var(--font-num); font-size: var(--fs-12); fill: var(--text-1); }
+.overview-page .performance-bars .performance-bar-label { font-family: var(--font-ui); font-size: var(--fs-13); fill: var(--text-2); }
+.overview-page .performance-zero { stroke: var(--line-control); stroke-width: 1; }
+.overview-page .performance-hit { fill: transparent; pointer-events: all; }
+.overview-page .performance-bar { fill: var(--pos); pointer-events: none; }
+.overview-page .performance-bar.negative { fill: var(--neg); }
+.overview-page .performance-bar.cdi { fill: #99aab6; }
+.overview-page .performance-bars .is-active .performance-bar { stroke: var(--text-1); stroke-width: 1; }
+.overview-page .performance-point { min-height: 38px; padding: var(--sp-2) 0; font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .performance-point strong { font-family: var(--font-num); font-weight: 500; color: var(--text-1); }
+.overview-page .performance-chart-table > .table-wrap { padding: 0; }
+.overview-page .performance-chart-table th { white-space: normal; }
+.overview-page .performance-chart-table td { font-size: var(--fs-12); }
+.overview-page .performance-table th { width: 64%; height: var(--row-h); white-space: normal; font-size: var(--fs-13); color: var(--text-2); }
+.overview-page .performance-table td { font-size: var(--fs-13); }
+.overview-page .performance-total :is(th, td) { border-top: 1px solid var(--line-strong); font-weight: 500; }
+.overview-page .performance-difference { padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .performance-source { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); font-size: var(--fs-12); color: var(--text-3); }
+.overview-page .performance-source:empty { display: none; }
+.overview-page .performance-source a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; }
+.overview-page .performance-source .public-source-error { color: var(--neg); }
+
+/* Referências públicas: valores pequenos e datados, sem competir com o resultado da carteira. */
+.overview-page .public-data-state, .overview-page .public-data-guidance { padding: var(--sp-2) var(--sp-4); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.overview-page .public-data-guidance, .overview-page .public-data-warning { color: var(--warn); }
+.overview-page .public-indicators { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
+.overview-page .public-indicators > div { padding: var(--sp-3) var(--sp-4); background: var(--surface); }
+.overview-page .public-indicators dt { font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .public-indicator-value { margin-top: var(--sp-1); font-size: var(--fs-20); color: var(--text-1); }
+.overview-page .public-indicator-value > span { font-family: var(--font-ui); font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .public-indicator-origin small { display: block; margin-top: var(--sp-1); font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.overview-page .public-data-summary a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; }
+.overview-page .public-data-summary .public-source-error { display: block; color: var(--neg); }
+.overview-page .public-summary-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
+.overview-page .public-summary-grid > div { min-width: 0; }
+.overview-page .public-news { border-left: 1px solid var(--line); }
+.overview-page .public-funds-table { table-layout: auto; min-width: 620px; }
+.overview-page .public-funds-table :is(th, td) { padding-inline: var(--sp-3); font-size: var(--fs-12); }
+.overview-page .public-funds-table th { white-space: normal; }
+.overview-page .public-funds-table :is(th, td).num { white-space: nowrap; overflow: visible; text-overflow: clip; }
+.overview-page .public-funds-table td:not(.num) { min-width: 116px; }
+.overview-page :is(.public-summary-note, .public-summary-empty) { padding: var(--sp-3) var(--sp-4); font-size: var(--fs-12); line-height: 1.6; color: var(--text-3); }
+.overview-page .public-news ul { margin: 0; padding: 0; list-style: none; }
+.overview-page .public-news li { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) var(--sp-4); font-size: var(--fs-13); line-height: 1.5; overflow-wrap: anywhere; }
+.overview-page .public-news li + li { border-top: 1px solid var(--line); }
+.overview-page .public-news li > span { font-size: var(--fs-12); color: var(--text-3); }
+.overview-page .public-source-checks { margin: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.overview-page .public-source-checks ul { display: grid; gap: var(--sp-2); }
+.overview-page .public-source-checks li { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .public-source-checks strong { min-width: 144px; font-weight: 500; }
+@media (max-width: 1100px) {
+  .overview-page .public-summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .overview-page .public-news { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 640px) {
+  .overview-page .public-indicators { grid-template-columns: minmax(0, 1fr); }
+}
+
+.overview-page .ov-readouts {
+  flex: 1;
+  display: flex; flex-direction: column; gap: 1px;
+  border: 0; border-radius: 0; background: var(--line);
+}
+.overview-page .ov-readouts .readout {
+  flex: 1;
+  flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+.overview-page .ov-readouts .readout.lead { flex: 1.6; flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: center; gap: var(--sp-2); }
+.overview-page .ov-lead-row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.overview-page .ov-lead-row .text-link { font-size: var(--fs-12); }
+
+.overview-page .ov-head-figure { display: flex; align-items: baseline; gap: var(--sp-2); font-size: var(--fs-12); color: var(--text-3); }
+.overview-page .ov-head-figure .num { font-size: var(--fs-14); font-weight: 500; color: var(--text-1); }
+
+/* Gráfico de proventos */
+.overview-page .ov-chart { padding: var(--sp-4) var(--sp-4) var(--sp-2); }
+.overview-page .ov-chart svg { display: block; width: 100%; overflow: visible; }
+.overview-page .ov-chart text { font-family: var(--font-num); font-size: var(--fs-12); }
+.overview-page .ov-chart .bar { fill: var(--accent-dim); }
+.overview-page .ov-chart .bar-current { fill: var(--accent); }
+.overview-page .ov-chart .hatch-bg { fill: var(--accent-wash); }
+.overview-page .ov-chart .hatch-line { stroke: var(--accent-dim); stroke-width: 2; }
+.overview-page .ov-chart .cap { fill: var(--text-2); }
+.overview-page .ov-chart .cap-zero { fill: var(--text-3); }
+.overview-page .ov-chart .cap-current { fill: var(--text-1); font-weight: 500; }
+.overview-page .ov-chart .month, .overview-page .ov-chart .year { fill: var(--text-3); }
+.overview-page .ov-chart .month-current { fill: var(--text-2); }
+.overview-page .ov-chart .base, .overview-page .ov-chart .sep { stroke: var(--line-strong); stroke-width: 1; }
+.overview-page .ov-chart .avg { stroke: var(--text-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.overview-page .ov-chart .avg-label { fill: var(--text-3); }
+.overview-page .ov-chart-empty { color: var(--text-2); }
+/* Entrada: as barras sobem da base e os valores aparecem logo depois. */
+.overview-page .ov-chart :is(.bar, .bar-partial) { transform-box: fill-box; transform-origin: center bottom; animation: grow-y var(--dur-3) var(--ease-out) backwards; }
+.overview-page .ov-chart :is(.cap, .avg-label, .avg) { animation: enter-fade var(--dur-2) var(--ease-out) 140ms backwards; }
+
+/* Tabelas do histórico */
+.overview-page .ov-table { table-layout: auto; }
+.overview-page .ov-table td { white-space: nowrap; }
+.overview-page .ov-funds-table td:first-child { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.overview-page .ov-funds { container-type: inline-size; }
+.overview-page .ov-funds-table { min-width: 700px; }
+.overview-page .ov-funds-table th { white-space: normal; vertical-align: bottom; }
+.overview-page .ov-col-fund { width: 172px; }
+.overview-page .ov-col-cotas { width: 68px; }
+.overview-page .ov-col-cost { width: 116px; }
+.overview-page .ov-col-proceeds { width: 128px; }
+.overview-page .ov-col-income { width: 116px; }
+.overview-page .ov-fund-name { font-family: var(--font-ui); font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+@container (min-width: 800px) {
+  .overview-page .ov-col-fund { width: 196px; }
+}
+/* Sem espaço para o nome: o nome continua no title e para leitores de tela. */
+@container (max-width: 739px) {
+  .overview-page .ov-col-fund { width: 104px; }
+  .overview-page .ov-fund-name {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+}
+.overview-page .ov-recent-table { min-width: 420px; }
+.overview-page .ov-recent-table th,
+.overview-page .ov-recent-table td { padding-inline: var(--sp-3); }
+.overview-page .ov-recent-table th:first-child,
+.overview-page .ov-recent-table td:first-child { padding-left: var(--sp-4); }
+.overview-page .ov-recent-table th:last-child,
+.overview-page .ov-recent-table td:last-child { padding-right: var(--sp-4); }
+.overview-page .ov-col-month { width: 76px; }
+.overview-page .ov-col-ticker { width: 72px; }
+.overview-page .ov-month { color: var(--text-3); }
+
+.overview-page .ov-empty-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.overview-page .ov-empty-actions .button { margin-top: 0; }
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 1180px) {
+  .complete-portfolio .modular > .span-5 { grid-column: span 5; }
+  .complete-portfolio .modular > .span-7 { grid-column: span 7; }
+  .complete-portfolio .modular > .cp-fixed,
+  .complete-portfolio .modular > .cp-cash { grid-column: 1 / -1; }
+  .complete-portfolio .cp-cash .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .complete-portfolio .cp-cash .facts > div:nth-child(odd) { border-right: 1px solid var(--line); }
+  .complete-portfolio .cp-cash .facts > div:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
+  /* Em blocos menores, cada conjunto mantém a largura toda para preservar os valores. */
+  .overview-page .ov-history .modular > .ov-readouts-block,
+  .overview-page .ov-history .modular > .ov-income,
+  .overview-page .ov-history .modular > .ov-funds,
+  .overview-page .ov-history .modular > .ov-recent { grid-column: 1 / -1; grid-row: auto; }
+}
+@media (max-width: 960px) {
+  .complete-portfolio .modular > [class*='span-'] { grid-column: 1 / -1; }
+  .complete-portfolio .cp-hero { min-height: 0; }
+  .overview-page .performance-comparison { grid-template-columns: minmax(0, 1fr); }
+  .overview-page .performance-breakdown { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 640px) {
+  .complete-portfolio .cp-observations-table thead { display: none; }
+  .complete-portfolio .cp-observations-table :is(tbody, tr, td) { display: block; width: 100%; }
+  .complete-portfolio .cp-observations-table td + td { padding-top: 0; }
+  .complete-portfolio .cp-fixed .facts,
+  .complete-portfolio .cp-cash .facts { grid-template-columns: minmax(0, 1fr); }
+  .complete-portfolio .cp-fixed .facts > div:nth-child(odd),
+  .complete-portfolio .cp-cash .facts > div:nth-child(odd) { border-right: 0; }
+  .complete-portfolio .cp-fixed .facts > div:nth-last-child(2):nth-child(odd),
+  .complete-portfolio .cp-cash .facts > div:nth-last-child(2):nth-child(odd) { border-bottom: 1px solid var(--line); }
+  /* Composição em tela estreita: colunas de valor e participação em px e rejunte interno menor, sem cortar valores. */
+  .complete-portfolio .cp-composition .cp-col-value { width: 96px; }
+  .complete-portfolio .cp-composition .cp-col-share { width: 132px; }
+  .complete-portfolio .cp-composition th:not(:first-child),
+  .complete-portfolio .cp-composition td:not(:first-child) { padding-left: var(--sp-2); }
+  .complete-portfolio .cp-composition th:first-child,
+  .complete-portfolio .cp-composition td:first-child { padding-right: var(--sp-2); }
+  .overview-page .ov-history .modular > .block { grid-column: 1 / -1; grid-row: auto; }
+  .overview-page .ov-readouts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-page .ov-readouts .readout,
+  .overview-page .ov-readouts .readout.lead { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: var(--sp-1); }
+  .overview-page .ov-readouts .readout.lead { grid-column: 1 / -1; }
+  .overview-page .ov-lead-row { width: 100%; }
+  .overview-page .ov-essential { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .overview-page .ov-chart .cap:not(.cap-current),
+  .overview-page .ov-chart .avg-label { display: none; }
+}

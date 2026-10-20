@@ -1,0 +1,132 @@
+/* Tela: settings. Usa apenas tokens de tokens.css e classes de base.css. */
+
+.settings-page .modular > .block { container-type: inline-size; }
+.settings-page .settings-row-title { font-size: var(--fs-13); font-weight: 500; color: var(--text-1); }
+.settings-page .settings-row-desc { font-size: var(--fs-12); color: var(--text-3); }
+.settings-page .block > .form-error { margin: 0 var(--sp-4) var(--sp-3); }
+
+/* ---------- Preferências essenciais; explicações e diagnósticos ficam recolhidos ---------- */
+.settings-page .settings-main { grid-row: auto; }
+.settings-page .settings-extra { margin-top: var(--sp-2); }
+.settings-page .block > .settings-extra { margin-top: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.settings-page .settings-extra-body { padding-inline: 0; }
+.settings-page .settings-extra .settings-paths { padding-inline: 0; }
+.settings-page .settings-extra .settings-market-cvm { padding-top: 0; }
+
+/* O rótulo explica a opção; o controle continua com nome e descrição acessíveis. */
+.settings-page .settings-list { display: flex; flex-direction: column; }
+.settings-page .settings-row {
+  display: flex; align-items: center; gap: var(--sp-4);
+  min-height: var(--row-h);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.settings-page .settings-list > li:last-child > .settings-row { border-bottom: 0; }
+.settings-page .settings-row-text {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+/* "Iniciar na bandeja" depende de "Iniciar com o Windows": recuada como subopção. */
+.settings-page .settings-sub { padding-left: calc(var(--sp-4) * 2); }
+.settings-page .settings-check { cursor: default; }
+.settings-page .settings-check:hover,
+.settings-page .settings-check:has(input:focus-visible) { background: var(--surface-2); }
+.settings-page .settings-check > input { flex: none; margin-left: auto; }
+.settings-page .settings-check:has(input:disabled) { cursor: not-allowed; }
+.settings-page .settings-check:has(input:disabled):hover { background: none; }
+.settings-page .settings-check:has(input:disabled) > input { cursor: not-allowed; }
+
+/* Rodapé de salvar */
+.settings-page .settings-save { justify-content: space-between; flex-wrap: nowrap; }
+.settings-page .settings-save > .button { flex: none; margin-left: auto; }
+.settings-page .settings-pending { color: var(--text-2); }
+
+/* Fatos (privacidade e sincronização) */
+.settings-page .settings-facts dd { color: var(--text-1); }
+.settings-page .settings-facts dd.settings-fact-text { font-family: var(--font-ui); color: var(--text-2); }
+.settings-page .settings-note {
+  margin-top: auto;
+  padding: var(--sp-2) var(--sp-4) var(--sp-3);
+  font-size: var(--fs-12); color: var(--text-3);
+}
+
+/* Credenciais nunca são preenchidas pelo banco nem fazem parte do formulário de preferências. */
+.settings-page .settings-market-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+.settings-page .settings-market-intro,
+.settings-page .settings-market-cvm { font-size: var(--fs-13); color: var(--text-2); line-height: 1.6; }
+.settings-page .settings-market-cvm { display: flex; flex-direction: column; gap: var(--sp-3); }
+.settings-page .settings-market-form .field { margin-bottom: 0; }
+.settings-page .settings-market-form input { max-width: 640px; }
+.settings-page :is(.settings-market-form, .settings-market-cvm) a { color: var(--text-1); text-decoration: underline; text-underline-offset: 3px; }
+.settings-page .settings-market-notice { font-size: var(--fs-13); color: var(--text-2); }
+.settings-page .settings-market-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.settings-page .public-source-error { display: block; font-size: var(--fs-12); color: var(--neg); }
+
+.settings-page .settings-updates-body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); font-size: var(--fs-13); }
+.settings-page .settings-update-time,
+.settings-page .settings-update-detail { color: var(--text-2); }
+.settings-page .settings-update-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.settings-page .settings-update-download { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); width: min(100%, 520px); font-family: var(--font-num); font-size: var(--fs-12); color: var(--text-2); }
+.settings-page .settings-update-download progress { width: min(100%, 220px); height: var(--sp-2); accent-color: var(--accent); }
+
+/* ---------- Importar e exportar: ação e descrição sob demanda ---------- */
+.settings-page .settings-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: var(--sp-4);
+}
+.settings-page .settings-action {
+  grid-column: 1 / -1;
+  display: grid; grid-template-columns: subgrid; align-items: center; row-gap: 2px;
+  min-height: 52px;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.settings-page .settings-action:last-child { border-bottom: 0; }
+.settings-page .settings-action > .settings-row-title { grid-column: 1; }
+.settings-page .settings-action > .settings-row-control { grid-column: 2; display: flex; }
+.settings-page .settings-row-control > .button { width: 100%; justify-content: flex-start; }
+
+/* ---------- Caminhos dos arquivos ---------- */
+.settings-page .settings-paths { padding-block: var(--sp-1); }
+.settings-page .settings-paths > div {
+  display: grid; grid-template-columns: 184px minmax(0, 1fr); align-items: baseline; gap: var(--sp-1) var(--sp-4);
+  min-height: var(--row-h);
+  padding: var(--sp-2) var(--sp-4);
+}
+.settings-page .settings-paths > div + div { border-top: 1px solid var(--line); }
+.settings-page .settings-paths dt { font-size: var(--fs-13); color: var(--text-2); }
+.settings-page .settings-paths dd { min-width: 0; font-size: var(--fs-13); color: var(--text-1); }
+.settings-page .settings-paths dd > .form-error { margin: 0; }
+.settings-page .settings-paths code {
+  color: var(--text-1);
+  word-break: break-all;
+  user-select: all;
+}
+
+/* ---------- Responsivo ---------- */
+/* Entre 961 e 1180 px a base divide 8|4 em 6|6; aqui 7|5 mantém as preferências em uma linha. */
+@media (min-width: 961px) and (max-width: 1180px) {
+  .settings-page .modular > .span-8 { grid-column: span 7; }
+  .settings-page .modular > .span-4 { grid-column: span 5; }
+}
+@media (max-width: 960px) {
+  .settings-page .settings-main { grid-row: auto; }
+}
+/* Bloco médio: rótulo e ação permanecem na mesma linha. */
+@container (max-width: 759px) {
+  .settings-page .settings-actions { grid-template-columns: minmax(0, 1fr) max-content; }
+  .settings-page .settings-action { min-height: 60px; padding-block: var(--sp-3); }
+  .settings-page .settings-action > .settings-row-title { grid-column: 1; grid-row: 1; }
+  .settings-page .settings-action > .settings-row-control { grid-column: 2; grid-row: 1; }
+}
+/* Bloco estreito: o botão desce para baixo do texto, alinhado à esquerda. */
+@container (max-width: 519px) {
+  .settings-page .settings-actions { grid-template-columns: minmax(0, 1fr); }
+  .settings-page .settings-action > .settings-row-control { grid-column: 1; grid-row: 2; margin-top: var(--sp-2); }
+  .settings-page .settings-row-control > .button { width: auto; }
+}
+@media (max-width: 760px) {
+  .settings-page .settings-paths > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .settings-page .settings-save > .button { min-height: 44px; }
+}

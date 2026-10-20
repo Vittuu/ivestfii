@@ -1,0 +1,67 @@
+name: Validar aplicativo
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - name: Instalar dependências
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci falhou.' }
+          npx playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Instalação do navegador de testes falhou.' }
+          cargo fetch --locked
+          if ($LASTEXITCODE -ne 0) { throw 'cargo fetch falhou.' }
+      - name: Testar Rust e interface
+        shell: pwsh
+        run: |
+          cargo test --workspace --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Testes Rust falharam.' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Build web falhou.' }
+          npm run verify:ledger
+          if ($LASTEXITCODE -ne 0) { throw 'Verificação do histórico falhou.' }
+          npm run verify:ui
+          if ($LASTEXITCODE -ne 0) { throw 'Verificação da interface falhou.' }
+      - name: Compilar aplicativo Windows para teste
+        shell: pwsh
+        run: |
+          npm run tauri -- build --ci --no-bundle -- --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Build Windows falhou.' }
+          python -B scripts/verify-migration.py --binary target/release/IvestFII.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Migração sintética falhou.' }
+          python -B scripts/verify-mcp.py --desktop --binary target/release/IvestFII.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Teste MCP falhou.' }
+      - name: Guardar aplicativo e relatório de teste
+        uses: actions/upload-artifact@v4
+        with:
+          name: IvestFII-Windows-teste
+          if-no-files-found: error
+          path: |
+            target/release/IvestFII.exe
+            .local/ui-verification/report.json

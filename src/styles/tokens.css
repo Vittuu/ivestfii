@@ -1,0 +1,82 @@
+/* IvestFII · direção "Instrumento": grafite quente, um único destaque âmbar,
+   IBM Plex Sans na interface e IBM Plex Mono em números, tickers e datas.
+   Decisões e regras de uso: docs/design-system.md. */
+@import '@fontsource/ibm-plex-sans/latin-400.css';
+@import '@fontsource/ibm-plex-sans/latin-500.css';
+@import '@fontsource/ibm-plex-sans/latin-600.css';
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
+
+:root {
+  color-scheme: dark;
+
+  /* Superfícies em degraus de grafite quente (nada de azul-marinho) */
+  --bg-sidebar: #121110;
+  --bg-app: #161514;
+  --surface: #1d1c1a;
+  --surface-2: #242220;      /* hover, item ativo */
+  --surface-zebra: #201f1d;  /* linhas pares de tabela */
+  --surface-3: #2d2a27;      /* campos, trilhas */
+  --surface-inset: #141312;  /* campos de texto, código */
+  --line: #3a3632;           /* bordas e rejunte do painel modular */
+  --line-strong: #4d4842;    /* linha de base de gráfico, borda de botão */
+  --line-control: #7a7268;   /* contorno de campos (3,6:1) */
+  --def-line: #6a635b;       /* sublinhado pontilhado de rótulos com definição */
+
+  /* Texto (contraste sobre --surface: 13,8 · 7,6 · 5,0) */
+  --text-1: #ece7df;
+  --text-2: #b3aca2;
+  --text-3: #918a80;
+
+  /* Destaque único: âmbar. Item ativo, foco, ação primária e um destaque por gráfico. */
+  --accent: #e6a23c;
+  --accent-hover: #f0b458;
+  --accent-ink: #1c1407;
+  --accent-dim: #a8792f;     /* série histórica em gráficos */
+  --accent-wash: rgba(168, 121, 47, .16);
+
+  /* Resultado: só para positivo/negativo, sempre com sinal ou rótulo */
+  --pos: #86c07f;
+  --neg: #e07a66;
+  --warn: #d9b26a;
+  --pos-wash: rgba(134, 192, 127, .10);
+  --neg-wash: rgba(224, 122, 102, .10);
+  --warn-wash: rgba(217, 178, 106, .10);
+
+  /* Barras de participação (cinza quente, nunca âmbar) */
+  --share-bar: #8d8579;
+
+  /* Tipografia */
+  --font-ui: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-num: 'IBM Plex Mono', Consolas, ui-monospace, monospace;
+  --fs-12: 12px;  /* auxiliar, eixos, cabeçalho de tabela */
+  --fs-13: 13px;  /* corpo, tabelas */
+  --fs-14: 14px;  /* título de bloco, campo */
+  --fs-16: 16px;  /* título da tela, marca */
+  --fs-20: 20px;  /* números secundários */
+  --fs-28: 28px;  /* número de destaque de grupo */
+  --fs-48: 48px;  /* número principal (um por tela) */
+  --lh-ui: 1.45;
+  --lh-num: 1.1;
+
+  /* Espaços: múltiplos de 4 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+
+  /* Raios quase retos */
+  --r-1: 2px; --r-2: 3px; --r-3: 4px;
+
+  /* Medidas do shell e ritmo vertical */
+  --sidebar-w: 224px;
+  --topbar-h: 48px;
+  --block-head-h: 44px;
+  --th-h: 32px;
+  --row-h: 36px;
+  --control-h: 32px;
+
+  /* Movimento: curto, só de entrada; desligado quando o sistema pede menos movimento */
+  --ease-out: cubic-bezier(.2, .7, .2, 1);
+  --dur-1: 120ms;  /* hover e foco */
+  --dur-2: 180ms;  /* telas, abas, modais, avisos */
+  --dur-3: 320ms;  /* barras de gráfico */
+}

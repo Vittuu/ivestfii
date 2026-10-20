@@ -1,0 +1,27 @@
+{
+  "fiis": [
+    {
+      "ticker": "TEST11",
+      "name": "Fundo fictício de demonstração",
+      "sector": "Exemplo",
+      "entries": [
+        {
+          "month": "2026-01",
+          "cotas_added": "10",
+          "price_per_cota": "10.00",
+          "dividend_per_cota": "0.10",
+          "dividend_total": "1.00",
+          "notes": "Dados fictícios. Não representa uma carteira ou ativo real."
+        },
+        {
+          "month": "2026-02",
+          "cotas_added": "2",
+          "price_per_cota": "9.50",
+          "dividend_per_cota": "0.10",
+          "dividend_total": "1.20",
+          "notes": "Exemplo com compra e rendimento no mesmo mês."
+        }
+      ]
+    }
+  ]
+}

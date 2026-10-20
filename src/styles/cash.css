@@ -1,0 +1,172 @@
+/* Tela: Caixinhas CDI. Escopo .cash-page; usa apenas tokens de tokens.css e classes de base.css. */
+
+/* ---------- Saldos: total e tabela ---------- */
+.cash-page .cash-total {
+  padding: 0;
+}
+.cash-page .cash-actual-readouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); }
+.cash-page .cash-actual-readouts .readout { gap: var(--sp-2); padding: var(--sp-4); }
+.cash-page .cash-actual-readouts dd { margin: 0; }
+.cash-page .cash-actual-note { padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); font-size: var(--fs-12); line-height: 1.6; color: var(--warn); }
+.cash-page .cash-actual-note.form-error { color: var(--neg); }
+.cash-page .cash-applied { color: var(--accent); }
+
+.cash-page .cash-unit {
+  font-family: var(--font-ui);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  letter-spacing: 0;
+}
+
+/* Valores financeiros mantêm a largura necessária; telas menores rolam dentro da tabela. */
+.cash-page .cash-table { table-layout: auto; min-width: 840px; }
+.cash-page .cash-col-balance { width: 148px; }
+.cash-page .cash-col-actual { width: 172px; }
+.cash-page .cash-col-cdi { width: 84px; }
+.cash-page .cash-col-ref { width: 192px; }
+.cash-page .cash-col-actions { width: 120px; }
+.cash-page .cash-name > span,
+.cash-page .cash-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cash-page .cash-name > span { display: block; font-weight: 500; color: var(--text-1); }
+.cash-page .cash-name { max-width: 240px; min-width: 156px; }
+.cash-page .cash-table :is(th, td).num { white-space: nowrap; overflow: visible; text-overflow: clip; }
+.cash-page .cash-table th.num { white-space: normal; }
+.cash-page :is(.cash-balance-date, .cash-incomplete) { display: block; margin-top: var(--sp-1); font-family: var(--font-ui); font-size: var(--fs-12); font-weight: 400; letter-spacing: 0; color: var(--text-3); }
+.cash-page .cash-incomplete { color: var(--warn); }
+.cash-page .cash-ref .muted, .cash-page .cash-ref small { font-family: var(--font-ui); letter-spacing: 0; }
+.cash-page .cash-ref small .num { font-size: inherit; }
+.cash-page .cash-row-actions {
+  padding-left: var(--sp-2); padding-right: var(--sp-2);
+  text-align: right; white-space: nowrap;
+}
+.cash-page .cash-row-actions > * { vertical-align: middle; }
+.cash-page .cash-row-actions > * + * { margin-left: var(--sp-1); }
+.cash-page .cash-pick { min-width: 0; }
+.cash-page .cash-pick:hover:not(:disabled) { border-color: transparent; }
+.cash-page .cash-pick[aria-pressed='true'] { color: var(--text-1); }
+.cash-page .cash-table tbody tr.is-selected > td { background: var(--surface-2); }
+.cash-page .cash-table tbody tr.is-selected > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Observações e fonte de cada caixinha, por extenso, num bloco de largura total.
+   A segunda coluna começa na mesma linha vertical do texto da tabela de caixinhas
+   (início do .span-8 na grade de 12 colunas com rejunte de 1px). */
+.cash-page .cash-details dl { margin: 0; }
+.cash-page .cash-details dl > div {
+  display: grid; grid-template-columns: calc((100% + 21px) / 3 - 12px) minmax(0, 1fr);
+  column-gap: var(--sp-4); row-gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-4);
+}
+.cash-page .cash-details dl > div:nth-child(even) { background: var(--surface-zebra); }
+.cash-page .cash-details dt {
+  grid-column: 1;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-13); color: var(--text-1);
+}
+.cash-page .cash-details dd { grid-column: 2; margin: 0; min-width: 0; }
+.cash-page .cash-details-notes { font-size: var(--fs-13); color: var(--text-2); white-space: pre-line; overflow-wrap: anywhere; }
+.cash-page .cash-details-source { font-size: var(--fs-12); color: var(--text-3); }
+.cash-page .cash-details-source .num { font-size: inherit; }
+
+.cash-page .cash-source-link a {
+  color: var(--text-2);
+  text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 4px;
+  white-space: nowrap;
+}
+.cash-page .cash-source-link a:hover { color: var(--text-1); text-decoration-color: var(--text-3); }
+.cash-page .cash-sim-details { margin: 0; border: 0; border-radius: 0; font-size: var(--fs-12); color: var(--text-2); }
+.cash-page .cash-sim-details p { margin-top: var(--sp-2); }
+.cash-page .cash-sim-details ul { margin: var(--sp-2) 0; padding-left: var(--sp-4); }
+.cash-page .cash-fetch > .def { font-size: var(--fs-12); color: var(--text-2); }
+.cash-page .public-source-error { display: block; font-size: var(--fs-12); color: var(--neg); }
+
+/* ---------- Simulação ---------- */
+.cash-page .cash-sim-form .button.full-width { margin-top: var(--sp-1); }
+.cash-page .cash-rate-missing { margin: 0 0 var(--sp-4); }
+
+.cash-page .cash-sim-error { margin: var(--sp-3) var(--sp-4); }
+.cash-page .cash-sim-error + .cash-sim-readouts { border-top: 1px solid var(--line); }
+/* O resultado ocupa a altura do bloco (esticado pelo .modular) em vez de deixar um vazio liso. */
+.cash-page .cash-sim-output { flex: 1; display: flex; flex-direction: column; }
+.cash-page .cash-sim-output > .cash-sim-readouts { flex: 1; }
+.cash-page .cash-nowrap { white-space: nowrap; }
+.cash-page .cash-sim-readouts {
+  display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1px; background: var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.cash-page .cash-sim-readouts .readout { justify-content: flex-start; gap: var(--sp-2); padding: var(--sp-4); }
+.cash-page .cash-sim-readouts dd { margin: 0; }
+.cash-page .cash-sim-readouts .figure-value { white-space: nowrap; }
+.cash-page .cash-sim-readouts .figure-note { line-height: 1.5; }
+.cash-page .cash-sim-hint { padding: var(--sp-3) var(--sp-4); }
+.cash-page .cash-assumptions { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+.cash-page .cash-assumptions h4 { margin-bottom: var(--sp-1); font-size: var(--fs-12); font-weight: 500; color: var(--text-3); }
+.cash-page .cash-assumptions li { font-size: var(--fs-12); line-height: 1.6; color: var(--text-2); }
+.cash-page .cash-sim-result .block-foot { padding-block: var(--sp-2); line-height: 1.5; }
+
+/* ---------- Formulário da caixinha (modal) ---------- */
+.cash-page .cash-rate { min-width: 0; margin: 0; padding: 0; border: 0; }
+.cash-page .cash-rate legend {
+  width: 100%;
+  padding: var(--sp-4) 0 var(--sp-3);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-13); font-weight: 600; color: var(--text-1);
+}
+.cash-page .cash-rate legend span { margin-left: var(--sp-1); font-weight: 400; color: var(--text-3); }
+.cash-page .cash-form-explanation { margin: 0 0 var(--sp-3); font-size: var(--fs-12); line-height: 1.6; color: var(--text-2); }
+.cash-page .cash-date-entry { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.cash-page .cash-date-entry .field { flex: 1 1 180px; }
+.cash-page .cash-date-entry .button { margin-bottom: 0; min-height: 36px; }
+.cash-page .cash-remove-reconciliation { margin-bottom: var(--sp-3); font-size: var(--fs-12); }
+.cash-page .cash-fetch {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.cash-page .cash-fetch p { flex: 1 1 220px; font-size: var(--fs-12); color: var(--text-3); }
+.cash-page .cash-provenance {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1);
+  margin: calc(-1 * var(--sp-1)) 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--line-strong);
+  background: var(--surface-zebra);
+  font-size: var(--fs-12); color: var(--text-2);
+}
+.cash-page .cash-provenance strong { font-size: var(--fs-13); font-weight: 500; color: var(--text-1); }
+.cash-page .cash-provenance .num { font-size: inherit; }
+.cash-page .cash-reference-notice {
+  margin: 0 0 var(--sp-4);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--line-strong);
+  font-size: var(--fs-12); color: var(--text-2);
+}
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 1180px) {
+  .cash-page .cash-total, .cash-page .cash-list { grid-column: 1 / -1; }
+  .cash-page .cash-details dl > div { grid-template-columns: minmax(120px, 28%) minmax(0, 1fr); }
+  .cash-page .cash-sim-setup { grid-column: span 5; }
+  .cash-page .cash-sim-result { grid-column: span 7; }
+  .cash-page .cash-sim-readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cash-page .cash-sim-lead { grid-column: 1 / -1; }
+}
+@media (max-width: 960px) {
+  .cash-page .cash-sim-setup, .cash-page .cash-sim-result { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .cash-page .cash-table { min-width: 780px; }
+  .cash-page .cash-table th, .cash-page .cash-table td { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+  .cash-page .cash-col-balance { width: 128px; }
+  .cash-page .cash-col-cdi { width: 80px; }
+  .cash-page .cash-col-ref { width: 180px; }
+  /* A seleção para simular continua pelo seletor "Caixinha" de Parâmetros. */
+  .cash-page .cash-pick { display: none; }
+  .cash-page .cash-col-actions { width: 56px; }
+  .cash-page .cash-row-actions > * + * { margin-left: 0; }
+  .cash-page .cash-details dl > div { padding-inline: var(--sp-3); }
+}
+@media (max-width: 520px) {
+  .cash-page .cash-actual-readouts { grid-template-columns: minmax(0, 1fr); }
+  .cash-page .cash-sim-readouts { grid-template-columns: minmax(0, 1fr); }
+  .cash-page .cash-details dl > div { grid-template-columns: minmax(0, 1fr); }
+  .cash-page .cash-details dt, .cash-page .cash-details dd { grid-column: 1; }
+}

@@ -1,0 +1,33 @@
+# Local build products and archived preview executables.
+/target/
+/node_modules/
+/web-dist/
+/dist/
+/build/
+/data/*
+!/data/README.md
+/src-tauri/gen/
+/.vercel/
+/.local/
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Local credentials, signing material and personal document exports.
+*.key
+*.pem
+*.p12
+*.pfx
+*.sqlite-journal
+Thumbs.db
+.DS_Store

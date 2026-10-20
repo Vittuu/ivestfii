@@ -1,0 +1,38 @@
+[package]
+name = "ivestfii-desktop"
+version = "0.1.11"
+description = "Carteira local de FIIs com Rust e Tauri"
+edition = "2021"
+
+[lib]
+name = "ivestfii_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+ivestfii-core = { path = "../crates/portfolio-core" }
+ivestfii-assistant = { path = "../crates/assistant-core" }
+ivestfii-runtime = { path = "../crates/assistant-runtime" }
+ivestfii-mcp = { path = "../crates/mcp-server" }
+ivestfii-market-data = { path = "../crates/market-data" }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
+chrono = "0.4"
+tokio = { version = "1", features = ["time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+base64 = "0.22"
+minisign-verify = "0.3"
+sha2 = "0.10"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

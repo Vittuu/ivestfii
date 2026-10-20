@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Janela local do IvestFII; sem shell ou acesso arbitrário a arquivos pelo frontend.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
