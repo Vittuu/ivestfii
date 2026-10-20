@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 mod broker;
 mod cash;
+pub mod income;
 pub mod performance;
 pub mod portfolio_performance;
 mod profile;
@@ -61,6 +62,10 @@ pub enum CoreError {
 pub struct MonthlyEntry {
     pub id: String,
     pub month: String,
+    /// Actual purchase date, when supplied by the user. Missing legacy dates
+    /// must remain unknown; do not infer eligibility from the end of the month.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase_date: Option<String>,
     pub cotas_added: String,
     pub price_per_cota: String,
     pub dividend_per_cota: String,
@@ -128,6 +133,8 @@ pub struct RecordInput {
     pub id: Option<String>,
     pub fund_id: String,
     pub month: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purchase_date: Option<String>,
     pub cotas_added: String,
     pub price_per_cota: String,
     pub dividend_per_cota: String,
@@ -256,7 +263,7 @@ impl Repository {
             "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;",
         )?;
         let version: u32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if version > 6 {
+        if version > 7 {
             return Err(CoreError::Validation(
                 "Este banco foi criado por uma versão mais recente do aplicativo.".into(),
             ));
@@ -335,7 +342,7 @@ impl Repository {
         let migration = (|| -> Result<()> {
             let locked_version: u32 =
                 connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            if locked_version > 6 {
+            if locked_version > 7 {
                 return Err(CoreError::Validation(
                     "Este banco foi criado por uma versão mais recente do aplicativo.".into(),
                 ));
@@ -358,7 +365,15 @@ impl Repository {
                     ))?;
                 }
             }
-            connection.execute_batch("PRAGMA user_version = 6; COMMIT;")?;
+            let record_columns = connection
+                .prepare("PRAGMA table_info(monthly_records)")?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<std::result::Result<HashSet<_>, _>>()?;
+            if !record_columns.contains("purchase_date") {
+                connection
+                    .execute_batch("ALTER TABLE monthly_records ADD COLUMN purchase_date TEXT;")?;
+            }
+            connection.execute_batch("PRAGMA user_version = 7; COMMIT;")?;
             Ok(())
         })();
         if let Err(error) = migration {
@@ -549,16 +564,17 @@ impl Repository {
 
     pub fn save_monthly_record(&self, input: RecordInput) -> Result<()> {
         let month = normalize_month(&input.month)?;
+        let cotas_added = parse_nonnegative(&input.cotas_added, "Quantidade de cotas")?;
+        let purchase_date =
+            normalize_purchase_date(input.purchase_date.as_deref(), &month, cotas_added)?;
         let entry = MonthlyEntry {
             id: input
                 .id
                 .filter(|v| !v.trim().is_empty())
                 .unwrap_or_else(|| Uuid::new_v4().to_string()),
             month,
-            cotas_added: decimal_string(parse_nonnegative(
-                &input.cotas_added,
-                "Quantidade de cotas",
-            )?),
+            purchase_date,
+            cotas_added: decimal_string(cotas_added),
             price_per_cota: decimal_string(parse_nonnegative(
                 &input.price_per_cota,
                 "Preço por cota",
@@ -640,14 +656,18 @@ impl Repository {
         for fund in snapshot.funds {
             let mut entries = Vec::with_capacity(fund.entries.len());
             for entry in fund.entries {
-                entries.push(json!({
+                let mut value = json!({
                     "month": entry.month,
                     "cotas_added": json_decimal(&entry.cotas_added)?,
                     "price_per_cota": json_decimal(&entry.price_per_cota)?,
                     "dividend_per_cota": json_decimal(&entry.dividend_per_cota)?,
                     "dividend_total": entry.dividend_total.map(|v| json_decimal(&v)).transpose()?,
                     "notes": entry.notes,
-                }));
+                });
+                if let Some(purchase_date) = entry.purchase_date {
+                    value["purchase_date"] = json!(purchase_date);
+                }
+                entries.push(value);
             }
             funds.push(json!({"ticker":fund.ticker,"name":fund.name,"sector":fund.sector,"entries":entries}));
         }
@@ -820,12 +840,13 @@ fn snapshot_connection(connection: &Connection) -> Result<PortfolioSnapshot> {
     let mut estimated_monthly_income = Decimal::ZERO;
     let mut record_count = 0;
     for (id, ticker, name, sector) in funds {
-        let mut records = connection.prepare("SELECT id, month, cotas_added, price_per_cota, dividend_per_cota, dividend_total, notes FROM monthly_records WHERE fund_id = ?1 ORDER BY month, sequence, id")?;
+        let mut records = connection.prepare("SELECT id, month, cotas_added, price_per_cota, dividend_per_cota, dividend_total, notes, purchase_date FROM monthly_records WHERE fund_id = ?1 ORDER BY month, sequence, id")?;
         let entries = records
             .query_map([&id], |r| {
                 Ok(MonthlyEntry {
                     id: r.get(0)?,
                     month: r.get(1)?,
+                    purchase_date: r.get(7)?,
                     cotas_added: r.get(2)?,
                     price_per_cota: r.get(3)?,
                     dividend_per_cota: r.get(4)?,
@@ -965,6 +986,7 @@ fn parse_legacy(bytes: &[u8]) -> Result<Vec<ImportedFund>> {
             let mut entry = MonthlyEntry {
                 id: String::new(),
                 month: normalize_month(required_string(raw_entry, "month")?)?,
+                purchase_date: None,
                 cotas_added: legacy_decimal(raw_entry, "cotas_added", false)?
                     .unwrap_or_else(zero_string),
                 price_per_cota: legacy_decimal(raw_entry, "price_per_cota", false)?
@@ -974,6 +996,20 @@ fn parse_legacy(bytes: &[u8]) -> Result<Vec<ImportedFund>> {
                 dividend_total: legacy_decimal(raw_entry, "dividend_total", true)?,
                 notes: optional_string(raw_entry, "notes")?,
             };
+            let purchase_date = match raw_entry.get("purchase_date") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(value)) => Some(value.as_str()),
+                _ => {
+                    return Err(CoreError::Validation(
+                        "Campo 'purchase_date' precisa ser uma data no formato AAAA-MM-DD.".into(),
+                    ))
+                }
+            };
+            entry.purchase_date = normalize_purchase_date(
+                purchase_date,
+                &entry.month,
+                parse_decimal(&entry.cotas_added)?,
+            )?;
             let fingerprint = format!("{:x}", Sha256::digest(serde_json::to_vec(&entry)?));
             let occurrence = occurrences.entry(fingerprint.clone()).or_default();
             entry.id = Uuid::new_v5(
@@ -1003,12 +1039,12 @@ fn insert_entry(
     now: &str,
 ) -> Result<()> {
     tx.execute(
-        "INSERT INTO monthly_records(id, fund_id, month, cotas_added, price_per_cota, dividend_per_cota, dividend_total, notes, sequence, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        "INSERT INTO monthly_records(id, fund_id, month, cotas_added, price_per_cota, dividend_per_cota, dividend_total, notes, sequence, updated_at, purchase_date)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET month=excluded.month, cotas_added=excluded.cotas_added, price_per_cota=excluded.price_per_cota,
-         dividend_per_cota=excluded.dividend_per_cota, dividend_total=excluded.dividend_total, notes=excluded.notes,
+         dividend_per_cota=excluded.dividend_per_cota, dividend_total=excluded.dividend_total, notes=excluded.notes, purchase_date=excluded.purchase_date,
          revision=monthly_records.revision+1, updated_at=excluded.updated_at",
-        params![entry.id, fund_id, entry.month, entry.cotas_added, entry.price_per_cota, entry.dividend_per_cota, entry.dividend_total, entry.notes, sequence, now],
+        params![entry.id, fund_id, entry.month, entry.cotas_added, entry.price_per_cota, entry.dividend_per_cota, entry.dividend_total, entry.notes, sequence, now, entry.purchase_date],
     )?;
     Ok(())
 }
@@ -1097,6 +1133,44 @@ fn normalize_month(value: &str) -> Result<String> {
         ));
     }
     Ok(date.format("%Y-%m").to_string())
+}
+
+fn normalize_purchase_date(
+    value: Option<&str>,
+    month: &str,
+    cotas_added: Decimal,
+) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    let invalid =
+        || CoreError::Validation("Informe a data da compra no formato AAAA-MM-DD.".into());
+    if value.len() != 10
+        || value.as_bytes().get(4) != Some(&b'-')
+        || value.as_bytes().get(7) != Some(&b'-')
+        || !value
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
+    {
+        return Err(invalid());
+    }
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| invalid())?;
+    if date.year() < 1 {
+        return Err(invalid());
+    }
+    if date.format("%Y-%m").to_string() != month {
+        return Err(CoreError::Validation(
+            "A data da compra precisa estar no mesmo mês do lançamento.".into(),
+        ));
+    }
+    if cotas_added <= Decimal::ZERO {
+        return Err(CoreError::Validation(
+            "Informe uma quantidade de cotas compradas para registrar a data da compra.".into(),
+        ));
+    }
+    Ok(Some(date.format("%Y-%m-%d").to_string()))
 }
 
 fn month_after(reference: &str, offset: u32) -> Result<String> {

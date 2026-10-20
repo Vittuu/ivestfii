@@ -9,6 +9,7 @@ export interface RecordEntry {
   pricePerCota: string;
   dividendPerCota: string;
   dividendTotal: string | null;
+  purchaseDate?: string | null;
   notes: string;
 }
 
@@ -135,10 +136,47 @@ export interface QuotePanel {
   errors: string[];
 }
 
-export type PublicDataSourceId = 'economics' | 'news' | 'quotes' | 'cvm' | 'cdiHistory';
+export interface DividendPanel {
+  items: { symbol: string; status: MarketDataStatus; observation: { fetchedAt: string; source: string; sourceUrl: string; events: unknown[] } | null; error: string | null }[];
+  fetchedAt: string | null;
+  errors: string[];
+}
+
+export interface MonthlyIncomeEvent {
+  id: string;
+  symbol: string;
+  amountPerShare: string;
+  recordDate: string;
+  paymentDate: string;
+  eligibleShares: string | null;
+  amount: string | null;
+  source: string;
+  sourceUrl: string;
+}
+export interface MonthlyIncomeReport {
+  months: {
+    month: string;
+    total: string | null;
+    knownTotal: string;
+    status: string;
+    funds: {
+      fundId: string;
+      symbol: string;
+      status: 'recorded' | 'api' | 'missing' | 'date_required' | 'not_held';
+      amount: string | null;
+      holdings: string;
+      eligibleShares: string | null;
+      events: MonthlyIncomeEvent[];
+      manualRecordIds: string[];
+      reasons: string[];
+    }[];
+  }[];
+}
+
+export type PublicDataSourceId = 'economics' | 'news' | 'quotes' | 'cvm' | 'cdiHistory' | 'dividends';
 export interface PublicDataSourceState {
   id: PublicDataSourceId;
-  status: 'updated' | 'cached' | 'unavailable' | 'not_configured' | 'deferred';
+  status: 'updated' | 'cached' | 'unavailable' | 'not_configured' | 'deferred' | 'unsupported';
   message?: string | null;
 }
 export interface PublicDataRefresh {
@@ -146,6 +184,7 @@ export interface PublicDataRefresh {
   news: NewsSnapshot | null;
   quotes: QuotePanel;
   cvm: CvmPanel;
+  dividends?: DividendPanel;
   sources: PublicDataSourceState[];
   checkedAt: string;
 }

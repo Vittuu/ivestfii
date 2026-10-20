@@ -28,7 +28,8 @@ const focusedCompact=process.env.IVESTFII_UI_FOCUS==='compact';
 const focusedPublicData=process.env.IVESTFII_UI_FOCUS==='public-data';
 const focusedProfile=process.env.IVESTFII_UI_FOCUS==='profile';
 const focusedIncome=process.env.IVESTFII_UI_FOCUS==='income';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':'report.json';
+const focusedIncomeApi=process.env.IVESTFII_UI_FOCUS==='income-api';
+const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -99,6 +100,29 @@ const incomeExpected=[
   ['2025-11','6.00'],['2025-12',null],['2026-01','6.00'],['2026-02','0.00'],['2026-03',null],['2026-04','5.75'],
   ['2026-05','8.00'],['2026-06',null],['2026-07',null],['2026-08',null],['2026-09','1.20'],['2026-10','2.00'],
 ];
+// Fixed native-contract responses, rather than a second implementation of the
+// entitlement calculator. Core tests separately verify dated purchase arithmetic.
+const incomeApiEvent=(symbol,month,rate,shares,amount)=>({id:`synthetic-${symbol}-${month}`,symbol,amountPerShare:rate,recordDate:`${month}-10`,paymentDate:`${month}-20`,eligibleShares:shares,amount,source:'B3',sourceUrl:'https://sistemaswebb3-listados.b3.com.br/fundsListedPage/events-main/'+symbol.slice(0,4),status:'api',missingPurchaseDates:[],reasons:[]});
+const incomeApiFund=(fundId,symbol,holdings,event)=>({fundId,symbol,status:'api',amount:event.amount,holdings,eligibleShares:event.eligibleShares,events:[event],manualRecordIds:[],reasons:[]});
+const incomeApiReport={startMonth:'2025-10',endMonth:'2026-10',asOf:'2026-10-20',ignoredEventCount:0,months:[
+  {month:'2026-06',total:'5',knownTotal:'5',recordedAmount:'0',apiAmount:'5',status:'complete',recordedFundCount:1,apiFundCount:1,missingFundCount:0,funds:[
+    incomeApiFund('income-alpha','ALFA11','12',incomeApiEvent('ALFA11','2026-06','0.5','10','5')),
+    {fundId:'income-beta',symbol:'BETA11',status:'recorded',amount:'0',holdings:'5',eligibleShares:null,events:[],manualRecordIds:['beta-june-zero'],reasons:[]},
+  ]},
+  {month:'2026-07',total:'7',knownTotal:'7',recordedAmount:'0',apiAmount:'7',status:'complete',recordedFundCount:0,apiFundCount:2,missingFundCount:0,funds:[
+    incomeApiFund('income-alpha','ALFA11','15',incomeApiEvent('ALFA11','2026-07','0.5','12','6')),
+    incomeApiFund('income-beta','BETA11','5',incomeApiEvent('BETA11','2026-07','0.2','5','1')),
+  ]},
+  {month:'2026-08',total:'12',knownTotal:'12',recordedAmount:'0',apiAmount:'12',status:'complete',recordedFundCount:0,apiFundCount:2,missingFundCount:0,funds:[
+    incomeApiFund('income-alpha','ALFA11','15',incomeApiEvent('ALFA11','2026-08','0.7','15','10.5')),
+    incomeApiFund('income-beta','BETA11','5',incomeApiEvent('BETA11','2026-08','0.3','5','1.5')),
+  ]},
+]};
+const incomeApiDividendPanel={items:['ALFA11','BETA11'].map(symbol=>({symbol,status:'cached',observation:{symbol,fetchedAt:'2026-10-20T12:00:00Z',source:'B3',sourceUrl:'https://sistemaswebb3-listados.b3.com.br/fundsListedPage/events-main/'+symbol.slice(0,4),events:[...incomeApiReport.months.flatMap(month=>month.funds.filter(fund=>fund.symbol===symbol).flatMap(fund=>fund.events)),...(symbol==='BETA11'?[incomeApiEvent('BETA11','2026-06','0.8','5','4')]:[])]},error:null})),fetchedAt:'2026-10-20T12:00:00Z',errors:[]};
+const incomeApiUnknownReport={...incomeApiReport,months:[{...incomeApiReport.months[1],total:null,knownTotal:'1',apiAmount:'1',status:'partial',apiFundCount:1,missingFundCount:1,funds:[
+  {...incomeApiReport.months[1].funds[0],status:'date_required',amount:null,eligibleShares:null,events:[{...incomeApiReport.months[1].funds[0].events[0],status:'date_required',amount:null,eligibleShares:null,missingPurchaseDates:['alpha-july-purchase'],reasons:['Informe o dia da compra para conferir a data-com.']}],reasons:['Informe o dia da compra para conferir a data-com.']},
+  incomeApiReport.months[1].funds[1],
+]}]};
 const importWarnings = [
   'Os horários das capturas dos fundos são diferentes.',
   'O panorama e os fundos listados foram capturados separadamente.',
@@ -203,6 +227,16 @@ function bootstrap(mode) {
       if(mode==='income-zero')for(const fund of initial.funds.slice(0,2))fund.entries.push(incomeEntry(fund.id+'-zero','2026-02',{received:'0'}));
       initial.totals.dividendsReceived='0';
     }
+    if(mode.startsWith('income-api')){
+      initial.funds[0].entries=[
+        {...incomeEntry('alpha-buy','2025-10',{added:'10'}),purchaseDate:'2025-10-01'},
+        {...incomeEntry('alpha-june-purchase','2026-06',{added:'2'}),purchaseDate:'2026-06-25'},
+        {...incomeEntry('alpha-july-purchase','2026-07',{added:'3'}),...(mode==='income-api-date-required'?{}:{purchaseDate:'2026-07-25'})},
+      ];
+      initial.funds[0].totalCotas='15';initial.funds[0].dividendsReceived='0';
+      initial.funds[1].entries=[{...incomeEntry('beta-buy','2025-10',{added:'5',price:'20'}),purchaseDate:'2025-10-01'},incomeEntry('beta-june-zero','2026-06',{price:'20',received:'0'})];
+      initial.funds[1].dividendsReceived='0';initial.totals.dividendsReceived='0';
+    }
     initial.recordCount=initial.funds.reduce((sum,fund)=>sum+fund.entries.length,0);
   }
   if (mode === 'connected') initial.funds.push({...initial.funds[0],id:'fund-fiagro',ticker:'VGIA11',name:'FIAGRO sintético VGIA11',entries:[],totalCotas:'0',totalInvested:'0',averagePrice:'0',dividendsReceived:'0',estimatedMonthlyIncome:'0'});
@@ -244,6 +278,8 @@ const wallets=${JSON.stringify(wallets)};
 Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformance)},otherPerformance:{...${JSON.stringify(performance)},invested:'200',dividends:'0',marketValue:'220',priceResult:'20',totalResult:'20',totalReturnPercent:'10',cdi:{endingValue:'210',result:'10',returnPercent:'5'},difference:'10'},deferPerformance:false,performanceWaiters:[],deferPerformanceRead:${mode === 'performance-loading'},performanceReadWaiters:[],failPerformance:false});
 Object.assign(globalThis.__uiTest,{chat:${JSON.stringify(chatFixture)},deferChatStart:false,chatStartWaiters:[],eventSubscriptions:[],eventCalls:[]});
 Object.assign(globalThis.__uiTest,{automaticMode:${JSON.stringify(mode)},deferAutoWallets:${JSON.stringify(automaticMode?['wallet-original']:[])},autoWaiters:[],publicCache:{shared:{economics:${JSON.stringify(economics)},news:${JSON.stringify(news)}},wallets:{}},autoCheckedAt:'2026-10-20T12:00:00Z'});
+Object.assign(globalThis.__uiTest,{incomeReport:${JSON.stringify(mode==='income-api-date-required'?incomeApiUnknownReport:mode==='income-api'?incomeApiReport:{months:[]})}});
+Object.assign(globalThis.__uiTest,{dividendPanel:${JSON.stringify(mode.startsWith('income-api')?incomeApiDividendPanel:{items:[],fetchedAt:null,errors:[]})}});
 ${mode.startsWith('income')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{items:[],fetchedAt:null,credentialConfigured:false,errors:[]},cvm:{items:[],fetchedAt:null,errors:[]}};`:''}
 Object.assign(globalThis.__uiTest,{profiles:{'wallet-original':${JSON.stringify(mode==='profile-stale'?{...otherProfile,riskTolerance:'aggressive',notes:'Nota da resposta antiga da carteira A.'}:null)},'wallet-other':${JSON.stringify(mode.startsWith('profile')?otherProfile:null)}},deferProfileWallets:${JSON.stringify(mode==='profile-stale'?['wallet-original']:[])},profileReadWaiters:[],deferProfileSaves:false,profileSaveWaiters:[],profileSaveError:null,profileReadError:${JSON.stringify(mode==='profile-error'?'Perfil sintético temporariamente indisponível.':null)}});
 ${mode.startsWith('profile')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{...${JSON.stringify(quotePanel)},items:[{symbol:'TEST11',status:'cached',observation:{...${JSON.stringify(quoteObservation)},quotedAt:'2026-10-20T00:30:00Z'},error:null},{symbol:'MOCK11',status:'cached',observation:{...${JSON.stringify(quoteObservation)},symbol:'MOCK11',price:'25',quotedAt:'not-a-date'},error:null}]}};`:''}
@@ -341,6 +377,8 @@ mockIPC(async (command, args={}) => {
     case 'get_quote_cache': return test.readQuotes(args.walletId);
     case 'refresh_quotes': {if(test.deferMarket)await new Promise(resolve=>test.marketWaiters.push(resolve));const result=${JSON.stringify(quotePanel)};result.credentialConfigured=true;result.items[0].status='available';result.items[0].observation.price='9.25';result.items[0].error=null;result.items[1].status='forbidden';result.items[1].error='Ativo não incluído no plano sintético.';result.errors=['Cobertura parcial no cenário sintético.'];test.publicCache.wallets[args.walletId]={...test.publicCache.wallets[args.walletId],quotes:structuredClone(result)};return result;}
     case 'get_cvm_cache': return test.readCvm(args.walletId);
+    case 'get_dividend_cache': return args.walletId==='wallet-original'?structuredClone(test.dividendPanel):{items:[],fetchedAt:null,errors:[]};
+    case 'get_monthly_income': return args.walletId==='wallet-original'?structuredClone(test.incomeReport):{months:[]};
     case 'refresh_cvm_data': {const result=${JSON.stringify(cvmPanel)};result.items[0].error='CVM temporariamente indisponível no teste.';result.errors=['Consulta parcial da CVM no teste.'];for(const item of result.items){const mapping=test.marketSettings.cvmMappings[item.symbol];if(mapping && !item.report){item.cnpj=mapping;item.report={...${JSON.stringify(cvmReport)},cnpj:mapping,fundName:'Fundo CVM sintético B'};item.status='available';}}test.publicCache.wallets[args.walletId]={...test.publicCache.wallets[args.walletId],cvm:structuredClone(result)};return result;}
     case 'upsert_fund':
       if(test.deferSaves)await new Promise(resolve=>test.saveWaiters.push(resolve));
@@ -415,7 +453,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -1544,6 +1582,125 @@ try {
     await readOnly(complete);await complete.context.close();
   }
 
+  async function verifyAutomaticMonthlyIncome(){
+    const fixture=await openPage('income-api',{width:1440,height:1000},{expandedSidebar:false}),page=fixture.page;
+    const chart=page.locator('.ov-income');
+    const original=await page.evaluate(()=>structuredClone(globalThis.__uiTest.snapshot));
+    const sourceCalls=await calls(page,'get_monthly_income');
+    assert.ok(sourceCalls.length>0);
+    assert.deepEqual(sourceCalls.at(-1).args,{walletId:'wallet-original',startMonth:'2025-10',endMonth:'2026-10'});
+    await openExtra(region(page,'Histórico de FIIs'));await chart.locator('.ov-chart').waitFor();
+    async function explain(month,method='hover'){
+      await page.keyboard.press('Escape');await page.mouse.move(1,1);
+      const trigger=chart.locator(`.ov-income-month[data-month="${month}"] .def`);await revealInViewport(trigger);
+      if(method==='focus')await trigger.focus();else await trigger.hover();
+      const bubble=page.getByRole('tooltip');await bubble.waitFor();return {trigger,bubble};
+    }
+    async function captureExplanation(currentPage,name){
+      const bubble=currentPage.getByRole('tooltip');await bubble.waitFor({state:'visible'});
+      assert.equal(await currentPage.locator('.ov-income svg').isVisible(),true);
+      const activeMonth=currentPage.locator('.ov-income-month .def[aria-expanded="true"]');
+      const geometry=await activeMonth.evaluate(element=>{const box=element.getBoundingClientRect();return {top:box.top,bottom:box.bottom,height:innerHeight};});
+      assert.ok(geometry.top>=0&&geometry.bottom<=geometry.height,'A tooltip capture must include its visible chart month');
+      const filename=name+'.png';await currentPage.screenshot({path:path.join(output,filename),fullPage:false,animations:'disabled'});screenshots.push(filename);
+    }
+    const fundCell=(bubble,symbol)=>bubble.getByRole('row',{name:new RegExp('^'+symbol+' ')}).locator('td').nth(1);
+    let opened=await explain('2026-07');
+    assert.match(compact(await opened.bubble.locator('.ov-income-tooltip-title').innerText()),/R\$7,00/);
+    await textEquals(fundCell(opened.bubble,'ALFA11'),'R$ 6,00 B3 · automático');
+    await textEquals(fundCell(opened.bubble,'BETA11'),'R$ 1,00 B3 · automático');
+    assert.match(await opened.bubble.innerText(),/2 de 2 fundos com rendimento disponível/);
+    assert.match(await opened.bubble.innerText(),/Preenchido automaticamente.*Um valor informado por você tem prioridade/);
+    assert.equal(await page.evaluate(()=>globalThis.__uiTest.snapshot.funds[1].entries.some(entry=>entry.month==='2026-07')),false,'The public payout fills a true ledger gap');
+    check('monthly-income-B3-fills-an-unrecorded-fund-month-with-the-current-published-rate');
+    const alphaRow=opened.bubble.getByRole('row',{name:/^ALFA11 /});
+    await textEquals(alphaRow.locator('td').nth(0),'15');
+    const alphaEvent=opened.bubble.locator('.ov-income-events').filter({hasText:'ALFA11 · cálculo B3'});
+    assert.match(compact(await alphaEvent.innerText()),/12cotascomdireito×0,5R\$\/cota=R\$6,00/);
+    assert.match(await alphaEvent.innerText(),/Data-com 10\/07\/2026 · pagamento 20\/07\/2026/);
+    assert.equal(await alphaEvent.getByRole('link',{name:/^Ver na B3/}).getAttribute('href'),'https://sistemaswebb3-listados.b3.com.br/fundsListedPage/events-main/ALFA');
+    await captureExplanation(page,'desktop-monthly-income-B3-cutoff');
+    check('monthly-income-B3-shows-entitled-shares-separately-from-final-holdings-dates-formula-and-official-source');
+    opened=await explain('2026-08','focus');
+    await textEquals(fundCell(opened.bubble,'ALFA11'),'R$ 10,50 B3 · automático');
+    await textEquals(fundCell(opened.bubble,'BETA11'),'R$ 1,50 B3 · automático');
+    assert.match(await opened.bubble.innerText(),/Sem novas compras: as cotas anteriores continuam no saldo/);
+    assert.match(compact(await opened.bubble.innerText()),/15cotascomdireito×0,7R\$\/cota=R\$10,50/);
+    check('monthly-income-B3-carries-purchases-forward-and-uses-each-months-own-public-distribution');
+    opened=await explain('2026-06');
+    await textEquals(fundCell(opened.bubble,'BETA11'),'R$ 0,00');
+    assert.match(await opened.bubble.innerText(),/R\$ 0 informado no lançamento é diferente de falta de registro/);
+    assert.equal(await opened.bubble.locator('.ov-income-events').filter({hasText:'BETA11 · cálculo B3'}).count(),0);
+    assert.equal(await page.evaluate(()=>globalThis.__uiTest.dividendPanel.items[1].observation.events.some(event=>event.paymentDate==='2026-06-20'&&event.amount==='4')),true,'A positive public payout exists but the canonical manual zero wins');
+    check('monthly-income-manual-zero-takes-priority-over-an-available-positive-B3-distribution');
+    await page.keyboard.press('Escape');await page.mouse.move(1,1);
+    const writes=await page.evaluate(()=>globalThis.__uiTest.calls.filter(({command})=>/^(?:save_|upsert_|delete_|remove_|import_|export_|start_chat_turn$|create_conversation$)/.test(command)));
+    assert.deepEqual(writes,[]);assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.snapshot),original,'Automatic chart calculation must not modify records, recorded totals, cash, or position');
+    assert.deepEqual(fixture.externalRequests,[]);
+    assert.equal((await calls(page,'save_record')).length,0);
+    check('monthly-income-automatic-payouts-never-create-ledger-records-or-change-recorded-wallet-totals');
+    await page.setViewportSize({width:375,height:812});
+    opened=await explain('2026-07','focus');
+    const geometry=await opened.bubble.evaluate(element=>{const box=element.getBoundingClientRect();return {left:box.left,right:box.right,top:box.top,bottom:box.bottom,width:innerWidth,height:innerHeight};});
+    assert.ok(geometry.left>=11.5&&geometry.right<=geometry.width-11.5&&geometry.top>=11.5&&geometry.bottom<=geometry.height-11.5);
+    await noOverflow(page,'monthly-income-B3-375-no-outer-overflow');await captureExplanation(page,'mobile-monthly-income-B3');
+    check('monthly-income-B3-explanation-with-formula-and-dates-remains-inside-a-mobile-viewport');
+    await page.keyboard.press('Escape');await page.mouse.move(1,1);await page.setViewportSize({width:1440,height:1000});
+    await navigate(page,'FIIs e posições');await openTab(page,'Histórico');
+    await banner(page).getByRole('button',{name:'Novo lançamento',exact:true}).click();
+    const form=page.getByRole('dialog',{name:'Novo lançamento · ALFA11',exact:true});await form.waitFor();
+    await form.getByLabel('Mês de referência',{exact:true}).fill('2026-10');
+    await form.getByLabel('Cotas adicionadas',{exact:true}).fill('3');
+    await form.getByLabel('Preço por cota (R$)',{exact:true}).fill('12,50');
+    const date=form.getByLabel('Data da compra',{exact:true});await date.waitFor();
+    assert.equal(await date.getAttribute('type'),'date');assert.equal(await date.getAttribute('min'),'2026-10-01');assert.equal(await date.getAttribute('max'),'2026-10-31');
+    assert.equal(await date.evaluate(element=>element.required),true);
+    await form.getByRole('button',{name:'Salvar lançamento',exact:true}).click();
+    assert.equal((await calls(page,'save_record')).length,0);assert.equal(await date.evaluate(element=>element.validity.valueMissing),true);
+    await date.fill('2026-09-30');await form.getByRole('button',{name:'Salvar lançamento',exact:true}).click();
+    assert.equal((await calls(page,'save_record')).length,0);assert.equal(await date.evaluate(element=>element.validity.rangeUnderflow),true);
+    check('new-purchase-requires-an-exact-date-within-the-reference-month-before-saving');
+    await date.fill('2026-10-11');await form.getByRole('button',{name:'Salvar lançamento',exact:true}).click();await form.waitFor({state:'detached'});
+    const save=(await calls(page,'save_record')).at(-1).args;
+    assert.equal(save.walletId,'wallet-original');
+    assert.deepEqual({...save.input,id:undefined},{id:undefined,fundId:'income-alpha',month:'2026-10',purchaseDate:'2026-10-11',cotasAdded:'3',pricePerCota:'12.50',dividendPerCota:'0',dividendTotal:null,notes:''});
+    await dismissToast(page,'Lançamento salvo. Indicadores atualizados.');
+    await navigate(page,'FIIs e posições');await openTab(page,'Histórico');
+    const purchase=panel(page,'Histórico').locator('.purchases-table').getByRole('row').filter({has:page.locator('time[datetime="2026-10-11"]')});
+    await purchase.waitFor();await textEquals(purchase.locator('time[datetime="2026-10-11"]'),'11/10/2026');
+    check('new-purchase-sends-the-exact-ISO-date-and-displays-it-in-the-purchase-history');
+    await noUnexpectedCommands(page);assert.deepEqual(fixture.externalRequests,[]);await fixture.context.close();
+
+    const unknown=await openPage('income-api-date-required',{width:1440,height:1000},{expandedSidebar:false});
+    await openExtra(region(unknown.page,'Histórico de FIIs'));
+    const unknownMonth=unknown.page.locator('.ov-income-month[data-month="2026-07"] .def');await revealInViewport(unknownMonth);await unknownMonth.focus();
+    const unknownTip=unknown.page.getByRole('tooltip');await unknownTip.waitFor();
+    await textEquals(fundCell(unknownTip,'ALFA11'),'Informe a data da compra');
+    assert.match(await unknownTip.innerText(),/Informe o dia da compra no histórico.*direito ao provento.*meses seguintes continuam usando essas cotas/);
+    await textEquals(fundCell(unknownTip,'BETA11'),'R$ 1,00 B3 · automático');
+    assert.equal(await unknownTip.locator('.ov-income-events').filter({hasText:'ALFA11 · cálculo B3'}).count(),0,'Unknown eligibility cannot be displayed as zero entitled shares');
+    await captureExplanation(unknown.page,'desktop-monthly-income-date-required');
+    assert.equal((await calls(unknown.page,'save_record')).length,0);assert.deepEqual(unknown.externalRequests,[]);
+    check('monthly-income-purchase-without-a-day-requests-the-date-without-fabricating-an-API-payment');
+    await unknown.page.keyboard.press('Escape');await unknown.page.mouse.move(1,1);
+    await navigate(unknown.page,'FIIs e posições');await openTab(unknown.page,'Histórico');
+    const legacy=panel(unknown.page,'Histórico').locator('.purchases-table').locator('tbody > tr').filter({has:unknown.page.locator('time[datetime="2026-07"]')});
+    await legacy.getByRole('button',{name:/^Editar compra/}).click();
+    const legacyForm=unknown.page.getByRole('dialog',{name:'Editar lançamento · ALFA11',exact:true});await legacyForm.waitFor();
+    assert.equal(await legacyForm.getByLabel('Data da compra',{exact:true}).inputValue(),'');
+    assert.equal(await legacyForm.getByLabel('Data da compra',{exact:true}).evaluate(element=>element.required),false,'Unchanged legacy entries remain editable without inventing a purchase day');
+    await legacyForm.getByRole('button',{name:'Salvar lançamento',exact:true}).click();await legacyForm.waitFor({state:'detached'});
+    const legacySave=(await calls(unknown.page,'save_record')).at(-1).args.input;
+    assert.equal(legacySave.id,'alpha-july-purchase');assert.equal('purchaseDate' in legacySave,false);
+    check('legacy-purchase-edit-preserves-an-unknown-day-until-the-user-provides-it');
+    await noUnexpectedCommands(unknown.page);await unknown.context.close();
+  }
+
+  if(focusedIncomeApi){
+    await verifyAutomaticMonthlyIncome();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'income-api',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
   if(focusedIncome){
     await verifyMonthlyIncome();assert.deepEqual(browserErrors,[]);
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
@@ -1586,6 +1743,7 @@ try {
     console.log(JSON.stringify({status:'PASS',mode:'shell',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
   }
   await verifyMonthlyIncome();
+  await verifyAutomaticMonthlyIncome();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {

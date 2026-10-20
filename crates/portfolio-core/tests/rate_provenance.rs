@@ -262,6 +262,7 @@ fn schema_three_migration_preserves_cash_history_and_unchanged_outbox() {
         fund_id,
         month: "2020-01".into(),
         cotas_added: "10".into(),
+        purchase_date: None,
         price_per_cota: "9.91".into(),
         dividend_per_cota: "0.12".into(),
         dividend_total: Some("1.17".into()),
@@ -333,7 +334,7 @@ fn schema_three_migration_preserves_cash_history_and_unchanged_outbox() {
         upgraded
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        6
+        7
     );
     let provenance: (String, Option<String>, Option<String>) = upgraded
         .query_row(

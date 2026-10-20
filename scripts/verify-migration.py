@@ -8,6 +8,7 @@ import argparse
 from hashlib import sha256
 import json
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import uuid
@@ -45,7 +46,8 @@ def canonical(data):
     for fund in data['fiis']:
         entries = []
         for entry in fund.get('entries', []):
-            normalized = {'month': entry['month'], 'notes': entry.get('notes', '')}
+            normalized = {'month': entry['month'], 'notes': entry.get('notes', ''),
+                          'purchase_date': entry.get('purchase_date')}
             for key in numeric:
                 value = entry.get(key)
                 normalized[key] = None if value is None else Decimal(str(value))
@@ -59,6 +61,9 @@ def canonical(data):
 
 first = run_native()
 second = run_native()
+with sqlite3.connect((directory / 'portfolio.sqlite').as_uri() + '?mode=ro', uri=True) as connection:
+    assert connection.execute('PRAGMA user_version').fetchone()[0] == 7
+    assert 'purchase_date' in {row[1] for row in connection.execute('PRAGMA table_info(monthly_records)')}
 if first['migration']['alreadyImported'] or not second['migration']['alreadyImported']:
     raise AssertionError('A importação não foi idempotente.')
 if first['fundCount'] != second['fundCount'] or first['recordCount'] != second['recordCount']:
@@ -75,7 +80,7 @@ report = {
     'status': 'ok', 'fundCount': first['fundCount'], 'recordCount': first['recordCount'],
     'originalUnchanged': True, 'backupExact': True, 'exportEquivalent': True,
     'idempotent': True, 'sha256': fingerprint, 'dataDirectory': str(directory),
-    'sourcePath': str(source),
+    'sourcePath': str(source), 'schemaVersion': 7,
 }
 (root / '.local' / 'last-verification.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
 print(json.dumps({key: value for key, value in report.items() if key not in ('dataDirectory', 'sourcePath')}))

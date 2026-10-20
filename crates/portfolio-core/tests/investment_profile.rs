@@ -37,6 +37,7 @@ fn add_history(repo: &Repository) {
         fund_id: id,
         month: "2020-01".into(),
         cotas_added: "10".into(),
+        purchase_date: None,
         price_per_cota: "9.91".into(),
         dividend_per_cota: "0.12".into(),
         dividend_total: Some("1.17".into()),
@@ -389,7 +390,7 @@ fn schema_five_upgrade_is_additive_without_inventing_a_profile_or_rewriting_fina
     let version: u32 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     drop(db);
     let reopened = Repository::open_existing(path).unwrap();
     assert_eq!(reopened.export_legacy_json().unwrap(), export);

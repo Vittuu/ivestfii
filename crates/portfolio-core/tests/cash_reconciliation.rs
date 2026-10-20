@@ -336,6 +336,7 @@ fn schema_four_migration_is_additive_and_preserves_legacy_payloads_and_history()
         fund_id,
         month: "2020-01".into(),
         cotas_added: "10".into(),
+        purchase_date: None,
         price_per_cota: "9.91".into(),
         dividend_per_cota: "0.12".into(),
         dividend_total: Some("1.17".into()),
@@ -382,7 +383,7 @@ fn schema_four_migration_is_additive_and_preserves_legacy_payloads_and_history()
     let version: u32 = database
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let group: (Option<String>, Option<String>, Option<String>) = database
         .query_row(
             "SELECT total_deposits,total_withdrawals,balance_date FROM cash_pockets",
@@ -401,17 +402,17 @@ fn schema_four_migration_is_additive_and_preserves_legacy_payloads_and_history()
 }
 
 #[test]
-fn schema_newer_than_six_is_rejected_without_downgrading() {
+fn schema_newer_than_seven_is_rejected_without_downgrading() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("future.sqlite");
     drop(Repository::open(&path).unwrap());
     let db = Connection::open(&path).unwrap();
-    db.pragma_update(None, "user_version", 7).unwrap();
+    db.pragma_update(None, "user_version", 8).unwrap();
     drop(db);
     assert!(Repository::open_existing(&path).is_err());
     let db = Connection::open(path).unwrap();
     let version: u32 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 }

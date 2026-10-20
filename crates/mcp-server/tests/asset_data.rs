@@ -64,6 +64,7 @@ fn add_fund(repository: &Repository, ticker: &str) {
             id: None,
             fund_id,
             month: "2020-01".into(),
+            purchase_date: None,
             cotas_added: "3".into(),
             price_per_cota: "10".into(),
             dividend_per_cota: "0.1".into(),

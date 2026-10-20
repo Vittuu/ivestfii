@@ -38,6 +38,7 @@ fn record(fund_id: &str, month: &str, cotas: &str, dividend: &str) -> RecordInpu
         fund_id: fund_id.into(),
         month: month.into(),
         cotas_added: cotas.into(),
+        purchase_date: None,
         price_per_cota: "10".into(),
         dividend_per_cota: dividend.into(),
         dividend_total: None,

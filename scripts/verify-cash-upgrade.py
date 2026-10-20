@@ -90,15 +90,18 @@ for relative, state in before.items():
             rows = connection.execute(f'SELECT {columns} FROM "{quoted}" ORDER BY rowid').fetchall()
             assert rows == original['rows'], f'Uma coluna financeira existente mudou: {relative}/{table}'
         if 'cash_pockets' in state['tables']:
-            assert upgraded['version'] == 6
+            assert upgraded['version'] == 7
             assert added.issubset(upgraded['tables']['cash_pockets']['columns'])
+            assert 'purchase_date' in upgraded['tables']['monthly_records']['columns']
+            if 'purchase_date' not in state['tables']['monthly_records']['columns']:
+                assert connection.execute('SELECT COUNT(*) FROM monthly_records WHERE purchase_date IS NOT NULL').fetchone()[0] == 0, 'A atualização inventou datas de compras.'
             if not added.intersection(state['tables']['cash_pockets']['columns']):
                 assert connection.execute('SELECT COUNT(*) FROM cash_pockets WHERE total_deposits IS NOT NULL OR total_withdrawals IS NOT NULL OR balance_date IS NOT NULL').fetchone()[0] == 0, 'A atualização inventou dados de rendimento.'
         else:
             assert upgraded['version'] == state['version'], 'O catálogo mudou de versão inesperadamente.'
 
 report = {'status': 'ok', 'sourceUnchanged': True, 'existingFinancialColumnsUnchanged': True,
-    'legacyCashBasisNotInferred': True, 'walletsVerified': len(wallet_ids), 'schemaVersion': 6,
+    'legacyCashBasisNotInferred': True, 'legacyPurchaseDatesNotInferred': True, 'walletsVerified': len(wallet_ids), 'schemaVersion': 7,
     'verificationDirectory': str(destination)}
 (destination / 'report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
 print(json.dumps(report))

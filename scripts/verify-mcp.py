@@ -86,6 +86,11 @@ assert prepared['marketData']['status'] == 'unavailable'
 assert prepared['economicData']['refreshRequested'] is False
 assert prepared['news']['refreshRequested'] is False
 assert prepared['news']['status'] in ('unavailable', 'cached')
+assert prepared['dividendData']['refreshRequested'] is False
+assert prepared['dividendData']['status'] == 'unavailable'
+assert prepared['monthlyIncome']['status'] == 'calculated'
+assert len(prepared['monthlyIncome']['report']['months']) == 12
+assert all(point['apiAmount'] == '0' for point in prepared['monthlyIncome']['report']['months']), 'Sem cache público o MCP inventou renda de API.'
 assert prepared['analysis']['status'] == 'not-generated'
 assert responses['invalid']['result']['isError'] is True
 assert counts() == before, 'MCP alterou carteira ou fila de sincronização.'

@@ -11,9 +11,9 @@ use ivestfii_core::{
     RecordInput, Repository, WalletCatalog, WalletInput, DEFAULT_WALLET_ID,
 };
 use ivestfii_market_data::{
-    CdiHistoryService, CvmFundRequest, CvmPanel, CvmService, EconomicIndicator, EconomicPanel,
-    EconomicService, MarketDataSettings, MarketSettingsStore, NewsService, NewsSnapshot,
-    QuotePanel, QuoteService,
+    CdiHistoryService, CvmFundRequest, CvmPanel, CvmService, DividendPanel, DividendService,
+    EconomicIndicator, EconomicPanel, EconomicService, MarketDataSettings, MarketSettingsStore,
+    NewsService, NewsSnapshot, QuotePanel, QuoteService,
 };
 use ivestfii_runtime::{ChatRun, RunManager};
 use serde::{Deserialize, Serialize};
@@ -319,6 +319,44 @@ fn performance_today() -> chrono::NaiveDate {
 }
 
 #[tauri::command]
+fn get_dividend_cache(
+    state: State<AppState>,
+    wallet_id: Option<String>,
+) -> CommandResult<DividendPanel> {
+    let _operation = state.operations.begin()?;
+    let symbols = market_symbols(&state, wallet_id.as_deref())?;
+    DividendService::new(state.data_directory.join("public-data/dividends.json"))?
+        .read_cache(&symbols)
+}
+
+#[tauri::command]
+fn get_monthly_income(
+    state: State<AppState>,
+    wallet_id: Option<String>,
+    start_month: String,
+    end_month: String,
+) -> CommandResult<ivestfii_core::income::MonthlyIncomeReport> {
+    let _operation = state.operations.begin()?;
+    let snapshot = selected_repository(&state, wallet_id.as_deref())?
+        .snapshot()
+        .map_err(|error| error.to_string())?;
+    let symbols = snapshot_symbols(&snapshot)?;
+    let panel = DividendService::new(state.data_directory.join("public-data/dividends.json"))
+        .and_then(|service| service.read_cache(&symbols))
+        .unwrap_or_default();
+    // Cached public events supply the rate/date. The calculation is ephemeral:
+    // it never inserts a receipt or changes the user's recorded purchases.
+    ivestfii_core::income::calculate_monthly_income(
+        &snapshot,
+        &ivestfii_market_data::dividends::income_events(&panel),
+        &start_month,
+        &end_month,
+        performance_today(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_fii_performance(
     state: State<AppState>,
     wallet_id: Option<String>,
@@ -450,6 +488,7 @@ fn public_source_url(value: &str) -> CommandResult<String> {
                     | "dados.cvm.gov.br"
                     | "sistemas.cvm.gov.br"
                     | "fnet.bmfbovespa.com.br"
+                    | "sistemaswebb3-listados.b3.com.br"
             )
         )
         || !url.username().is_empty()
@@ -1354,6 +1393,8 @@ pub fn run() {
             save_cvm_mapping,
             get_quote_cache,
             refresh_quotes,
+            get_dividend_cache,
+            get_monthly_income,
             get_fii_performance,
             refresh_fii_performance,
             get_cvm_cache,
@@ -1473,6 +1514,7 @@ mod tests {
         for url in [
             "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4389/dados/ultimos/1?formato=json",
             "https://agenciabrasil.ebc.com.br/economia/noticia/2026-10/exemplo",
+            "https://sistemaswebb3-listados.b3.com.br/fundsListedProxy/Search/GetEventsCorporateActions/exemplo",
         ] {
             assert_eq!(public_source_url(url).unwrap(), url);
         }
@@ -1483,6 +1525,7 @@ mod tests {
             "mailto:teste@example.com",
             "https://example.com/?fonte=api.bcb.gov.br",
             "https://api.bcb.gov.br.example.com/",
+            "https://sistemaswebb3-listados.b3.com.br.example.com/",
             "https://api.bcb.gov.br@evil.example/",
             "https://user:secret@api.bcb.gov.br/",
             "https://api.bcb.gov.br:8080/",

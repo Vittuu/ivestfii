@@ -18,6 +18,20 @@ Falhas de autenticação, recurso não incluído, limite e rede são distintas. 
 
 Uma leitura local não repara arquivos inválidos. Em uma consulta permitida pela política de atualização, um cache inválido de até 2 MiB pode ser reconstruído somente se pelo menos uma cotação nova for validada. Antes da substituição é preservada uma cópia exata `quotes.corrupt-UUID.json` na pasta pública local; valores antigos inválidos nunca são reaproveitados. Se toda a consulta falhar, o arquivo original permanece intacto. Um controle separado `quotes.recovery-backoff.json` conserva um eventual novo `Retry-After` mesmo nessa falha, compartilhado com o MCP. Arquivos maiores ou falhas de leitura continuam com diagnóstico, sem cópia ilimitada nem reconstrução automática.
 
+## Proventos históricos gratuitos da B3
+
+O gráfico mensal preenche lacunas com a consulta pública usada pela [página oficial de fundos da B3](https://sistemaswebb3-listados.b3.com.br/fundsListedPage/events-main/MXRF), sem chave. O endpoint `fundsListedProxy/Search/GetEventsCorporateActions` recebe somente o código público do fundo. Quantidades, datas de compra e dados da carteira ficam no computador. A integração foi validada para MXRF11, VGHF11, VGIA11 e XPML11. O serviço pertence ao site público da B3 e pode mudar sem aviso; não há SLA de API contratado.
+
+São conservados o valor decimal por cota, a data-com, a data do pagamento e o ISIN. Recibos de subscrição e amortizações não são tratados como rendimento das cotas normais. O mês do gráfico é o mês do pagamento. A quantidade elegível soma as compras até a data-com, inclusive. As cotas anteriores continuam valendo sem novos lançamentos; o aplicativo não repete o valor do provento do mês anterior.
+
+Compras novas pedem o dia da compra, no mesmo mês de referência. Os registros antigos continuam sem data exata quando ela não era conhecida. Se uma compra antiga estiver no mês da data-com e faltar o dia, o aplicativo pede essa data em vez de presumir o direito. Compras de meses anteriores continuam disponíveis para calcular o pagamento. Um rendimento mensal informado pelo usuário tem prioridade sobre a consulta, inclusive um total explicitamente igual a zero.
+
+O gráfico distingue os cálculos automáticos dos valores do histórico, com fórmula, cotas elegíveis, data-com, pagamento e fonte na explicação de cada mês. Valores da B3 são cálculos de proventos devidos; não criam lançamentos nem confirmam crédito na corretora. Os totais contábeis dos recebimentos registrados permanecem baseados no histórico do usuário.
+
+A abertura do aplicativo atualiza o cache de proventos quando necessário. Navegar e passar o mouse usam somente dados locais. O cache dura 24 horas, com no máximo 40 consultas B3 por dia em Brasília, compartilhadas entre carteiras, MCP e aplicativo. Falhas têm intervalo mínimo de cinco minutos; HTTP 429 respeita `Retry-After`. Dados salvos são mantidos durante falhas. A B3 retorna uma janela recente de eventos, observada em torno de doze meses; ausência de evento fora da cobertura não vira rendimento zero.
+
+A [API de dividendos de FIIs da brapi](https://brapi.dev/docs/fiis/dividendos) e a de [outros fundos](https://brapi.dev/docs/fundos/dividendos) exigem plano Pro para cobrir a carteira completa. Por isso, o preenchimento gratuito usa a fonte B3 e não consome a cota de requisições da chave brapi.
+
 ## Informes da CVM
 
 O conector usa os [informes mensais estruturados dos FIIs](https://dados.cvm.gov.br/dataset/fii-doc-inf_mensal), os [informes mensais FIAGRO](https://dados.cvm.gov.br/dataset/fiagro-doc-inf_mensal) e o [cadastro de fundos e classes](https://dados.cvm.gov.br/dataset/fi-cad), sem chave. Baixa os arquivos oficiais e filtra localmente: nenhum saldo, carteira, ticker ou CNPJ é enviado em parâmetros para a CVM.

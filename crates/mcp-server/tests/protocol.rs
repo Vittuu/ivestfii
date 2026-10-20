@@ -21,6 +21,7 @@ fn fixture() -> (tempfile::TempDir, McpServer, String) {
             id: None,
             fund_id,
             month: "2025-01".into(),
+            purchase_date: None,
             cotas_added: "10".into(),
             price_per_cota: "100".into(),
             dividend_per_cota: "1".into(),
@@ -108,6 +109,7 @@ fn handshake_is_required_and_preserves_string_or_zero_ids() {
         "refreshNews",
         "refreshQuotes",
         "refreshCvmData",
+        "refreshDividends",
         "refreshPublicDataIfDue",
     ] {
         assert_eq!(

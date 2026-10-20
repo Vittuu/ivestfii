@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 pub mod cdi_history;
 pub mod cvm;
+pub mod dividends;
 pub mod news;
 pub mod performance;
 pub mod public_refresh;
@@ -30,6 +31,7 @@ mod refresh_policy;
 pub mod settings;
 pub use cdi_history::{CdiHistoryService, CdiHistorySnapshot};
 pub use cvm::{CvmFundRequest, CvmPanel, CvmService};
+pub use dividends::{DividendPanel, DividendService};
 pub use news::{NewsItem, NewsService, NewsSnapshot};
 pub use quotes::{QuotePanel, QuoteService};
 pub use refresh_policy::RefreshOutcome;

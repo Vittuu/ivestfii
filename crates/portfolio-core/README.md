@@ -16,6 +16,17 @@ Biblioteca Rust independente de Tauri, reutilizável por desktop, MCP e API.
   mesmo mês e os mesmos valores. A edição usa o ID do lançamento.
 - `dividend_total` explícito é preservado, incluindo zero e casas decimais
   adicionais. `null` continua identificando um valor calculado automaticamente.
+- O esquema SQLite 7 acrescenta somente `monthly_records.purchase_date`,
+  anulável. Os registros existentes continuam sem uma data de compra inferida,
+  e a migração não reescreve valores, revisões ou a fila de sincronização.
+- `RecordInput.purchaseDate` e `MonthlyEntry.purchaseDate` são opcionais. A
+  data informada precisa ser válida em `AAAA-MM-DD`, pertencer ao mês do
+  lançamento e acompanhar uma quantidade positiva de cotas compradas. Ela
+  permite conferir a elegibilidade em eventos com data de corte. Não altera
+  automaticamente totais explícitos ou os cálculos mensais do histórico antigo.
+- O backup legado usa `purchase_date` somente quando há uma data informada.
+  Backups e entradas antigos continuam compatíveis, sem acrescentar campos
+  ausentes ou inventar dias de compra.
 - `export_legacy_json()` retorna o esquema legado com números JSON decimais,
   sem conversão por ponto flutuante. O backup preserva também formatação e
   quaisquer campos extras que o esquema do aplicativo ainda não interpreta.
@@ -92,3 +103,26 @@ existentes exigem o ID explícito para proteger os metadados.
 
 Os testes usam apenas dados sintéticos e diretórios
 temporários: `cargo test -p ivestfii-core`.
+
+## Proventos publicados por data
+
+`income::calculate_monthly_income(snapshot, events, start_month, end_month,
+today)` produz uma série mensal derivada, sem gravar recibos ou alterar
+`monthly_records`, os totais contábeis e a fila de sincronização. O intervalo
+inclui seus dois meses, limita-se a 1200 meses e não admite meses futuros.
+
+Um total informado pelo usuário, inclusive zero, ou um rendimento por cota
+positivo com cotas no histórico tem prioridade sobre a API no mesmo fundo/mês.
+Sem esse registro, cada `IncomeEvent` multiplica o valor publicado por cota
+pelas compras até sua **data-com**, inclusive, e entra no mês do pagamento.
+As cotas continuam nos meses seguintes sem exigir novas compras. Compras do
+mesmo mês da data-com sem dia informado tornam o evento `date_required`;
+compras de meses anteriores permanecem elegíveis. Eventos incompletos, futuros
+ou com o mesmo ID e dados financeiros conflitantes não completam lacunas.
+
+O relatório inclui cotas no mês, cotas elegíveis por evento, fonte, URL,
+data-com, data de pagamento e motivos de ausência. Valores de API são
+calculados a partir de informações públicas, sem confirmar um crédito na
+corretora. `amount: null` distingue informação ausente de zero. Um mês
+incompleto mantém `total: null`, expondo somente `knownTotal`, `recordedAmount`
+e `apiAmount` como subtotais conhecidos, além das contagens por origem.

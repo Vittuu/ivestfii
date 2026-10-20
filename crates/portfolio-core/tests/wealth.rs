@@ -30,6 +30,7 @@ fn wallet_summary_keeps_fii_cost_and_cash_balances_separate() {
                 fund_id: fund.id,
                 month: "2026-01".into(),
                 cotas_added: "1".into(),
+                purchase_date: None,
                 price_per_cota: cost.into(),
                 dividend_per_cota: "0".into(),
                 dividend_total: None,

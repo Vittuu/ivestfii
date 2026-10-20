@@ -1,12 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { call, desktop, errorMessage } from './bridge';
-import type { CvmPanel, EconomicPanel, MarketDataSettings, NewsSnapshot, PublicDataRefresh, PublicDataSourceState, QuotePanel, Snapshot } from './bridge';
+import type { CvmPanel, DividendPanel, EconomicPanel, MarketDataSettings, NewsSnapshot, PublicDataRefresh, PublicDataSourceState, QuotePanel, Snapshot } from './bridge';
 
 export const emptyQuotes: QuotePanel = { items: [], fetchedAt: null, credentialConfigured: false, errors: [] };
 export const emptyCvm: CvmPanel = { items: [], fetchedAt: null, errors: [] };
+export const emptyDividends: DividendPanel = { items: [], fetchedAt: null, errors: [] };
 export const emptyEconomics: EconomicPanel = { indicators: [], errors: [] };
 type Source = 'economics' | 'news' | 'quotes' | 'cvm';
-interface CacheData { economics: EconomicPanel | null; news: NewsSnapshot | null; quotes: QuotePanel; cvm: CvmPanel }
+interface CacheData { economics: EconomicPanel | null; news: NewsSnapshot | null; quotes: QuotePanel; cvm: CvmPanel; dividends: DividendPanel }
 interface State extends CacheData {
   walletId: string; loading: boolean; refreshing: boolean; revision: number;
   error: string; sources: PublicDataSourceState[]; checkedAt: string | null;
@@ -20,7 +21,7 @@ interface PublicData extends State {
   configurationChanged: (settings?: MarketDataSettings) => void;
 }
 
-const initial = (walletId = ''): State => ({ walletId, economics: null, news: null, quotes: emptyQuotes, cvm: emptyCvm, loading: desktop, refreshing: false, revision: 0, error: '', sources: [], checkedAt: null });
+const initial = (walletId = ''): State => ({ walletId, economics: null, news: null, quotes: emptyQuotes, cvm: emptyCvm, dividends: emptyDividends, loading: desktop, refreshing: false, revision: 0, error: '', sources: [], checkedAt: null });
 // Only in-flight reads are shared. Finished reads are never reused over newer native caches.
 const reads = new Map<string, Promise<unknown>>();
 export function readPublicCache<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -54,12 +55,14 @@ async function caches(walletId: string) {
     readPublicCache<NewsSnapshot | null>('get_news_cache'),
     readPublicCache<QuotePanel>('get_quote_cache', { walletId }),
     readPublicCache<CvmPanel>('get_cvm_cache', { walletId }),
+    readPublicCache<DividendPanel>('get_dividend_cache', { walletId }),
   ]);
   const data: Partial<CacheData> = {};
   if (results[0].status === 'fulfilled') data.economics = results[0].value;
   if (results[1].status === 'fulfilled') data.news = results[1].value;
   if (results[2].status === 'fulfilled') data.quotes = results[2].value;
   if (results[3].status === 'fulfilled') data.cvm = results[3].value;
+  if (results[4].status === 'fulfilled' && results[4].value) data.dividends = results[4].value;
   return { data, failed: results.some((result) => result.status === 'rejected') };
 }
 
@@ -144,7 +147,7 @@ export function usePublicDataController(walletId: string, snapshot: Snapshot, re
         const latest = await caches(walletId);
         if (!valid()) return;
         setState((previous) => {
-          const next = { economics: result.economics ?? previous.economics, news: result.news ?? previous.news, quotes: result.quotes, cvm: result.cvm, ...latest.data };
+          const next = { economics: result.economics ?? previous.economics, news: result.news ?? previous.news, quotes: result.quotes, cvm: result.cvm, dividends: result.dividends ?? previous.dividends, ...latest.data };
           for (const source of ['economics', 'news', 'quotes', 'cvm'] as const) if (versions[source] !== manualVersions.current[source]) delete (next as Partial<CacheData>)[source];
           return { ...previous, ...next, sources: result.sources, checkedAt: result.checkedAt, walletId, loading: false, error: '', revision: previous.revision + 1 };
         });

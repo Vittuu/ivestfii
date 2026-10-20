@@ -95,6 +95,7 @@
 .portfolio-page .other-records-table { min-width: 460px; }
 .portfolio-page :is(.purchases-table, .income-table) .month-cell { width: 108px; }
 .portfolio-page :is(.purchases-table, .income-table) .month-cell time { color: var(--text-2); }
+.portfolio-page .ledger-purchase-date { display: block; margin-top: 3px; font-size: var(--fs-11); }
 .portfolio-page .purchases-table tbody td.num { color: var(--accent); }
 .portfolio-page .income-table tbody td.ledger-received { color: var(--pos); }
 .portfolio-page .ledger-empty { padding: var(--sp-2) var(--sp-4) var(--sp-4); font-size: var(--fs-13); color: var(--text-2); }

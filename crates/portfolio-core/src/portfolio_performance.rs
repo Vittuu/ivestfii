@@ -329,6 +329,7 @@ mod tests {
             id: id.into(),
             month: month.into(),
             cotas_added: quantity.into(),
+            purchase_date: None,
             price_per_cota: price.into(),
             dividend_per_cota: "0".into(),
             dividend_total: Some(income.into()),

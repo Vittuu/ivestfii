@@ -1,7 +1,7 @@
-import type { Fund } from './bridge';
+import type { Fund, MonthlyIncomeEvent, MonthlyIncomeReport } from './bridge';
 import { ledgerRows } from './ledger.ts';
 
-export type MonthlyFundIncomeStatus = 'recorded' | 'computed' | 'missing' | 'not-held';
+export type MonthlyFundIncomeStatus = 'recorded' | 'computed' | 'api' | 'date-required' | 'missing' | 'not-held';
 
 export interface MonthlyFundIncome {
   id: string;
@@ -17,6 +17,8 @@ export interface MonthlyFundIncome {
   incomeRecordCount: number;
   recordedRecordCount: number;
   computedRecordCount: number;
+  apiEvents?: MonthlyIncomeEvent[];
+  reasons?: string[];
 }
 
 export interface MonthlyIncomePoint {
@@ -35,6 +37,38 @@ export interface MonthlyIncomePoint {
   expectedFunds: string[];
   missingFunds: string[];
   funds: MonthlyFundIncome[];
+  apiFundCount?: number;
+}
+
+/** Native calculation uses real cutoff/payment dates. Manual records retain priority. */
+export function applyMonthlyIncomeReport(points: MonthlyIncomePoint[], report: MonthlyIncomeReport): MonthlyIncomePoint[] {
+  return points.map((point) => {
+    const month = report.months.find((item) => item.month === point.key);
+    if (!month) return point;
+    const funds = point.funds.map((fund): MonthlyFundIncome => {
+      const item = month.funds.find((value) => value.fundId === fund.id);
+      if (!item) return fund;
+      // A cache-only response without API coverage must retain the local ledger presentation.
+      if (item.status === 'recorded') return { ...fund, income: item.amount, held: item.holdings };
+      return {
+        ...fund,
+        held: item.holdings,
+        income: item.status === 'not_held' ? null : item.amount,
+        status: item.status === 'not_held' ? 'not-held' : item.status === 'date_required' ? 'date-required' : item.status,
+        apiEvents: item.events,
+        reasons: item.reasons,
+      };
+    });
+    const incomeFunds = funds.filter((fund) => fund.income !== null).map((fund) => fund.ticker);
+    const total = sumExact(funds.flatMap((fund) => fund.income === null ? [] : [fund.income]));
+    return {
+      ...point, total, value: Number(total), funds,
+      incomeRecorded: incomeFunds.length, incomeFunds,
+      expectedFunds: funds.filter((fund) => fund.status !== 'not-held').map((fund) => fund.ticker),
+      missingFunds: funds.filter((fund) => fund.status === 'missing' || fund.status === 'date-required').map((fund) => fund.ticker),
+      apiFundCount: funds.filter((fund) => fund.status === 'api').length,
+    };
+  });
 }
 
 /** Sum values already validated/calculated by ledgerRows without Number rounding. */

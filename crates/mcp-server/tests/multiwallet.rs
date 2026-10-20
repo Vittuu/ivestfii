@@ -34,6 +34,7 @@ fn position(repository: &Repository, shares: &str) -> String {
             id: None,
             fund_id: id.clone(),
             month: "2026-01".into(),
+            purchase_date: None,
             cotas_added: shares.into(),
             price_per_cota: "10".into(),
             dividend_per_cota: "1".into(),

@@ -22,11 +22,12 @@ pub(crate) fn definitions() -> Vec<Value> {
     let wallet_field = json!({"type":"string","minLength":1,"maxLength":100,"description":"ID do catálogo de carteiras. Omitir usa a carteira selecionada pelo chat nesta sessão. IDs desconhecidos geram erro; não há fallback."});
     let mut analysis_fields = context_fields.clone();
     analysis_fields["walletId"] = wallet_field.clone();
-    analysis_fields["refreshPublicDataIfDue"] = json!({"type":"boolean","default":false,"description":"Opt-in para verificar as mesmas fontes/caches públicos do aplicativo e atualizar só o que estiver ausente ou vencido, respeitando orçamento, cadência, timeout e intervalo de novas tentativas. Inclui histórico diário CDI quando necessário ao desempenho. Não envia perfil, valores da carteira nem conversa às fontes. Omitir mantém somente leitura local."});
+    analysis_fields["refreshPublicDataIfDue"] = json!({"type":"boolean","default":false,"description":"Opt-in para verificar as mesmas fontes/caches públicos do aplicativo e atualizar só o que estiver ausente ou vencido, respeitando orçamento, cadência, timeout e intervalo de novas tentativas. Inclui histórico diário CDI quando necessário ao desempenho e eventos de proventos B3 para o gráfico mensal. Não envia perfil, valores da carteira nem conversa às fontes. Omitir mantém somente leitura local."});
     analysis_fields["refreshEconomicData"] = json!({"type":"boolean","default":false,"description":"Consultar explicitamente as últimas referências BCB disponíveis (CDI, Selic, IPCA). Sem isso lê somente cache local, com datas/erros."});
     analysis_fields["refreshNews"] = json!({"type":"boolean","default":false,"description":"Atualizar explicitamente manchetes de economia da Agência Brasil. Sem isso lê somente cache; não pesquisa um FII específico."});
     analysis_fields["refreshQuotes"] = json!({"type":"boolean","default":false,"description":"Consultar cotações básicas brapi dos símbolos cadastrados e da posição importada da carteira selecionada. Usa a chave local, nunca retorna a chave. Cobertura/limites dependem do plano, com status por símbolo; preços possuem horário próprio e não alteram a carteira. Sem esta opção lê cache."});
     analysis_fields["refreshCvmData"] = json!({"type":"boolean","default":false,"description":"Consultar informes mensais oficiais CVM para FII e FIAGRO vinculados pelo CNPJ atual do fundo/classe. fundType diferencia os tipos e sourceUrl identifica a base correspondente. Sem CNPJ verificado retorna mapping_required, sem tentar adivinhar. Competência, entrega e coleta são distintas; VP não é preço de mercado. Sem esta opção lê cache."});
+    analysis_fields["refreshDividends"] = json!({"type":"boolean","default":false,"description":"Consultar eventos públicos de proventos B3 para os símbolos da carteira, com cache de 24 horas e orçamento próprio. Sem chave, sem envio de cotas ou saldos. Taxa por cota, data-com e data de pagamento são distintas; monthlyIncome calcula lacunas sem criar lançamentos. Sem esta opção lê cache."});
     [
         (
             NAMES[0],
@@ -58,7 +59,7 @@ pub(crate) fn definitions() -> Vec<Value> {
         (
             NAMES[3],
             "Preparar análise da carteira",
-            "Reúne perfil cadastrado, completude, FIIs, caixinhas, desempenho completo, histórico CDI, contexto e fontes datadas. Para análise atual use refreshPublicDataIfDue:true: mesmos caches e política do aplicativo, atualização pública limitada só se necessária. Flags anteriores permitem consulta explícita BCB/notícias/cotações/CVM. Todas opcionais false: somente cache local. Confira profileCompleteness; pergunte por risco, objetivos, prazos, liquidez e reserva ausentes antes de sugestões personalizadas; nunca infira perfil pelos ativos. Cite fontes, horários e competências; não some cotações, histórico ou caixinhas à posição importada. Prepara dados sem gerar recomendação nem executar ordens.",
+            "Reúne perfil cadastrado, completude, FIIs, caixinhas, desempenho completo, histórico CDI, proventos B3, renda mensal calculada, contexto e fontes datadas. Para análise atual use refreshPublicDataIfDue:true: mesmos caches e política do aplicativo, atualização pública limitada só se necessária. Flags anteriores permitem consulta explícita BCB/notícias/cotações/CVM/proventos B3. Todas opcionais false: somente cache local. Confira profileCompleteness; pergunte por risco, objetivos, prazos, liquidez e reserva ausentes antes de sugestões personalizadas; nunca infira perfil pelos ativos. Cite fontes, horários e competências; não some cotações, histórico ou caixinhas à posição importada. Prepara dados sem gerar recomendação nem executar ordens.",
             schema(analysis_fields, &[]),
         ),
     ]
@@ -294,6 +295,7 @@ pub(crate) fn execute(
                     "refreshNews",
                     "refreshQuotes",
                     "refreshCvmData",
+                    "refreshDividends",
                     "refreshPublicDataIfDue",
                 ],
             )?;
@@ -301,6 +303,7 @@ pub(crate) fn execute(
             let refresh_news = boolean_argument(arguments, "refreshNews")?;
             let refresh_quotes = boolean_argument(arguments, "refreshQuotes")?;
             let refresh_cvm = boolean_argument(arguments, "refreshCvmData")?;
+            let refresh_dividends = boolean_argument(arguments, "refreshDividends")?;
             let refresh_if_due = boolean_argument(arguments, "refreshPublicDataIfDue")?;
             let wallet_id = wallet_id(arguments, default_wallet_id)?;
             let id = conversation_id(arguments, false)?;
@@ -340,11 +343,18 @@ pub(crate) fn execute(
                 json!({"requested":false,"checkedAt":null,"sources":[],"error":null})
             };
             let mut external = public_data.collect(refresh_economics, refresh_news);
-            let assets = public_data.collect_assets(&symbols, refresh_quotes, refresh_cvm);
+            let assets = public_data.collect_assets(
+                &symbols,
+                refresh_quotes,
+                refresh_cvm,
+                refresh_dividends,
+            );
             external["marketData"] = assets["marketData"].clone();
             external["cvmData"] = assets["cvmData"].clone();
+            external["dividendData"] = assets["dividendData"].clone();
             external["cdiHistory"] = public_data.cdi_history();
             let performance = public_data.performance_context(&snapshot);
+            let monthly_income = public_data.monthly_income_context(&snapshot);
             if let Some(conversation) = id {
                 record_public_sources(assistant, conversation, &external)?;
             }
@@ -363,6 +373,7 @@ pub(crate) fn execute(
                 "investorProfile":profile,
                 "profileCompleteness":profile_completeness,
                 "performance":performance,
+                "monthlyIncome":monthly_income,
                 "cdiHistory":external["cdiHistory"],
                 "publicDataRefresh":refresh,
                 "context":context,
@@ -379,6 +390,7 @@ pub(crate) fn execute(
                 },
                 "marketData":external["marketData"],
                 "cvmData":external["cvmData"],
+                "dividendData":external["dividendData"],
                 "economicData":external["economicData"],
                 "news":external["news"],
                 "analysis":{"status":"not-generated","reason":"Esta ferramenta reúne dados locais e referências públicas; a análise vem do modelo escolhido no chat."},
@@ -595,6 +607,27 @@ fn record_public_sources(
                             Some(&metadata),
                         )
                         .map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+    if let Some(items) = external
+        .pointer("/dividendData/items")
+        .and_then(Value::as_array)
+    {
+        for item in items {
+            let observation = &item["observation"];
+            if let (Some(symbol), Some(url), Some(fetched_at)) = (
+                item["symbol"].as_str(),
+                observation["sourceUrl"].as_str(),
+                observation["fetchedAt"].as_str(),
+            ) {
+                let title = format!("{symbol} · proventos B3 · coleta {fetched_at}");
+                if existing.insert((title.clone(), url.into())) {
+                    let metadata = json!({"fetchedAt":fetched_at,"eventCount":observation["events"].as_array().map_or(0,Vec::len),"interpretation":"Eventos por cota; conferir data-com e pagamento em dividendData e monthlyIncome. Não é confirmação de crédito."}).to_string();
+                    assistant
+                        .add_source(conversation, None, &title, url, Some("B3"), Some(&metadata))
+                        .map_err(|error| error.to_string())?;
                 }
             }
         }

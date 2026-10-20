@@ -1,14 +1,14 @@
 //! Explicit public-data reads. Portfolio, conversation and wallet identifiers
 //! are never transmitted to these fixed-source services.
-use chrono::{FixedOffset, Utc};
+use chrono::{FixedOffset, Months, Utc};
 use ivestfii_core::PortfolioSnapshot;
 use ivestfii_market_data::{
     public_refresh::{refresh_if_due, PublicDataRequest},
     CdiHistoryService,
 };
 use ivestfii_market_data::{
-    CvmFundRequest, CvmPanel, CvmService, EconomicPanel, EconomicService, MarketSettingsStore,
-    NewsService, NewsSnapshot, QuotePanel, QuoteService,
+    CvmFundRequest, CvmPanel, CvmService, DividendPanel, DividendService, EconomicPanel,
+    EconomicService, MarketSettingsStore, NewsService, NewsSnapshot, QuotePanel, QuoteService,
 };
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -88,6 +88,43 @@ impl PublicData {
             }
             Ok(None) => json!({"status":"unavailable","history":null,"error":null}),
             Err(error) => json!({"status":"unavailable","history":null,"error":error}),
+        }
+    }
+
+    /// Same exact monthly calculation as the desktop chart, using only saved
+    /// public events. Missing payments never become new accounting entries.
+    pub fn monthly_income_context(&self, snapshot: &PortfolioSnapshot) -> Value {
+        let today = Utc::now()
+            .with_timezone(&FixedOffset::west_opt(3 * 3600).expect("Brasília offset"))
+            .date_naive();
+        let start = today
+            .checked_sub_months(Months::new(11))
+            .expect("recent month range")
+            .format("%Y-%m")
+            .to_string();
+        let end = today.format("%Y-%m").to_string();
+        let symbols = snapshot
+            .funds
+            .iter()
+            .map(|fund| fund.ticker.clone())
+            .collect::<Vec<_>>();
+        let cache = DividendService::new(self.directory.join("dividends.json"))
+            .and_then(|service| service.read_cache(&symbols));
+        let source_error = cache.as_ref().err().cloned();
+        let panel = cache.unwrap_or_default();
+        let result = ivestfii_core::income::calculate_monthly_income(
+            snapshot,
+            &ivestfii_market_data::dividends::income_events(&panel),
+            &start,
+            &end,
+            today,
+        )
+        .map_err(|error| error.to_string());
+        match result {
+            Ok(report) => {
+                json!({"status":"calculated","report":report,"sourceError":source_error,"interpretation":"Rendimentos mensais: lançamentos do usuário prevalecem; lacunas podem usar eventos oficiais por cota e cotas elegíveis na data-com. O mês é o pagamento. Sem nova compra, mantêm-se as cotas anteriores. Compras sem data dentro do mês da data-com exigem confirmação. api identifica cálculo por evento público, não confirmação de crédito nem novo lançamento. total nulo significa cobertura incompleta; knownTotal soma somente valores conhecidos. Não repita a taxa do mês anterior e não some este relatório novamente aos dividendos registrados do desempenho."})
+            }
+            Err(error) => json!({"status":"unavailable","report":null,"error":error}),
         }
     }
 
@@ -227,6 +264,7 @@ impl PublicData {
         symbols: &[String],
         refresh_quotes: bool,
         refresh_cvm: bool,
+        refresh_dividends: bool,
     ) -> Value {
         let root = self.directory.parent().expect("public-data has a parent");
         let settings = MarketSettingsStore::new(root);
@@ -251,6 +289,7 @@ impl PublicData {
             .collect();
         let quote_service = QuoteService::new(self.directory.join("quotes.json"));
         let cvm_service = CvmService::new(self.directory.join("cvm-funds.json"));
+        let dividend_service = DividendService::new(self.directory.join("dividends.json"));
         let quote_cache = quote_service
             .as_ref()
             .map_err(Clone::clone)
@@ -268,6 +307,14 @@ impl PublicData {
             fetched_at: None,
             errors: vec![error],
         });
+        let mut dividends = dividend_service
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|service| service.read_cache(symbols))
+            .unwrap_or_else(|error| DividendPanel {
+                errors: vec![error],
+                ..Default::default()
+            });
         quotes.set_credential_presence(key.is_some());
         if let Some(error) = key_error {
             quotes.errors.push(error);
@@ -275,7 +322,7 @@ impl PublicData {
         if let Some(error) = mapping_error {
             cvm.errors.push(error);
         }
-        if refresh_quotes || refresh_cvm {
+        if refresh_quotes || refresh_cvm || refresh_dividends {
             let query_symbols = symbols.to_vec();
             // Embedded CLIs may already own a runtime. Use a bounded worker;
             // tool stdio remains JSON-RPC and no model subprocess is invoked.
@@ -288,11 +335,14 @@ impl PublicData {
                     let cvm_task = async {
                         if refresh_cvm { Some(match cvm_service { Ok(service) => tokio::time::timeout(std::time::Duration::from_secs(45), service.refresh(&funds)).await.unwrap_or_else(|_| Err("A consulta CVM excedeu 45 segundos. Os dados salvos foram preservados.".into())), Err(error) => Err(error) }) } else { None }
                     };
-                    Ok(tokio::join!(quote_task, cvm_task))
+                    let dividend_task = async {
+                        if refresh_dividends { Some(match dividend_service { Ok(service) => tokio::time::timeout(std::time::Duration::from_secs(45), service.refresh(&query_symbols)).await.unwrap_or_else(|_| Err("A consulta de proventos excedeu 45 segundos. Os eventos salvos foram preservados.".into())), Err(error) => Err(error) }) } else { None }
+                    };
+                    Ok(tokio::join!(quote_task, cvm_task, dividend_task))
                 })
             }).join().unwrap_or_else(|_| Err("A consulta das fontes foi interrompida.".into()));
             match result {
-                Ok((quote_result, cvm_result)) => {
+                Ok((quote_result, cvm_result, dividend_result)) => {
                     if let Some(result) = quote_result {
                         match result {
                             Ok(panel) => quotes = panel,
@@ -305,13 +355,22 @@ impl PublicData {
                             Err(error) => cvm.errors.push(error),
                         }
                     }
+                    if let Some(result) = dividend_result {
+                        match result {
+                            Ok(panel) => dividends = panel,
+                            Err(error) => dividends.errors.push(error),
+                        }
+                    }
                 }
                 Err(error) => {
                     if refresh_quotes {
                         quotes.errors.push(error.clone());
                     }
                     if refresh_cvm {
-                        cvm.errors.push(error);
+                        cvm.errors.push(error.clone());
+                    }
+                    if refresh_dividends {
+                        dividends.errors.push(error);
                     }
                 }
             }
@@ -327,7 +386,12 @@ impl PublicData {
         reports["status"] = json!(panel_status(&reports, "report"));
         reports["refreshRequested"] = json!(refresh_cvm);
         reports["interpretation"] = json!("Informes mensais de FII e FIAGRO da CVM, associados pelo CNPJ atual do fundo/classe verificado ou informado pelo usuário. fundType distingue FII de FIAGRO e sourceUrl identifica a base oficial correspondente. referenceDate é a competência, filedAt a entrega e fetchedAt a coleta. VP por cota é patrimônio contábil, não cotação de mercado. Informes podem sofrer reapresentações; não combine dados de classes ou versões diferentes. Outros tipos continuam explicitamente não atendidos. Dados ausentes não são zero e não alteram a carteira.");
-        json!({"marketData":market,"cvmData":reports})
+        let mut income = serde_json::to_value(&dividends)
+            .unwrap_or_else(|_| json!({"items":[],"errors":["Falha ao preparar proventos."]}));
+        income["status"] = json!(panel_status(&income, "observation"));
+        income["refreshRequested"] = json!(refresh_dividends);
+        income["interpretation"] = json!("Eventos públicos B3, separados dos lançamentos financeiros. Confira perShare, recordDate (data-com), paymentDate e fetchedAt; o gráfico usa o mês do pagamento e somente eventos de rendimento com datas exatas. Amortizações e datas incompletas não são inferidas como renda. A quantidade elegível deriva das compras locais e suas datas. Valores calculados por API não confirmam crédito na conta e não alteram a carteira.");
+        json!({"marketData":market,"cvmData":reports,"dividendData":income})
     }
 }
 

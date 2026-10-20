@@ -5,6 +5,7 @@ edition = "2021"
 description = "Dated public economic indicators and news, independent of portfolio data"
 
 [dependencies]
+base64 = "0.22.1"
 ivestfii-core = { path = "../portfolio-core" }
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "json"] }

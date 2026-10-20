@@ -2,8 +2,9 @@
 use std::{path::Path, time::Duration};
 
 use crate::{
-    CdiHistoryService, CvmFundRequest, CvmPanel, CvmService, EconomicPanel, EconomicService,
-    NewsService, NewsSnapshot, QuotePanel, QuoteService, RefreshOutcome,
+    CdiHistoryService, CvmFundRequest, CvmPanel, CvmService, DividendPanel, DividendService,
+    EconomicPanel, EconomicService, NewsService, NewsSnapshot, QuotePanel, QuoteService,
+    RefreshOutcome,
 };
 use chrono::{NaiveDate, SecondsFormat, Utc};
 use ivestfii_core::PortfolioSnapshot;
@@ -16,6 +17,7 @@ pub struct PublicDataRefresh {
     pub news: Option<NewsSnapshot>,
     pub quotes: QuotePanel,
     pub cvm: CvmPanel,
+    pub dividends: DividendPanel,
     pub sources: Vec<SourceRefresh>,
     pub checked_at: String,
 }
@@ -74,6 +76,7 @@ pub async fn refresh_if_due(
     } = request;
     let quotes = QuoteService::new(directory.join("public-data/quotes.json"));
     let cvm = CvmService::new(directory.join("public-data/cvm-funds.json"));
+    let dividends = DividendService::new(directory.join("public-data/dividends.json"));
     let quote_refresh = async {
         if symbols.is_empty() {
             return RefreshOutcome {
@@ -120,11 +123,34 @@ pub async fn refresh_if_due(
                 )
             })
     };
-    let (economics, news, mut quotes, cvm) = tokio::join!(
+    let dividend_refresh = async {
+        if symbols.is_empty() {
+            return RefreshOutcome {
+                data: Some(DividendPanel::default()),
+                status: "cached".into(),
+                message: None,
+            };
+        }
+        let service = match &dividends {
+            Ok(service) => service,
+            Err(error) => return unavailable(None, error.clone()),
+        };
+        tokio::time::timeout(Duration::from_secs(45), service.refresh_if_due(symbols))
+            .await
+            .unwrap_or_else(|_| {
+                unavailable(
+                    service.read_cache(symbols).ok(),
+                    "A consulta de proventos demorou demais. Os eventos salvos foram mantidos."
+                        .into(),
+                )
+            })
+    };
+    let (economics, news, mut quotes, cvm, dividends) = tokio::join!(
         economics.refresh_if_due(),
         news.refresh_if_due(),
         quote_refresh,
         cvm_refresh,
+        dividend_refresh,
     );
     if let Some(panel) = quotes.data.as_mut() {
         panel.set_credential_presence(key.as_ref().is_ok_and(|key| key.is_some()));
@@ -134,6 +160,7 @@ pub async fn refresh_if_due(
         source("news", &news),
         source("quotes", &quotes),
         source("cvm", &cvm),
+        source("dividends", &dividends),
     ];
     let quote_panel = quotes.data.unwrap_or_default();
     // Use exactly the quote date used for the full FII result. Re-fetching quotes
@@ -166,6 +193,7 @@ pub async fn refresh_if_due(
         news: news.data,
         quotes: quote_panel,
         cvm: cvm.data.unwrap_or_default(),
+        dividends: dividends.data.unwrap_or_default(),
         sources,
         checked_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
     })

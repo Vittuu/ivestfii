@@ -433,6 +433,7 @@ mod tests {
             id: format!("fixture-{month}-{quantity}-{price}-{per_share}"),
             month: month.into(),
             cotas_added: quantity.into(),
+            purchase_date: None,
             price_per_cota: price.into(),
             dividend_per_cota: per_share.into(),
             dividend_total: total.map(str::to_owned),

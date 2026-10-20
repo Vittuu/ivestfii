@@ -150,3 +150,25 @@ identificar turnos interrompidos e reconstruir contexto em uma próxima execuç�
 Referências de implementação: [transporte stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports),
 [ciclo de vida](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)
 e [ferramentas e erros](https://modelcontextprotocol.io/specification/2025-11-25/server/tools).
+
+## Proventos por data e cotas elegíveis
+
+`preparar_analise_carteira` inclui `dividendData` (eventos públicos B3 do cache)
+e `monthlyIncome` (mesmo cálculo decimal Rust do gráfico, últimos 12 meses).
+`refreshPublicDataIfDue:true` também verifica os proventos; `refreshDividends:true`
+permite uma consulta explícita sujeita ao cache, intervalo de tentativas e
+orçamento próprios da fonte. Esta consulta não usa a chave nem a franquia brapi.
+
+O cálculo usa o mês do pagamento, a taxa por cota do evento e as cotas adquiridas
+até a data-com, preservando o saldo de cotas nos meses sem compras. Lançamentos
+do usuário prevalecem. Compras antigas sem dia conhecido não recebem uma data
+inventada: se o mês da compra contém a data-com, o fundo retorna `date_required`.
+Eventos sem datas exatas e amortizações não viram rendimentos automaticamente.
+
+`recorded` identifica lançamento local e `api` identifica cálculo por evento
+público, sem confirmação de crédito na corretora. `total:null` indica cobertura
+incompleta; `knownTotal` soma o que foi possível apurar. Não some este relatório
+novamente aos proventos já registrados no desempenho, e não trate rendimento
+declarado como operação de compra. Tudo permanece separado dos dados financeiros;
+consultas e cálculos não gravam lançamentos, não mudam quantidades e não alteram
+a posição importada.

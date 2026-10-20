@@ -1,24 +1,27 @@
 import { useId } from 'react';
-import { amount, money, monthShort, quantity } from '../lib/bridge';
+import { amount, dateBR, money, monthShort, quantity } from '../lib/bridge';
 import type { MonthlyIncomePoint } from '../lib/monthlyIncome';
 import { Def } from '../components';
+import PublicSourceLink from './PublicSourceLink';
 
 const chartHeight = 216;
 const plotBottom = 148;
 const plotTop = 34;
 
 function monthStatus(point: MonthlyIncomePoint): string {
-  return !point.recorded ? 'Sem registros' : point.incomeRecorded === 0 ? 'Sem rendimento registrado' : money(point.total);
+  return point.incomeRecorded > 0 ? money(point.total) : !point.recorded ? 'Sem registros' : 'Sem rendimento registrado';
 }
 
 function MonthExplanation({ point, partial, until }: { point: MonthlyIncomePoint; partial: boolean; until: string }) {
   const funds = point.funds.filter((fund) => fund.status !== 'not-held' || fund.recordCount > 0);
   const hasCarriedShares = funds.some((fund) => /[1-9]/.test(fund.held)) && point.purchaseCount === 0;
   const hasZero = funds.some((fund) => fund.income !== null && Number(fund.income) === 0 && fund.recordedRecordCount > 0);
+  const apiFunds = funds.filter((fund) => fund.status === 'api');
   return <div className="ov-income-tooltip">
     <p className="ov-income-tooltip-title"><strong>{monthShort(point.key)}</strong> · {monthStatus(point)}{partial && <span> · Parcial até {until}</span>}</p>
-    {point.expectedFunds.length > 0 && <p>{point.incomeRecorded} de {point.expectedFunds.length} {point.expectedFunds.length === 1 ? 'fundo' : 'fundos'} com rendimento registrado.</p>}
-    {!point.recorded && <p>Nenhum lançamento neste mês. Isso não confirma rendimento zero.</p>}
+    {point.expectedFunds.length > 0 && <p>{point.incomeRecorded} de {point.expectedFunds.length} {point.expectedFunds.length === 1 ? 'fundo' : 'fundos'} com rendimento {apiFunds.length ? 'disponível' : 'registrado'}.</p>}
+    {!point.recorded && apiFunds.length === 0 && <p>Nenhum lançamento neste mês. Isso não confirma rendimento zero.</p>}
+    {apiFunds.length > 0 && <p>Preenchido automaticamente com os proventos publicados pela B3. Um valor informado por você tem prioridade.</p>}
     {point.recorded && point.incomeRecorded === 0 && <p>Há lançamentos, mas nenhum rendimento informado neste mês.</p>}
     {funds.length > 0 ? <table>
       <caption className="sr-only">Fundos de {monthShort(point.key)}</caption>
@@ -27,13 +30,21 @@ function MonthExplanation({ point, partial, until }: { point: MonthlyIncomePoint
         <th scope="row">{fund.ticker}</th>
         <td className="num">{quantity(fund.held)}</td>
         <td className={fund.income === null ? 'ov-income-missing' : 'num ov-income-known'}>
-          {fund.income === null ? 'Sem registro' : <>{money(fund.income)}{fund.computedRecordCount > 0 && <span className="ov-income-origin">calculado</span>}</>}
+          {fund.income === null ? fund.status === 'date-required' ? 'Informe a data da compra' : 'Sem registro' : <>{money(fund.income)}{(fund.status === 'api' || fund.computedRecordCount > 0) && <span className="ov-income-origin">{fund.status === 'api' ? 'B3 · automático' : 'calculado'}</span>}</>}
         </td>
       </tr>)}</tbody>
     </table> : <p>Não há cotas acumuladas nem rendimento informado no histórico desse mês.</p>}
     {hasCarriedShares && <p>Sem novas compras: as cotas anteriores continuam no saldo.</p>}
+    {apiFunds.map((fund) => <div className="ov-income-events" key={fund.id}>
+      <strong>{fund.ticker} · cálculo B3</strong>
+      {fund.apiEvents?.map((event) => <p key={event.id}>
+        {quantity(event.eligibleShares ?? '0')} cotas com direito × {quantity(event.amountPerShare)} R$/cota = {money(event.amount ?? '0')}.<br />
+        Data-com {dateBR(event.recordDate)} · pagamento {dateBR(event.paymentDate)}. <PublicSourceLink href={event.sourceUrl}>Ver na B3</PublicSourceLink>
+      </p>)}
+    </div>)}
     {funds.some((fund) => fund.computedRecordCount > 0) && <p>Calculado com as cotas acumuladas e o rendimento por cota informado para este mês.</p>}
     {point.missingFunds.length > 0 && <p>Falta o rendimento do mês para: {point.missingFunds.join(', ')}. Não repetimos automaticamente o pagamento do mês anterior.</p>}
+    {funds.some((fund) => fund.status === 'date-required') && <p>Informe o dia da compra no histórico para conferir se as novas cotas já tinham direito ao provento. Os meses seguintes continuam usando essas cotas.</p>}
     {hasZero && <p>R$ 0 informado no lançamento é diferente de falta de registro.</p>}
   </div>;
 }
@@ -91,7 +102,7 @@ export default function MonthlyIncomeChart({ points, until }: { points: MonthlyI
         </div>
       </div>
     </div>
-    <p className="ov-income-hint">Passe o mouse, toque ou foque um mês para ver os fundos e as cotas acumuladas. <span>O total soma apenas os rendimentos registrados.</span></p>
+    <p className="ov-income-hint">Passe o mouse, toque ou foque um mês para ver os fundos e as cotas acumuladas. <span>{points.some((point) => point.apiFundCount) ? 'Inclui proventos da B3 calculados pelas cotas com direito. Valores informados por você têm prioridade.' : 'O total soma apenas os rendimentos registrados; as lacunas serão preenchidas quando houver dados da B3.'}</span></p>
     {average !== null && <p className="ov-income-average">Média dos valores registrados em {closed.length} meses fechados: <span className="num">{money(average)}</span>.</p>}
     <div className="sr-only"><table>
       <caption>Proventos por mês</caption>

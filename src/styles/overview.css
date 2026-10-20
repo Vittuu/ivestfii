@@ -271,6 +271,8 @@
 .overview-page .ov-empty-actions .button { margin-top: 0; }
 
 /* ---------- Responsivo ---------- */
+.ov-income-events { border-top: 1px solid var(--line); padding-top: var(--sp-2); margin-top: var(--sp-2); }
+.ov-income-events a { color: var(--accent); }
 @media (max-width: 1180px) {
   .complete-portfolio .modular > .span-5 { grid-column: span 5; }
   .complete-portfolio .modular > .span-7 { grid-column: span 7; }

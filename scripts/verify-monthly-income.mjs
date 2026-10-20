@@ -1,7 +1,7 @@
 /** Synthetic monthly-income regressions; Node 24 strips TypeScript types. */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildMonthlyIncome } from '../src/lib/monthlyIncome.ts';
+import { applyMonthlyIncomeReport, buildMonthlyIncome } from '../src/lib/monthlyIncome.ts';
 
 const entry = (id, month, fields = {}) => ({ id, month, cotasAdded: '0', pricePerCota: '0', dividendPerCota: '0', dividendTotal: null, notes: '', ...fields });
 const fund = (entries, ticker = 'TEST11') => ({ id: ticker, ticker, name: 'Fundo sintético', sector: 'Teste', entries, totalCotas: '999', totalInvested: '0', averagePrice: '0', dividendsReceived: '0', estimatedMonthlyIncome: '999' });
@@ -143,4 +143,46 @@ test('empty inputs stay empty and source data is never mutated', () => {
   for (const key of ['2026-00', '2026-13', '2026-2', '', 'invalid']) {
     assert.throws(() => buildMonthlyIncome(input, [key]), RangeError);
   }
+});
+
+test('native API income fills a gap without adding a launch or counting unheld funds', () => {
+  const input = [fund([entry('buy', '2026-01', { cotasAdded: '10' })]), fund([], 'LATER11')];
+  const points = buildMonthlyIncome(input, ['2026-07']);
+  const report = { months: [{ month: '2026-07', funds: [
+    { fundId: 'TEST11', symbol: 'TEST11', status: 'api', amount: '1.23', holdings: '10', events: [{id:'public-event'}], reasons: [] },
+    { fundId: 'LATER11', symbol: 'LATER11', status: 'not_held', amount: '0', holdings: '0', events: [], reasons: [] },
+  ] }] };
+  const original = structuredClone(points);
+  const [result] = applyMonthlyIncomeReport(points, report);
+  assert.equal(result.total, '1.23');
+  assert.equal(result.recorded, false);
+  assert.equal(result.apiFundCount, 1);
+  assert.deepEqual(result.expectedFunds, ['TEST11']);
+  assert.deepEqual(result.incomeFunds, ['TEST11']);
+  assert.deepEqual(result.missingFunds, []);
+  assert.equal(result.funds[1].income, null);
+  assert.deepEqual(points, original);
+  assert.equal(input[0].entries.length, 1);
+});
+
+test('unknown cutoff purchase date remains missing while other API income is shown', () => {
+  const points = buildMonthlyIncome([fund([entry('buy', '2026-07', { cotasAdded: '10' })])], ['2026-07']);
+  const [result] = applyMonthlyIncomeReport(points, {months:[{month:'2026-07',funds:[
+    {fundId:'TEST11',symbol:'TEST11',status:'date_required',amount:null,holdings:'10',events:[],reasons:['Informe a data']},
+  ]}]});
+  assert.equal(result.incomeRecorded, 0);
+  assert.equal(result.funds[0].status, 'date-required');
+  assert.equal(result.funds[0].income, null);
+  assert.deepEqual(result.missingFunds, ['TEST11']);
+});
+
+test('native manual zero remains known and does not count as API income', () => {
+  const points = buildMonthlyIncome([fund([entry('buy', '2026-01', {cotasAdded:'10'}),entry('zero','2026-07',{dividendTotal:'0'})])], ['2026-07']);
+  const [result] = applyMonthlyIncomeReport(points, {months:[{month:'2026-07',funds:[
+    {fundId:'TEST11',symbol:'TEST11',status:'recorded',amount:'0',holdings:'10',events:[],reasons:[]},
+  ]}]});
+  assert.equal(result.total, '0');
+  assert.equal(result.incomeRecorded, 1);
+  assert.equal(result.apiFundCount, 0);
+  assert.equal(result.funds[0].status, 'recorded');
 });

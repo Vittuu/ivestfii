@@ -108,7 +108,7 @@ export default function Portfolio({ walletId, snapshot, refresh, onImport, onExp
               <caption className="sr-only">Compras de {fund.ticker}, do mais recente ao mais antigo</caption>
               <thead><tr><th scope="col">Mês</th><th scope="col" className="num">Cotas compradas</th><th scope="col" className="num">Preço por cota</th><th scope="col" className="num">Total pago</th><th scope="col" className="col-action"><span className="sr-only">Detalhes e edição</span></th></tr></thead>
               <tbody>{purchases.map((row) => { const { entry, purchaseCost } = row; return <tr key={entry.id}>
-                <td className="month-cell"><time className="num" dateTime={entry.month.slice(0, 7)} title={monthLabel(entry.month)}>{monthShort(entry.month)}</time></td>
+                <td className="month-cell"><time className="num" dateTime={entry.month.slice(0, 7)} title={monthLabel(entry.month)}>{monthShort(entry.month)}</time>{entry.purchaseDate && <span className="ledger-purchase-date"><time dateTime={entry.purchaseDate}>{entry.purchaseDate.split('-').reverse().join('/')}</time></span>}</td>
                 <td className="num">{quantity(entry.cotasAdded)}</td><td className="num">{money(entry.pricePerCota)}</td><td className="num ledger-paid">{money(purchaseCost)}</td>
                 <td className="col-action"><span className="record-actions"><button className="text-link" type="button" aria-label={`Ver detalhes da compra de ${monthLabel(entry.month)}`} onClick={() => setDetailModal({ fund, row })}>Detalhes</button><button className="icon-button" aria-label={`Editar compra de ${monthLabel(entry.month)}`} title="Editar compra" onClick={() => setRecordModal({ fund, entry })}><Pencil size={16} /></button></span></td>
               </tr>; })}</tbody>
@@ -152,6 +152,7 @@ function RecordDetails({ fund, row, onClose }: { fund: Fund; row: LedgerRow; onC
     <dl className="record-facts">
       <div><dt>Fundo</dt><dd className="ticker">{fund.ticker}</dd></div>
       <div><dt>Mês</dt><dd><time dateTime={entry.month.slice(0, 7)}>{monthLabel(entry.month)}</time></dd></div>
+      {Number(entry.cotasAdded) > 0 && <div><dt>Data da compra</dt><dd>{entry.purchaseDate ? <time dateTime={entry.purchaseDate}>{entry.purchaseDate.split('-').reverse().join('/')}</time> : 'Dia não informado'}</dd></div>}
       <div><dt>Cotas compradas</dt><dd className="num">{entry.cotasAdded.replace('.', ',')}</dd></div>
       <div><dt>Preço por cota</dt><dd className="num">{recordedMoney(entry.pricePerCota)}</dd></div>
       <div><dt>Total pago</dt><dd className="num ledger-paid">{money(row.purchaseCost)}</dd></div>
@@ -186,25 +187,33 @@ function FundForm({ walletId, fund, onClose, onSaved }: { walletId: string; fund
 }
 
 function RecordForm({ walletId, fund, entry, onClose, onSaved }: { walletId: string; fund: Fund; entry?: RecordEntry; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [values, setValues] = useState({ month: entry?.month.slice(0, 7) || new Date().toLocaleDateString('sv-SE').slice(0, 7), cotasAdded: entry?.cotasAdded || '0', pricePerCota: entry?.pricePerCota || '0', dividendPerCota: entry?.dividendPerCota || '0', dividendTotal: entry?.dividendTotal ?? '', notes: entry?.notes || '' });
+  const [values, setValues] = useState({ month: entry?.month.slice(0, 7) || new Date().toLocaleDateString('sv-SE').slice(0, 7), purchaseDate: entry?.purchaseDate || '', cotasAdded: entry?.cotasAdded || '0', pricePerCota: entry?.pricePerCota || '0', dividendPerCota: entry?.dividendPerCota || '0', dividendTotal: entry?.dividendTotal ?? '', notes: entry?.notes || '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const savePending = useRef(false);
   const update = (name: keyof typeof values, value: string) => setValues((old) => ({ ...old, [name]: value }));
-  const save = async () => { if (savePending.current) return; savePending.current = true; setBusy(true); setError(''); try { await call('save_record', { walletId, input: { id: entry?.id, fundId: fund.id, month: values.month, cotasAdded: decimal(values.cotasAdded), pricePerCota: decimal(values.pricePerCota), dividendPerCota: decimal(values.dividendPerCota), dividendTotal: values.dividendTotal.trim() ? decimal(values.dividendTotal) : null, notes: values.notes.trim() } }); await onSaved(); } catch (err) { setError(errorMessage(err)); } finally { savePending.current = false; setBusy(false); } };
+  const hasPurchase = Number(decimal(values.cotasAdded)) > 0;
+  const requirePurchaseDate = hasPurchase && (!entry || entry.cotasAdded !== decimal(values.cotasAdded) || entry.month.slice(0, 7) !== values.month);
+  const save = async () => { if (savePending.current) return; savePending.current = true; setBusy(true); setError(''); try {
+    if (requirePurchaseDate && !values.purchaseDate) throw new Error('Informe a data da compra para calcular os proventos corretamente.');
+    if (hasPurchase && values.purchaseDate && values.purchaseDate.slice(0, 7) !== values.month) throw new Error('A data da compra deve pertencer ao mês de referência.');
+    const purchaseDate = hasPurchase && values.purchaseDate ? values.purchaseDate : null;
+    await call('save_record', { walletId, input: { id: entry?.id, fundId: fund.id, month: values.month, ...(purchaseDate || entry?.purchaseDate ? { purchaseDate } : {}), cotasAdded: decimal(values.cotasAdded), pricePerCota: decimal(values.pricePerCota), dividendPerCota: decimal(values.dividendPerCota), dividendTotal: values.dividendTotal.trim() ? decimal(values.dividendTotal) : null, notes: values.notes.trim() } }); await onSaved();
+  } catch (err) { setError(errorMessage(err)); } finally { savePending.current = false; setBusy(false); } };
   useEffect(() => { if (!entry) setValues((old) => ({ ...old, pricePerCota: fund.averagePrice })); }, [entry, fund.averagePrice]);
   return <Modal title={entry ? `Editar lançamento · ${fund.ticker}` : `Novo lançamento · ${fund.ticker}`} description="O mesmo lançamento pode registrar compras e rendimentos do mês." onClose={onClose} busy={busy}><form onSubmit={handleForm(save)}>
     <fieldset className="ledger-form-fields" disabled={busy}>
-      <Field label="Mês de referência" hint="Mês ao qual este registro pertence. Não representa uma data exata de compra ou pagamento."><input type="month" autoFocus value={values.month} onChange={(event) => update('month', event.target.value)} required /></Field>
+      <Field label="Mês de referência" hint="Mês ao qual este registro pertence. Para uma compra, informe também o dia abaixo."><input type="month" autoFocus value={values.month} onChange={(event) => update('month', event.target.value)} required /></Field>
       <fieldset className="ledger-form-section"><legend>Compras</legend>
         <p className="ledger-form-guide">Se comprou neste mês, informe cotas e preço. Sem compra, deixe as cotas em 0.</p>
         <div className="form-grid">
           <Field label="Cotas adicionadas" hint="Quantidade comprada neste lançamento. Use 0 quando não houve compra."><input className="num" inputMode="decimal" value={values.cotasAdded} onChange={(event) => update('cotasAdded', event.target.value)} required /></Field>
           <Field label="Preço por cota (R$)" hint="Preço pago por cota. Um preço salvo com quantidade 0 fica preservado como informação e não gera uma compra."><input className="num" inputMode="decimal" value={values.pricePerCota} onChange={(event) => update('pricePerCota', event.target.value)} required /></Field>
         </div>
+        {hasPurchase && <Field label="Data da compra" hint="Usada para saber se estas cotas tinham direito ao provento na data-com. Compras antigas sem dia informado continuam preservadas."><input type="date" value={values.purchaseDate} min={`${values.month}-01`} max={`${values.month}-${new Date(Number(values.month.slice(0, 4)), Number(values.month.slice(5, 7)), 0).getDate()}`} onChange={(event) => update('purchaseDate', event.target.value)} required={requirePurchaseDate} /></Field>}
       </fieldset>
       <fieldset className="ledger-form-section"><legend>Rendimentos</legend>
-        <p className="ledger-form-guide">Se recebeu, informe o total ou o rendimento por cota. Sem recebimento, use total 0.</p>
+        <p className="ledger-form-guide">Preencha somente para informar ou corrigir um rendimento. Deixe o total vazio e o valor por cota em 0 para usar a consulta automática no gráfico. Total 0 confirma que não recebeu.</p>
         <div className="form-grid">
           <Field label="Total recebido (R$)" hint="Um total preenchido prevalece, inclusive 0. Vazio: calculado pelas cotas acumuladas até o fim do mês, incluindo as compras do mês, multiplicadas pelo rendimento por cota."><input className="num" inputMode="decimal" value={values.dividendTotal} onChange={(event) => update('dividendTotal', event.target.value)} placeholder="Vazio: calcular por cota" /></Field>
           <Field label="Rendimento por cota (R$)" hint="Use para calcular o recebimento quando o total estiver vazio. Se você preencheu o total, esse total é mantido."><input className="num" inputMode="decimal" value={values.dividendPerCota} onChange={(event) => update('dividendPerCota', event.target.value)} required /></Field>

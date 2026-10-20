@@ -34,6 +34,7 @@ fn fixture() -> Fixture {
             id: None,
             fund_id,
             month: "2020-01".into(),
+            purchase_date: None,
             cotas_added: "5".into(),
             price_per_cota: "10.123456789".into(),
             dividend_per_cota: "0.5".into(),
@@ -316,6 +317,9 @@ fn invalid_flags_and_unknown_scope_are_rejected_before_fetch_or_cache_creation()
         json!({"refreshNews":null}),
         json!({"refreshPublicDataIfDue":null}),
         json!({"refreshPublicDataIfDue":"true"}),
+        json!({"refreshDividends":"true"}),
+        json!({"refreshDividends":null}),
+        json!({"walletId":"unknown-wallet","refreshDividends":true}),
         json!({"walletId":"unknown-wallet","refreshPublicDataIfDue":true}),
         json!({"walletId":"unknown-wallet","refreshEconomicData":true,"refreshNews":true}),
         json!({"walletId":17,"refreshEconomicData":true}),
@@ -335,6 +339,145 @@ fn invalid_flags_and_unknown_scope_are_rejected_before_fetch_or_cache_creation()
     let assistant = AssistantStore::open(path.join("assistant.sqlite")).unwrap();
     assert!(assistant.sources(&fixture.conversation).unwrap().is_empty());
     assert_eq!(financial_state(path), before);
+}
+
+#[test]
+fn monthly_income_uses_dated_public_events_carries_shares_and_preserves_manual_zero() {
+    use chrono::{FixedOffset, Months, Utc};
+    use ivestfii_market_data::dividends::parse_b3_dividends;
+    let fixture = fixture();
+    let path = fixture.directory.path();
+    let catalog = WalletCatalog::open(path).unwrap();
+    let repository = catalog.repository(Some(&fixture.wallet)).unwrap();
+    let fund_id = repository.snapshot().unwrap().funds[0].id.clone();
+    let today = Utc::now()
+        .with_timezone(&FixedOffset::west_opt(3 * 3600).unwrap())
+        .date_naive();
+    let month = today
+        .checked_sub_months(Months::new(1))
+        .unwrap()
+        .format("%Y-%m")
+        .to_string();
+    // A later purchase increases the current holding, but not entitlement to
+    // the event with data-com on the first day of that month.
+    repository
+        .save_monthly_record(RecordInput {
+            id: None,
+            fund_id: fund_id.clone(),
+            month: month.clone(),
+            purchase_date: Some(format!("{month}-02")),
+            cotas_added: "2".into(),
+            price_per_cota: "10".into(),
+            dividend_per_cota: "0".into(),
+            dividend_total: None,
+            notes: "Compra sintética posterior à data-com".into(),
+        })
+        .unwrap();
+    let fetched = Utc::now();
+    let observation = parse_b3_dividends(
+        &serde_json::to_vec(&json!({"code":"TEST","cashDividends":[{
+            "isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"0,123456789",
+            "lastDatePrior":format!("{month}-01"),"paymentDate":format!("{month}-15"),
+            "approvedOn":format!("{month}-01")
+        }]}))
+        .unwrap(),
+        "TEST11",
+        fetched,
+    )
+    .unwrap();
+    let event_id = observation.events[0].event_id.clone();
+    let source_url = observation.source_url.clone();
+    let bytes = serde_json::to_vec(&json!({"version":1,"items":{"TEST11":{
+        "observation":observation,"checkedAt":fetched.to_rfc3339(),
+        "status":"available","error":null}},"retryAfter":null}))
+    .unwrap();
+    fs::create_dir_all(path.join("public-data")).unwrap();
+    fs::write(path.join("public-data/dividends.json"), &bytes).unwrap();
+    let before = financial_state(path);
+    let mut server = ready(path);
+    let first = call(&mut server, json!({"conversationId":fixture.conversation}));
+    let first = content(&first);
+    assert_eq!(first["dividendData"]["status"], "cached");
+    assert_eq!(first["dividendData"]["refreshRequested"], false);
+    assert_eq!(first["monthlyIncome"]["status"], "calculated");
+    let point = first["monthlyIncome"]["report"]["months"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|point| point["month"] == month)
+        .unwrap();
+    assert_eq!(point["total"], "0.62");
+    assert_eq!(point["apiAmount"], "0.62");
+    assert_eq!(point["recordedAmount"], "0");
+    assert_eq!(point["funds"][0]["holdings"], "7");
+    assert_eq!(point["funds"][0]["eligibleShares"], "5");
+    assert_eq!(point["funds"][0]["status"], "api");
+    assert_eq!(point["funds"][0]["events"][0]["id"], event_id);
+    assert_eq!(point["funds"][0]["events"][0]["sourceUrl"], source_url);
+    assert_eq!(financial_state(path), before);
+    assert_eq!(
+        fs::read(path.join("public-data/dividends.json")).unwrap(),
+        bytes
+    );
+    assert_eq!(first["storedSourceCount"], 1);
+    let repeat = call(&mut server, json!({"conversationId":fixture.conversation}));
+    assert_eq!(content(&repeat)["storedSourceCount"], 1);
+    assert_eq!(content(&repeat)["monthlyIncome"], first["monthlyIncome"]);
+
+    repository
+        .save_monthly_record(RecordInput {
+            id: None,
+            fund_id,
+            month: month.clone(),
+            purchase_date: None,
+            cotas_added: "0".into(),
+            price_per_cota: "0".into(),
+            dividend_per_cota: "0".into(),
+            dividend_total: Some("0".into()),
+            notes: "Zero confirmado sintético tem prioridade sobre a API".into(),
+        })
+        .unwrap();
+    let before_override_read = financial_state(path);
+    let overridden = call(&mut server, json!({}));
+    let point = content(&overridden)["monthlyIncome"]["report"]["months"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|point| point["month"] == month)
+        .unwrap();
+    assert_eq!(point["funds"][0]["status"], "recorded");
+    assert_eq!(point["total"], "0");
+    assert_eq!(point["apiAmount"], "0");
+    assert_eq!(financial_state(path), before_override_read);
+    assert_eq!(
+        fs::read(path.join("public-data/dividends.json")).unwrap(),
+        bytes
+    );
+    assert!(!path
+        .join("public-data/dividends.refresh-policy.json")
+        .exists());
+    fs::write(
+        path.join("public-data/dividends.json"),
+        b"invalid-synthetic-cache",
+    )
+    .unwrap();
+    let degraded = call(&mut server, json!({}));
+    let degraded = content(&degraded);
+    assert_eq!(degraded["dividendData"]["status"], "unavailable");
+    assert!(degraded["monthlyIncome"]["sourceError"].is_string());
+    let point = degraded["monthlyIncome"]["report"]["months"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|point| point["month"] == month)
+        .unwrap();
+    assert_eq!(point["total"], "0");
+    assert_eq!(point["funds"][0]["status"], "recorded");
+    assert_eq!(financial_state(path), before_override_read);
+    assert_eq!(
+        fs::read(path.join("public-data/dividends.json")).unwrap(),
+        b"invalid-synthetic-cache"
+    );
 }
 
 #[test]
@@ -503,7 +646,14 @@ fn opt_in_reports_blocked_refresh_and_preserves_cached_dates_without_network() {
     let (economic_bytes, news_bytes) = public_caches(path);
     // A corrupt persistent reservation blocks each source before HTTP. This
     // exercises the new flag offline without consuming any API budget.
-    for source in ["economics", "news", "quotes", "cvm-funds", "cdi-history"] {
+    for source in [
+        "economics",
+        "news",
+        "quotes",
+        "cvm-funds",
+        "cdi-history",
+        "dividends",
+    ] {
         fs::write(
             path.join(format!("public-data/{source}.refresh-policy.json")),
             b"blocked synthetic policy",
@@ -526,6 +676,15 @@ fn opt_in_reports_blocked_refresh_and_preserves_cached_dates_without_network() {
         assert_eq!(outcome["status"], "cached");
         assert!(outcome["message"].is_string());
     }
+    let dividends = result["publicDataRefresh"]["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|source| source["id"] == "dividends")
+        .unwrap();
+    assert_eq!(dividends["status"], "cached");
+    assert!(dividends["message"].is_string());
+    assert_eq!(result["dividendData"]["status"], "unavailable");
     assert_eq!(
         result["economicData"]["indicators"][0]["fetchedAt"],
         "2020-01-03T12:00:00Z"

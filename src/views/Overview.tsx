@@ -3,7 +3,7 @@ import { Plus, Upload } from 'lucide-react';
 import { desktop, money, monthShort, percent, quantity } from '../lib/bridge';
 import type { Snapshot } from '../lib/bridge';
 import { ledgerRows } from '../lib/ledger';
-import { buildMonthlyIncome } from '../lib/monthlyIncome';
+import { useMonthlyIncome } from '../lib/useMonthlyIncome';
 import { Def, Empty, PageActions, SectionHeading, ShareBar, TextLink } from '../components';
 import CompletePortfolio from './CompletePortfolio';
 import FiiPerformancePanel from '../components/FiiPerformance';
@@ -29,13 +29,15 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
   const currentKey = monthKey(today);
   const untilLabel = today.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   const monthKeys = Array.from({ length: 12 }, (_, index) => monthKey(new Date(today.getFullYear(), today.getMonth() - 11 + index, 1)));
-  const points = buildMonthlyIncome(funds, monthKeys);
+  const allMonthKeys = [monthKey(new Date(today.getFullYear(), today.getMonth() - 12, 1)), ...monthKeys];
+  const allPoints = useMonthlyIncome(walletId, snapshot, allMonthKeys);
+  const points = allPoints.slice(1);
   const period = `${monthShort(points[0].key)} a ${monthShort(currentKey)}`;
   const total12 = cents(points.reduce((sum, point) => sum + point.value, 0));
   const hasIncome = points.some((point) => point.incomeRecorded > 0);
   // Yield on cost sobre os 12 meses fechados: o mês corrente parcial não derruba o indicador no início de cada mês.
   const closedKeys = Array.from({ length: 12 }, (_, index) => monthKey(new Date(today.getFullYear(), today.getMonth() - 12 + index, 1)));
-  const closedPoints = buildMonthlyIncome(funds, closedKeys);
+  const closedPoints = allPoints.slice(0, -1);
   const closed12 = cents(closedPoints.reduce((sum, point) => sum + point.value, 0));
   const yieldOnCost = invested > 0 && closedPoints.some((point) => point.incomeRecorded > 0) ? closed12 / invested * 100 : null;
 
@@ -110,10 +112,10 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
           <div className="modular">
             <div className="block span-4 ov-readouts-block">
               <p className="block-body ov-method-note">Compras mostram o dinheiro usado nos lançamentos. Rendimentos mostram o que foi recebido. Esses registros não atualizam a posição importada da corretora.</p>
-              <div className="readouts ov-readouts"><div className="readout"><span className="figure-label"><Def text={`Soma dos proventos registrados de ${monthShort(closedKeys[0])} a ${monthShort(closedKeys[11])}, meses fechados, dividida pelo custo de aquisição. Meses ou fundos sem registros não confirmam rendimento zero. Não inclui a variação do preço dos fundos.`}>Proventos sobre o custo (12 meses)</Def></span><span className="figure-value">{yieldOnCost === null ? '—' : percent(yieldOnCost)}</span></div></div>
+              <div className="readouts ov-readouts"><div className="readout"><span className="figure-label"><Def text={`Soma dos proventos informados e calculados pela B3 de ${monthShort(closedKeys[0])} a ${monthShort(closedKeys[11])}, meses fechados, dividida pelo custo de aquisição. Meses sem dados não confirmam rendimento zero. Não inclui a variação do preço dos fundos.`}>Proventos sobre o custo (12 meses)</Def></span><span className="figure-value">{yieldOnCost === null ? '—' : percent(yieldOnCost)}</span></div></div>
             </div>
             <div className="block span-8 ov-income">
-              <SectionHeading title="Proventos por mês" level={3}><span className="ov-head-figure"><Def text={`Soma apenas dos valores registrados de ${period}. As cotas anteriores continuam acumuladas mesmo sem novas compras; é preciso informar o rendimento de cada mês. ${monthShort(currentKey)} parcial, até ${untilLabel}, aparece hachurado.`}>em 12 meses</Def><span className="num">{hasIncome ? money(total12) : '—'}</span></span></SectionHeading>
+              <SectionHeading title="Proventos por mês" level={3}><span className="ov-head-figure"><Def text={`Soma dos rendimentos informados e preenchidos pela B3 de ${period}. Sem novas compras, as cotas anteriores continuam. Cada cálculo automático usa o provento real e as cotas com direito na data-com; um valor informado por você tem prioridade. ${monthShort(currentKey)} parcial, até ${untilLabel}, aparece hachurado.`}>em 12 meses</Def><span className="num">{hasIncome ? money(total12) : '—'}</span></span></SectionHeading>
               <MonthlyIncomeChart points={points} until={untilLabel} />
             </div>
           </div>
