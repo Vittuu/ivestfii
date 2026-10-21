@@ -16,6 +16,83 @@ use ivestfii_core::{
     PortfolioSnapshot,
 };
 use serde::Serialize;
+use std::collections::BTreeSet;
+
+const PENDING_INCOME_ARCHIVE: &str = "A consulta dos avisos oficiais antigos ainda está incompleta. Os pagamentos já conferidos foram preservados; a comparação aguarda a cobertura completa.";
+
+fn unverified_income_symbols(
+    snapshot: &PortfolioSnapshot,
+    coverage: &crate::income_history::HistoricalIncomeCoverage,
+    today: NaiveDate,
+) -> BTreeSet<String> {
+    let complete: BTreeSet<_> = coverage
+        .sources
+        .iter()
+        .filter(|source| source.complete)
+        .map(|source| source.symbol.to_uppercase())
+        .collect();
+    let month = today.format("%Y-%m").to_string();
+    snapshot
+        .funds
+        .iter()
+        .filter(|fund| {
+            fund.entries.iter().any(|entry| {
+                entry.month <= month
+                    && entry
+                        .cotas_added
+                        .parse::<rust_decimal::Decimal>()
+                        .is_ok_and(|quantity| quantity > rust_decimal::Decimal::ZERO)
+            })
+        })
+        .map(|fund| fund.ticker.to_uppercase())
+        .filter(|symbol| !complete.contains(symbol))
+        .collect()
+}
+
+/// Explicit monthly ledger totals, including zero, remain authoritative even
+/// when a public catalogue cannot be queried. Only API-dependent held months
+/// require the missing archive before a comparative conclusion is possible.
+fn income_requiring_archive(
+    snapshot: &PortfolioSnapshot,
+    events: &[ivestfii_core::income::IncomeEvent],
+    unverified: &BTreeSet<String>,
+    cutoff: NaiveDate,
+) -> BTreeSet<String> {
+    if unverified.is_empty() {
+        return BTreeSet::new();
+    }
+    let end = cutoff.format("%Y-%m").to_string();
+    let Some(start) = snapshot
+        .funds
+        .iter()
+        .filter(|fund| unverified.contains(&fund.ticker.to_uppercase()))
+        .flat_map(|fund| &fund.entries)
+        .filter(|entry| {
+            entry.month <= end
+                && entry
+                    .cotas_added
+                    .parse::<rust_decimal::Decimal>()
+                    .is_ok_and(|quantity| quantity > rust_decimal::Decimal::ZERO)
+        })
+        .map(|entry| entry.month.as_str())
+        .min()
+    else {
+        return BTreeSet::new();
+    };
+    match ivestfii_core::income::calculate_monthly_income(snapshot, events, start, &end, cutoff) {
+        Ok(report) => report
+            .months
+            .iter()
+            .flat_map(|point| &point.funds)
+            .filter(|fund| {
+                unverified.contains(&fund.symbol.to_uppercase())
+                    && !["recorded", "not_held"].contains(&fund.status.as_str())
+            })
+            .map(|fund| fund.symbol.to_uppercase())
+            .collect(),
+        Err(_) => unverified.clone(),
+    }
+}
 
 /// Read the same public observations as the desktop, without network or ledger writes.
 pub fn cached_report(
@@ -47,22 +124,127 @@ pub fn cached_report(
             errors.push(error);
             DividendPanel::default()
         });
-    let report = build_report_with_income(
+    build_report_with_public_history(
         snapshot,
+        directory,
         &panel,
         history.as_ref(),
         &dividends,
         today,
         errors,
-    )?;
-    Ok(attach_historical_cache(
+    )
+}
+
+/// One set of reconciled public payments feeds totals, comparison, monthly
+/// reconstruction and archived-observation validation. No derived payment is
+/// inserted into the investor's ledger.
+pub fn build_report_with_public_history(
+    snapshot: &PortfolioSnapshot,
+    directory: &std::path::Path,
+    panel: &QuotePanel,
+    history: Option<&CdiHistorySnapshot>,
+    dividends: &DividendPanel,
+    today: NaiveDate,
+    mut errors: Vec<String>,
+) -> Result<PerformanceReport, String> {
+    let historical = crate::income_history::read_cache(snapshot, directory, dividends, today);
+    let (events, coverage) = match &historical {
+        Ok(data) => (data.events.clone(), data.coverage.clone()),
+        Err(error) => {
+            errors.push(error.clone());
+            (
+                crate::dividends::income_events(dividends),
+                crate::income_history::HistoricalIncomeCoverage {
+                    status: "unavailable".into(),
+                    issues: vec![error.clone()],
+                    ..Default::default()
+                },
+            )
+        }
+    };
+    errors.extend(coverage.issues.iter().cloned());
+    // Missing CNPJ mappings and unreadable caches have no per-source row. Their
+    // absence must not turn a recent payment into proof of a complete archive.
+    let pending_symbols = unverified_income_symbols(snapshot, &coverage, today);
+    let mut report = build_report_inner(
         snapshot,
-        directory,
-        report,
-        history.as_ref(),
-        &dividends,
+        panel,
+        history,
+        Some(dividends),
+        Some(&events),
+        Some(&pending_symbols),
         today,
-    ))
+        errors,
+    )?;
+    if let Ok(data) = &historical {
+        for item in &data.historical.items {
+            let Some(observation) = &item.observation else {
+                continue;
+            };
+            if !snapshot
+                .funds
+                .iter()
+                .any(|fund| fund.ticker.eq_ignore_ascii_case(&item.symbol))
+            {
+                continue;
+            }
+            report.dividend_sources.push(DividendPerformanceSource {
+                symbol: item.symbol.clone(),
+                status: item.status.clone(),
+                source: observation.source.clone(),
+                source_url: observation.source_url.clone(),
+                fetched_at: observation.fetched_at.clone(),
+                coverage_warning: observation.coverage_warning.clone(),
+            });
+        }
+        report.dividend_fetched_at = report
+            .dividend_sources
+            .iter()
+            .map(|source| source.fetched_at.clone())
+            .min();
+        report.dividend_source = (!report.dividend_sources.is_empty()).then(|| {
+            report
+                .dividend_sources
+                .iter()
+                .map(|source| source.source.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(" + ")
+        });
+    }
+    let mut report =
+        attach_historical_cache_with_events(snapshot, directory, report, history, &events, today);
+    if !pending_symbols.is_empty() {
+        let mut guarded = false;
+        for point in &mut report.portfolio_evolution.points {
+            let Some(origin) = &mut point.provenance else {
+                continue;
+            };
+            let required = NaiveDate::parse_from_str(&point.as_of, "%Y-%m-%d")
+                .ok()
+                .map(|cutoff| income_requiring_archive(snapshot, &events, &pending_symbols, cutoff))
+                .unwrap_or_else(|| pending_symbols.clone());
+            if origin.components.iter().any(|component| {
+                component.kind == "fii" && required.contains(&component.name.to_uppercase())
+            }) {
+                origin.income_complete = false;
+                point.difference = None;
+                point.status = "incomplete".into();
+                point.issues.push(PENDING_INCOME_ARCHIVE.into());
+                guarded = true;
+            }
+        }
+        if guarded {
+            report.portfolio_evolution.status = "partial".into();
+            report
+                .portfolio_evolution
+                .issues
+                .push(PENDING_INCOME_ARCHIVE.into());
+        }
+    }
+    report.historical_income = Some(coverage);
+    Ok(report)
 }
 
 /// Attach derived historical points without changing today's result or creating
@@ -70,9 +252,23 @@ pub fn cached_report(
 pub fn attach_historical_cache(
     snapshot: &PortfolioSnapshot,
     directory: &std::path::Path,
-    mut report: PerformanceReport,
+    report: PerformanceReport,
     cdi: Option<&CdiHistorySnapshot>,
     dividends: &DividendPanel,
+    today: NaiveDate,
+) -> PerformanceReport {
+    let events = crate::income_history::read_cache(snapshot, directory, dividends, today)
+        .map(|data| data.events)
+        .unwrap_or_else(|_| crate::dividends::income_events(dividends));
+    attach_historical_cache_with_events(snapshot, directory, report, cdi, &events, today)
+}
+
+fn attach_historical_cache_with_events(
+    snapshot: &PortfolioSnapshot,
+    directory: &std::path::Path,
+    mut report: PerformanceReport,
+    cdi: Option<&CdiHistorySnapshot>,
+    events: &[ivestfii_core::income::IncomeEvent],
     today: NaiveDate,
 ) -> PerformanceReport {
     match crate::historical_performance::read_cache(snapshot, directory, today) {
@@ -93,7 +289,7 @@ pub fn attach_historical_cache(
                 snapshot,
                 &mut report.portfolio_evolution,
                 &history,
-                &crate::dividends::income_events(dividends),
+                events,
                 &rates,
                 today,
             ) {
@@ -136,6 +332,8 @@ pub struct PerformanceReport {
     pub portfolio_evolution: PortfolioEvolution,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub historical_data: Option<crate::historical_performance::HistoricalDataCoverage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub historical_income: Option<crate::income_history::HistoricalIncomeCoverage>,
     #[serde(skip_serializing)]
     pub history_observation: Option<PortfolioHistoryObservation>,
     pub quote_source: Option<String>,
@@ -155,7 +353,7 @@ pub fn build_report(
     today: NaiveDate,
     errors: Vec<String>,
 ) -> Result<PerformanceReport, String> {
-    build_report_inner(snapshot, panel, history, None, today, errors)
+    build_report_inner(snapshot, panel, history, None, None, None, today, errors)
 }
 
 /// Use the same saved public events and manual precedence as the monthly chart.
@@ -168,7 +366,16 @@ pub fn build_report_with_income(
     today: NaiveDate,
     errors: Vec<String>,
 ) -> Result<PerformanceReport, String> {
-    build_report_inner(snapshot, panel, history, Some(dividends), today, errors)
+    build_report_inner(
+        snapshot,
+        panel,
+        history,
+        Some(dividends),
+        None,
+        None,
+        today,
+        errors,
+    )
 }
 
 fn build_report_inner(
@@ -176,6 +383,8 @@ fn build_report_inner(
     panel: &QuotePanel,
     history: Option<&CdiHistorySnapshot>,
     dividends: Option<&DividendPanel>,
+    public_events: Option<&[ivestfii_core::income::IncomeEvent]>,
+    unverified_income: Option<&BTreeSet<String>>,
     today: NaiveDate,
     errors: Vec<String>,
 ) -> Result<PerformanceReport, String> {
@@ -211,14 +420,37 @@ fn build_report_inner(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let events = dividends
-        .map(crate::dividends::income_events)
-        .unwrap_or_default();
+    let events = public_events.map(<[_]>::to_vec).unwrap_or_else(|| {
+        dividends
+            .map(crate::dividends::income_events)
+            .unwrap_or_default()
+    });
     let mut calculation = match dividends {
         Some(_) => calculate_fii_performance_with_income(snapshot, &quotes, &rates, &events, today),
         None => calculate_fii_performance(snapshot, &quotes, &rates, today),
     }
     .map_err(|error| error.to_string())?;
+    let cutoff = calculation
+        .as_of
+        .as_deref()
+        .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+        .unwrap_or(today);
+    if unverified_income.is_some_and(|symbols| {
+        !income_requiring_archive(snapshot, &events, symbols, cutoff).is_empty()
+    }) {
+        if let Some(income) = &mut calculation.income {
+            income.status = "partial".into();
+        }
+        calculation.issues.push(PENDING_INCOME_ARCHIVE.into());
+    }
+    let incomplete_income = unverified_income.is_some()
+        && calculation
+            .income
+            .as_ref()
+            .is_some_and(|income| income.status != "complete");
+    if incomplete_income {
+        calculation.difference = None;
+    }
     for error in errors
         .into_iter()
         .chain(panel.errors.iter().cloned())
@@ -273,18 +505,33 @@ fn build_report_inner(
     let dividend_source = dividend_sources.first().map(|source| source.source.clone());
     let portfolio =
         calculate_portfolio_performance(snapshot, &calculation).map_err(|e| e.to_string())?;
-    let portfolio_benchmark =
+    let mut portfolio_benchmark =
         calculate_portfolio_benchmark(snapshot, &calculation, &portfolio, &rates, today)
             .map_err(|e| e.to_string())?;
-    let history_observation = observe_portfolio(
-        snapshot,
-        &calculation,
-        &portfolio,
-        &portfolio_benchmark,
-        &events,
-        today,
-    )
-    .map_err(|error| error.to_string())?;
+    if incomplete_income {
+        portfolio_benchmark.difference = None;
+        portfolio_benchmark.status = "incomplete".into();
+        let message = "O resultado dos FIIs usa os proventos conhecidos; a comparação conclusiva aguarda os rendimentos pendentes.";
+        portfolio_benchmark.issues.push(message.into());
+        for component in &mut portfolio_benchmark.components {
+            if component.kind == "fiis" {
+                component.issues.push(message.into());
+            }
+        }
+    }
+    let history_observation = if incomplete_income {
+        None
+    } else {
+        observe_portfolio(
+            snapshot,
+            &calculation,
+            &portfolio,
+            &portfolio_benchmark,
+            &events,
+            today,
+        )
+        .map_err(|error| error.to_string())?
+    };
     let mut portfolio_evolution = calculate_portfolio_evolution(
         snapshot,
         &rates,
@@ -301,6 +548,7 @@ fn build_report_inner(
         portfolio,
         portfolio_evolution,
         historical_data: None,
+        historical_income: None,
         history_observation,
         portfolio_benchmark,
         calculation,
@@ -428,6 +676,330 @@ mod tests {
     }
 
     #[test]
+    fn official_historical_income_reconciles_mirrors_and_restores_the_entire_wallet_monthly_cdi_difference(
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut snapshot = historical_fixture(directory.path());
+        snapshot.funds[0].entries[1].dividend_total = None;
+        snapshot.funds[0].dividends_received = "2".into();
+        snapshot.totals.dividends_received = "2".into();
+        let path = crate::income_history::tests::archive(directory.path(), &snapshot, false);
+        let history =
+            crate::CdiHistoryService::new(directory.path().join("public-data/cdi-history.json"))
+                .unwrap()
+                .read_cache()
+                .unwrap()
+                .unwrap();
+        let recent = crate::income_history::tests::recent_panel();
+        let before = serde_json::to_value(&snapshot).unwrap();
+        let files = [
+            "historical-prices.json",
+            "fund-nav.json",
+            "cdi-history.json",
+            "historical-dividends.json",
+            "market-settings.json",
+        ];
+        let bytes = files
+            .map(|name| std::fs::read(directory.path().join("public-data").join(name)).unwrap());
+        let calculate = || {
+            build_report_with_public_history(
+                &snapshot,
+                directory.path(),
+                &quote("BRL", "2026-10-19T21:00:00Z"),
+                Some(&history),
+                &recent,
+                crate::income_history::tests::day(),
+                vec![],
+            )
+            .unwrap()
+        };
+        let report = calculate();
+        // The administrator's August99/share is masked by manual2; September's
+        // 0.3/share appears in both sources and earns exactly3, once.
+        assert_eq!(report.calculation.dividends, "5");
+        assert_eq!(report.calculation.total_result.as_deref(), Some("-5"));
+        let income = report.calculation.income.as_ref().unwrap();
+        assert_eq!(income.recorded_amount, "2");
+        assert_eq!(income.api_amount, "3");
+        assert_eq!(report.portfolio.income.as_deref(), Some("25"));
+        assert_eq!(report.portfolio.total_result.as_deref(), Some("15"));
+        // October still has no recorded payment in this synthetic cache. The
+        // current known gain is retained without claiming a conclusive current
+        // comparison; the fully covered September reconstruction is comparable.
+        assert_eq!(report.portfolio_benchmark.difference, None);
+        let september = report
+            .portfolio_evolution
+            .points
+            .iter()
+            .find(|point| point.month == "2026-09")
+            .unwrap();
+        assert_eq!(september.portfolio_result.as_deref(), Some("35"));
+        assert_eq!(september.cdi_result.as_deref(), Some("0"));
+        assert_eq!(september.difference.as_deref(), Some("35"));
+        assert!(september.provenance.as_ref().unwrap().income_complete);
+        assert_eq!(september.provenance.as_ref().unwrap().components.len(), 2);
+        assert_eq!(report.historical_income.as_ref().unwrap().status, "ready");
+        assert_eq!(report.dividend_sources.len(), 2);
+        assert!(report
+            .dividend_sources
+            .iter()
+            .any(|source| source.source == "b3"));
+        assert!(report
+            .dividend_sources
+            .iter()
+            .any(|source| source.source == "fundosnet"));
+        assert_eq!(
+            serde_json::to_value(calculate()).unwrap(),
+            serde_json::to_value(report).unwrap()
+        );
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), before);
+        for (index, name) in files.iter().enumerate() {
+            assert_eq!(
+                std::fs::read(directory.path().join("public-data").join(name)).unwrap(),
+                bytes[index]
+            );
+        }
+        assert_eq!(std::fs::read(path).unwrap(), bytes[3]);
+        assert!(!directory
+            .path()
+            .join("public-data/historical-dividends.refresh-policy.json")
+            .exists());
+    }
+
+    #[test]
+    fn an_unfinished_historical_archive_cannot_claim_a_complete_wallet_cdi_comparison() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut snapshot = historical_fixture(directory.path());
+        snapshot.funds[0].entries[1].dividend_total = None;
+        snapshot.funds[0].dividends_received = "2".into();
+        snapshot.totals.dividends_received = "2".into();
+        crate::income_history::tests::archive(directory.path(), &snapshot, true);
+        let history =
+            crate::CdiHistoryService::new(directory.path().join("public-data/cdi-history.json"))
+                .unwrap()
+                .read_cache()
+                .unwrap()
+                .unwrap();
+        let report = build_report_with_public_history(
+            &snapshot,
+            directory.path(),
+            &quote("BRL", "2026-10-19T21:00:00Z"),
+            Some(&history),
+            &DividendPanel::default(),
+            crate::income_history::tests::day(),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(report.calculation.dividends, "5");
+        assert_eq!(report.calculation.income.as_ref().unwrap().api_amount, "3");
+        assert_eq!(
+            report.historical_income.as_ref().unwrap().pending_documents,
+            1
+        );
+        let september = report
+            .portfolio_evolution
+            .points
+            .iter()
+            .find(|point| point.month == "2026-09")
+            .unwrap();
+        assert_eq!(september.portfolio_result.as_deref(), Some("35"));
+        assert_eq!(september.cdi_result.as_deref(), Some("0"));
+        assert_eq!(september.difference, None);
+        assert!(!september.provenance.as_ref().unwrap().income_complete);
+    }
+
+    #[test]
+    fn corrupted_historical_income_cache_preserves_recent_known_income_and_the_original_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut snapshot = historical_fixture(directory.path());
+        snapshot.funds[0].entries[1].dividend_total = None;
+        snapshot.funds[0].dividends_received = "2".into();
+        snapshot.totals.dividends_received = "2".into();
+        let path = crate::income_history::tests::archive(directory.path(), &snapshot, false);
+        std::fs::write(&path, b"original-invalid-cache").unwrap();
+        let history =
+            crate::CdiHistoryService::new(directory.path().join("public-data/cdi-history.json"))
+                .unwrap()
+                .read_cache()
+                .unwrap()
+                .unwrap();
+        let report = build_report_with_public_history(
+            &snapshot,
+            directory.path(),
+            &quote("BRL", "2026-10-19T21:00:00Z"),
+            Some(&history),
+            &crate::income_history::tests::recent_panel(),
+            crate::income_history::tests::day(),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(report.calculation.dividends, "5");
+        assert_eq!(report.portfolio.income.as_deref(), Some("25"));
+        assert_eq!(report.portfolio.total_result.as_deref(), Some("15"));
+        assert_eq!(
+            report.historical_income.as_ref().unwrap().status,
+            "unavailable"
+        );
+        assert!(!report.historical_income.as_ref().unwrap().issues.is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original-invalid-cache");
+    }
+
+    #[test]
+    fn unmapped_held_fund_keeps_known_payment_but_cannot_claim_a_complete_monthly_comparison() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut snapshot = historical_fixture(directory.path());
+        snapshot.funds[0].entries[1].dividend_total = None;
+        snapshot.funds[0].dividends_received = "2".into();
+        snapshot.totals.dividends_received = "2".into();
+        let history =
+            crate::CdiHistoryService::new(directory.path().join("public-data/cdi-history.json"))
+                .unwrap()
+                .read_cache()
+                .unwrap()
+                .unwrap();
+        let report = build_report_with_public_history(
+            &snapshot,
+            directory.path(),
+            &quote("BRL", "2026-10-19T21:00:00Z"),
+            Some(&history),
+            &crate::income_history::tests::recent_panel(),
+            crate::income_history::tests::day(),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(report.calculation.dividends, "5");
+        assert_eq!(report.calculation.income.as_ref().unwrap().api_amount, "3");
+        assert!(report
+            .historical_income
+            .as_ref()
+            .unwrap()
+            .sources
+            .is_empty());
+        assert!(report
+            .historical_income
+            .as_ref()
+            .unwrap()
+            .issues
+            .iter()
+            .any(|issue| issue.contains("CNPJ")));
+        let september = report
+            .portfolio_evolution
+            .points
+            .iter()
+            .find(|point| point.month == "2026-09")
+            .unwrap();
+        assert_eq!(september.portfolio_result.as_deref(), Some("35"));
+        assert_eq!(september.cdi_result.as_deref(), Some("0"));
+        assert_eq!(september.difference, None);
+        assert!(!september.provenance.as_ref().unwrap().income_complete);
+        assert!(report.history_observation.is_none());
+    }
+
+    #[test]
+    fn corrupted_archive_with_same_date_current_values_cannot_create_a_comparable_observed_point() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut snapshot = historical_fixture(directory.path());
+        snapshot.funds[0].entries[1].dividend_total = None;
+        snapshot.funds[0].dividends_received = "2".into();
+        snapshot.totals.dividends_received = "2".into();
+        snapshot
+            .broker_position
+            .as_mut()
+            .unwrap()
+            .fixed_income
+            .latest_observation
+            .as_mut()
+            .unwrap()
+            .reference_date = "2026-09-30".into();
+        snapshot.broker_position.as_mut().unwrap().reference_date = "2026-09-30".into();
+        let path = crate::income_history::tests::archive(directory.path(), &snapshot, false);
+        std::fs::write(&path, b"original-invalid-cache").unwrap();
+        let history =
+            crate::CdiHistoryService::new(directory.path().join("public-data/cdi-history.json"))
+                .unwrap()
+                .read_cache()
+                .unwrap()
+                .unwrap();
+        let report = build_report_with_public_history(
+            &snapshot,
+            directory.path(),
+            &quote("BRL", "2026-09-30T21:00:00Z"),
+            Some(&history),
+            &crate::income_history::tests::recent_panel(),
+            crate::income_history::tests::day(),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(report.calculation.dividends, "5");
+        assert_eq!(report.portfolio.income.as_deref(), Some("25"));
+        assert_eq!(report.portfolio.total_result.as_deref(), Some("15"));
+        assert_eq!(report.portfolio_benchmark.difference, None);
+        assert!(report.history_observation.is_none());
+        let september = report
+            .portfolio_evolution
+            .points
+            .iter()
+            .find(|point| point.month == "2026-09")
+            .unwrap();
+        assert_eq!(september.difference, None);
+        assert!(!september.provenance.as_ref().unwrap().income_complete);
+        assert_eq!(std::fs::read(path).unwrap(), b"original-invalid-cache");
+    }
+
+    #[test]
+    fn explicit_manual_zero_keeps_a_fully_recorded_wallet_comparable_without_a_public_archive() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut snapshot = historical_fixture(directory.path());
+        snapshot.funds[0].entries[1].dividend_total = Some("0".into());
+        snapshot.funds[0].dividends_received = "2".into();
+        snapshot.totals.dividends_received = "2".into();
+        let position = snapshot.broker_position.as_mut().unwrap();
+        position.reference_date = "2026-09-30".into();
+        position
+            .fixed_income
+            .latest_observation
+            .as_mut()
+            .unwrap()
+            .reference_date = "2026-09-30".into();
+        let history =
+            crate::CdiHistoryService::new(directory.path().join("public-data/cdi-history.json"))
+                .unwrap()
+                .read_cache()
+                .unwrap()
+                .unwrap();
+        let report = build_report_with_public_history(
+            &snapshot,
+            directory.path(),
+            &quote("BRL", "2026-09-30T21:00:00Z"),
+            Some(&history),
+            &crate::income_history::tests::recent_panel(),
+            crate::income_history::tests::day(),
+            vec![],
+        )
+        .unwrap();
+        let income = report.calculation.income.as_ref().unwrap();
+        assert_eq!(income.status, "complete");
+        assert_eq!(income.recorded_amount, "2");
+        assert_eq!(income.api_amount, "0");
+        assert_eq!(report.portfolio.income.as_deref(), Some("22"));
+        assert_eq!(report.portfolio.total_result.as_deref(), Some("12"));
+        assert_eq!(report.portfolio_benchmark.difference.as_deref(), Some("12"));
+        assert!(report.history_observation.is_some());
+        let september = report
+            .portfolio_evolution
+            .points
+            .iter()
+            .find(|point| point.month == "2026-09")
+            .unwrap();
+        assert_eq!(september.difference.as_deref(), Some("12"));
+        assert!(september.provenance.is_none());
+        assert!(!directory
+            .path()
+            .join("public-data/historical-dividends.json")
+            .exists());
+    }
+
+    #[test]
     fn cached_report_reconstructs_entire_wallet_months_without_capturing_balances_or_changing_sources(
     ) {
         let directory = tempfile::tempdir().unwrap();
@@ -453,7 +1025,10 @@ mod tests {
         assert_eq!(points[1].portfolio_result.as_deref(), Some("35"));
         assert_eq!(points[1].invested.as_deref(), Some("200"));
         assert_eq!(points[1].cdi_result.as_deref(), Some("0"));
+        // All held months through September are explicitly recorded, so a
+        // public archive is not required to verify those manual payments.
         assert_eq!(points[1].difference.as_deref(), Some("35"));
+        assert!(points[1].provenance.as_ref().unwrap().income_complete);
         assert!(points[2].portfolio_result.is_none());
         assert_eq!(points[1].provenance.as_ref().unwrap().components.len(), 2);
         let coverage = report.historical_data.as_ref().unwrap();

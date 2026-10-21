@@ -187,13 +187,28 @@ pub async fn refresh_if_due(
             },
         }
     };
-    let (economics, news, mut quotes, cvm, dividends, historical) = tokio::join!(
+    let income_refresh = async {
+        match crate::income_history::refresh_if_due(snapshot, directory, today).await {
+            Ok(coverage) => SourceRefresh {
+                id: "historicalIncome",
+                status: if coverage.event_count > 0 || coverage.status == "ready" { "cached" } else { "unavailable" }.into(),
+                message: if !coverage.issues.is_empty() {
+                    Some(coverage.issues.join(" "))
+                } else if coverage.pending_documents > 0 {
+                    Some(format!("Proventos antigos: {} avisos oficiais ainda aguardam consulta. Os dados já conferidos foram salvos.", coverage.pending_documents))
+                } else { None },
+            },
+            Err(error) => SourceRefresh { id: "historicalIncome", status: "unavailable".into(), message: Some(error) },
+        }
+    };
+    let (economics, news, mut quotes, cvm, dividends, historical, income) = tokio::join!(
         economics.refresh_if_due(),
         news.refresh_if_due(),
         quote_refresh,
         cvm_refresh,
         dividend_refresh,
         historical_refresh,
+        income_refresh,
     );
     if let Some(panel) = quotes.data.as_mut() {
         panel.set_credential_presence(key.as_ref().is_ok_and(|key| key.is_some()));
@@ -205,6 +220,7 @@ pub async fn refresh_if_due(
         source("cvm", &cvm),
         source("dividends", &dividends),
         historical,
+        income,
     ];
     let quote_panel = quotes.data.unwrap_or_default();
     let dividend_panel = dividends.data.unwrap_or_default();

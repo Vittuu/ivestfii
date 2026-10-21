@@ -428,3 +428,289 @@ fn incomplete_or_conflicting_events_cannot_make_a_partial_event_total_look_compl
     assert_eq!(result.months[0].total, None);
     assert_eq!(result.months[0].funds[0].status, "missing");
 }
+
+#[test]
+fn cross_source_mirrors_with_different_ids_and_decimal_formats_count_once_in_either_order() {
+    let dir = TempDir::new().unwrap();
+    let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+    let id = fund(&repo, "TEST11");
+    record(&repo, &id, "2026-05", "10", None, None, "0");
+    let before = serde_json::to_value(repo.snapshot().unwrap()).unwrap();
+    let export = repo.export_legacy_json().unwrap();
+    let outbox = serde_json::to_value(repo.pending_changes().unwrap()).unwrap();
+    let mut b3 = event("public-feed-id", "0.1000", "2026-06-30", "2026-07-15");
+    b3.source = "B3 · eventos corporativos públicos de fundos".into();
+    let mut document = event("fundosnet:document-id", "0.1", "2026-06-30", "2026-07-15");
+    document.source = "Administrador · documento de rendimento".into();
+    let mut mirror = document.clone();
+    mirror.id = "another-cache-id".into();
+    let events = [document, b3, mirror];
+    let result = report(&repo, &events, "2026-07", "2026-07");
+    let july = &result.months[0];
+    assert_eq!(july.total.as_deref(), Some("1"));
+    assert_eq!(july.api_amount, "1");
+    assert_eq!(july.funds[0].events.len(), 1);
+    assert_eq!(july.funds[0].events[0].id, "public-feed-id");
+    assert_eq!(july.funds[0].events[0].amount_per_share, "0.1");
+    assert_eq!(result.ignored_event_count, 2);
+    let mut reverse = events.to_vec();
+    reverse.reverse();
+    assert_eq!(report(&repo, &reverse, "2026-07", "2026-07"), result);
+    assert_eq!(
+        serde_json::to_value(repo.snapshot().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(repo.export_legacy_json().unwrap(), export);
+    assert_eq!(
+        serde_json::to_value(repo.pending_changes().unwrap()).unwrap(),
+        outbox
+    );
+}
+
+#[test]
+fn different_rates_for_the_same_payout_are_unresolved_even_across_different_sources_or_ids() {
+    let dir = TempDir::new().unwrap();
+    let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+    let id = fund(&repo, "TEST11");
+    record(&repo, &id, "2026-05", "10", None, None, "0");
+    let one = event("one", "0.1", "2026-06-30", "2026-07-15");
+    for source in ["fixture", "another-source"] {
+        let mut two = event("different-id", "0.2", "2026-06-30", "2026-07-15");
+        two.source = source.into();
+        let result = report(&repo, &[one.clone(), two], "2026-07", "2026-07");
+        assert_eq!(result.months[0].total, None);
+        assert_eq!(result.months[0].funds[0].status, "missing");
+        assert_eq!(result.ignored_event_count, 2);
+    }
+    record(&repo, &id, "2026-07", "0", None, Some("0"), "0");
+    let mut two = event("different-id", "0.2", "2026-06-30", "2026-07-15");
+    two.source = "another-source".into();
+    let manual = report(&repo, &[one, two], "2026-07", "2026-07");
+    assert_eq!(manual.months[0].total.as_deref(), Some("0"));
+    assert_eq!(manual.months[0].funds[0].status, "recorded");
+    assert_eq!(manual.months[0].api_amount, "0");
+}
+
+#[test]
+fn cross_source_record_and_payment_date_revisions_do_not_turn_into_extra_income() {
+    let dir = TempDir::new().unwrap();
+    let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+    let id = fund(&repo, "TEST11");
+    record(&repo, &id, "2026-05", "10", None, None, "0");
+    let one = event("feed-id", "0.1", "2026-06-29", "2026-07-15");
+    let mut record_revision = event("document-id", "0.1", "2026-06-30", "2026-07-15");
+    record_revision.source = "another-source".into();
+    let result = report(&repo, &[one.clone(), record_revision], "2026-07", "2026-07");
+    assert_eq!(result.months[0].total, None);
+    assert_eq!(result.ignored_event_count, 2);
+    let mut payment_revision = event("document-id", "0.1", "2026-06-29", "2026-08-15");
+    payment_revision.source = "another-source".into();
+    let result = report(&repo, &[one, payment_revision], "2026-07", "2026-08");
+    assert!(result.months.iter().all(|month| month.total.is_none()));
+    assert_eq!(result.ignored_event_count, 2);
+}
+
+#[test]
+fn same_source_distinct_dated_distributions_remain_distinct_with_a_partial_source_mirror() {
+    let dir = TempDir::new().unwrap();
+    let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+    let id = fund(&repo, "TEST11");
+    record(&repo, &id, "2026-05", "10", None, None, "0");
+    let one = event("ordinary", "0.1", "2026-06-29", "2026-07-15");
+    let two = event("extraordinary", "0.2", "2026-06-30", "2026-07-15");
+    let mut mirror = one.clone();
+    mirror.source = "another-source".into();
+    mirror.id = "document-ordinary".into();
+    let result = report(&repo, &[one, two, mirror], "2026-07", "2026-07");
+    assert_eq!(result.months[0].total.as_deref(), Some("3"));
+    assert_eq!(result.months[0].funds[0].events.len(), 2);
+    assert_eq!(result.ignored_event_count, 1);
+}
+
+#[test]
+fn same_source_installments_are_not_a_cross_source_payment_date_revision() {
+    let dir = TempDir::new().unwrap();
+    let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+    let id = fund(&repo, "TEST11");
+    record(&repo, &id, "2026-05", "10", None, None, "0");
+    let one = event("first-installment", "0.1", "2026-06-30", "2026-07-15");
+    let two = event("second-installment", "0.2", "2026-06-30", "2026-08-15");
+    let mut mirror = one.clone();
+    mirror.source = "another-source".into();
+    mirror.id = "document-first-installment".into();
+    let result = report(&repo, &[one, two, mirror], "2026-07", "2026-08");
+    assert_eq!(result.months[0].total.as_deref(), Some("1"));
+    assert_eq!(result.months[1].total.as_deref(), Some("2"));
+    assert_eq!(result.ignored_event_count, 1);
+}
+
+#[test]
+fn a_literal_calendar_month_end_resolves_undated_purchase_eligibility_without_changing_the_record()
+{
+    for (month, cutoff, payment) in [
+        ("2024-02", "2024-02-29", "2024-03-15"),
+        ("2025-12", "2025-12-31", "2026-01-15"),
+        ("2026-06", "2026-06-30", "2026-07-15"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+        let id = fund(&repo, "TEST11");
+        record(&repo, &id, month, "12", None, None, "0");
+        let before = serde_json::to_value(repo.snapshot().unwrap()).unwrap();
+        let end = &payment[..7];
+        let result = report(
+            &repo,
+            &[event("calendar-end", "0.1", cutoff, payment)],
+            end,
+            end,
+        );
+        assert_eq!(result.months[0].total.as_deref(), Some("1.2"));
+        assert_eq!(
+            result.months[0].funds[0].eligible_shares.as_deref(),
+            Some("12")
+        );
+        assert!(result.months[0].funds[0].events[0]
+            .missing_purchase_dates
+            .is_empty());
+        assert_eq!(
+            serde_json::to_value(repo.snapshot().unwrap()).unwrap(),
+            before
+        );
+        let earlier = NaiveDate::parse_from_str(cutoff, "%Y-%m-%d")
+            .unwrap()
+            .pred_opt()
+            .unwrap()
+            .to_string();
+        let ambiguous = report(
+            &repo,
+            &[event("earlier", "0.1", &earlier, payment)],
+            end,
+            end,
+        );
+        assert_eq!(ambiguous.months[0].total, None);
+        assert_eq!(ambiguous.months[0].funds[0].status, "date_required");
+    }
+}
+
+#[test]
+fn weekends_and_verified_historical_equity_closures_prove_eligibility_without_inventing_purchase_dates(
+) {
+    for (prior, month, cutoff, payment, has_closure_source) in [
+        ("2023-08", "2023-09", "2023-09-29", "2023-10-06", false),
+        ("2024-02", "2024-03", "2024-03-28", "2024-04-05", true),
+        ("2024-11", "2024-12", "2024-12-30", "2025-01-14", true),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+        let id = fund(&repo, "TEST11");
+        record(&repo, &id, prior, "10", None, None, "0");
+        record(&repo, &id, month, "2", None, None, "0");
+        let before = serde_json::to_value(repo.snapshot().unwrap()).unwrap();
+        let exported = repo.export_legacy_json().unwrap();
+        let outbox = serde_json::to_value(repo.pending_changes().unwrap()).unwrap();
+        let paid_month = &payment[..7];
+        let result = report(
+            &repo,
+            &[event("dated-public-payout", "0.1", cutoff, payment)],
+            paid_month,
+            paid_month,
+        );
+        let fund = &result.months[0].funds[0];
+        assert_eq!(fund.amount.as_deref(), Some("1.2"));
+        assert_eq!(fund.eligible_shares.as_deref(), Some("12"));
+        assert!(fund.events[0].missing_purchase_dates.is_empty());
+        assert!(fund.events[0]
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("A data de cada compra foi preservada")));
+        assert_eq!(
+            fund.events[0]
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("https://www.b3.com.br/")
+                    && reason.contains("calendario-de-negociacao/feriados/")),
+            has_closure_source
+        );
+        assert_eq!(
+            serde_json::to_value(repo.snapshot().unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(repo.export_legacy_json().unwrap(), exported);
+        assert_eq!(
+            serde_json::to_value(repo.pending_changes().unwrap()).unwrap(),
+            outbox
+        );
+        assert!(repo.snapshot().unwrap().funds[0]
+            .entries
+            .iter()
+            .all(|entry| entry.purchase_date.is_none()));
+        // An earlier cutoff leaves an actual open weekday before month-end.
+        let earlier = NaiveDate::parse_from_str(cutoff, "%Y-%m-%d")
+            .unwrap()
+            .pred_opt()
+            .unwrap()
+            .to_string();
+        let ambiguous = report(
+            &repo,
+            &[event("earlier-public-payout", "0.1", &earlier, payment)],
+            paid_month,
+            paid_month,
+        );
+        assert_eq!(ambiguous.months[0].total, None);
+        assert_eq!(ambiguous.months[0].funds[0].status, "date_required");
+    }
+}
+
+#[test]
+fn a_reported_later_purchase_day_overrides_the_month_bound_and_unverified_years_stay_ambiguous() {
+    for (month, cutoff, payment) in [
+        ("2023-09", "2023-09-29", "2023-10-06"),
+        ("2024-03", "2024-03-28", "2024-04-05"),
+        ("2024-12", "2024-12-30", "2025-01-14"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+        let id = fund(&repo, "TEST11");
+        record(&repo, &id, month, "10", None, None, "0");
+        let later = NaiveDate::parse_from_str(cutoff, "%Y-%m-%d")
+            .unwrap()
+            .succ_opt()
+            .unwrap()
+            .to_string();
+        record(&repo, &id, month, "2", Some(&later), None, "0");
+        let paid_month = &payment[..7];
+        let result = report(
+            &repo,
+            &[event("dated-public-payout", "0.1", cutoff, payment)],
+            paid_month,
+            paid_month,
+        );
+        let fund = &result.months[0].funds[0];
+        assert_eq!(fund.holdings, "12");
+        assert_eq!(fund.eligible_shares.as_deref(), Some("10"));
+        assert_eq!(fund.amount.as_deref(), Some("1"));
+        assert_eq!(
+            repo.snapshot().unwrap().funds[0].entries[1]
+                .purchase_date
+                .as_deref(),
+            Some(later.as_str())
+        );
+    }
+    let dir = TempDir::new().unwrap();
+    let repo = Repository::open(dir.path().join("portfolio.sqlite")).unwrap();
+    let id = fund(&repo, "TEST11");
+    record(&repo, &id, "2025-12", "10", None, None, "0");
+    let result = report(
+        &repo,
+        &[event(
+            "no-calendar-extrapolation",
+            "0.1",
+            "2025-12-30",
+            "2026-01-14",
+        )],
+        "2026-01",
+        "2026-01",
+    );
+    assert_eq!(result.months[0].total, None);
+    assert_eq!(result.months[0].funds[0].status, "date_required");
+}

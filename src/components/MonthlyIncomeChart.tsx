@@ -21,7 +21,7 @@ function MonthExplanation({ point, partial, until }: { point: MonthlyIncomePoint
     <p className="ov-income-tooltip-title"><strong>{monthShort(point.key)}</strong> · {monthStatus(point)}{partial && <span> · Parcial até {until}</span>}</p>
     {point.expectedFunds.length > 0 && <p>{point.incomeRecorded} de {point.expectedFunds.length} {point.expectedFunds.length === 1 ? 'fundo' : 'fundos'} com rendimento {apiFunds.length ? 'disponível' : 'registrado'}.</p>}
     {!point.recorded && apiFunds.length === 0 && <p>Nenhum lançamento neste mês. Isso não confirma rendimento zero.</p>}
-    {apiFunds.length > 0 && <p>Preenchido automaticamente com os proventos publicados pela B3. Um valor informado por você tem prioridade.</p>}
+    {apiFunds.length > 0 && <p>Preenchido automaticamente com proventos oficiais. Um valor informado por você tem prioridade.</p>}
     {point.recorded && point.incomeRecorded === 0 && <p>Há lançamentos, mas nenhum rendimento informado neste mês.</p>}
     {funds.length > 0 ? <table>
       <caption className="sr-only">Fundos de {monthShort(point.key)}</caption>
@@ -30,16 +30,17 @@ function MonthExplanation({ point, partial, until }: { point: MonthlyIncomePoint
         <th scope="row">{fund.ticker}</th>
         <td className="num">{quantity(fund.held)}</td>
         <td className={fund.income === null ? 'ov-income-missing' : 'num ov-income-known'}>
-          {fund.income === null ? fund.status === 'date-required' ? 'Informe a data da compra' : 'Sem registro' : <>{money(fund.income)}{(fund.status === 'api' || fund.computedRecordCount > 0) && <span className="ov-income-origin">{fund.status === 'api' ? 'B3 · automático' : 'calculado'}</span>}</>}
+          {fund.income === null ? fund.status === 'date-required' ? 'Informe a data da compra' : 'Sem registro' : <>{money(fund.income)}{(fund.status === 'api' || fund.computedRecordCount > 0) && <span className="ov-income-origin">{fund.status === 'api' ? 'oficial · automático' : 'calculado'}</span>}</>}
         </td>
       </tr>)}</tbody>
     </table> : <p>Não há cotas acumuladas nem rendimento informado no histórico desse mês.</p>}
     {hasCarriedShares && <p>Sem novas compras: as cotas anteriores continuam no saldo.</p>}
     {apiFunds.map((fund) => <div className="ov-income-events" key={fund.id}>
-      <strong>{fund.ticker} · cálculo B3</strong>
-      {fund.apiEvents?.map((event) => <p key={event.id}>
+      <strong>{fund.ticker} · provento oficial</strong>
+      {fund.apiEvents?.map((event) => <p key={`${event.source}-${event.id}`}>
         {quantity(event.eligibleShares ?? '0')} cotas com direito × {quantity(event.amountPerShare)} R$/cota = {money(event.amount ?? '0')}.<br />
-        Data-com {dateBR(event.recordDate)} · pagamento {dateBR(event.paymentDate)}. <PublicSourceLink href={event.sourceUrl}>Ver na B3</PublicSourceLink>
+        Data-com {dateBR(event.recordDate)} · pagamento {dateBR(event.paymentDate)}.<br />
+        Fonte: {event.source}. <PublicSourceLink href={event.sourceUrl}>Ver documento ou fonte</PublicSourceLink>
       </p>)}
     </div>)}
     {funds.some((fund) => fund.computedRecordCount > 0) && <p>Calculado com as cotas acumuladas e o rendimento por cota informado para este mês.</p>}
@@ -102,7 +103,7 @@ export default function MonthlyIncomeChart({ points, until }: { points: MonthlyI
         </div>
       </div>
     </div>
-    <p className="ov-income-hint">Passe o mouse, toque ou foque um mês para ver os fundos e as cotas acumuladas. <span>{points.some((point) => point.apiFundCount) ? 'Inclui proventos da B3 calculados pelas cotas com direito. Valores informados por você têm prioridade.' : 'O total soma apenas os rendimentos registrados; as lacunas serão preenchidas quando houver dados da B3.'}</span></p>
+    <p className="ov-income-hint">Passe o mouse, toque ou foque um mês para ver os fundos e as cotas acumuladas. <span>{points.some((point) => point.apiFundCount) ? 'Inclui proventos oficiais calculados pelas cotas com direito. Valores informados por você têm prioridade.' : 'O total soma apenas os rendimentos registrados; as lacunas serão preenchidas quando houver proventos oficiais disponíveis.'}</span></p>
     {average !== null && <p className="ov-income-average">Média dos valores registrados em {closed.length} meses fechados: <span className="num">{money(average)}</span>.</p>}
     <div className="sr-only"><table>
       <caption>Proventos por mês</caption>

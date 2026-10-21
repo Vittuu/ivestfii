@@ -10,6 +10,14 @@ A visão geral reúne FIIs, pós-fixado identificado e caixinhas da carteira sel
 
 Para uma caixinha, `resultado = saldo + resgates acumulados − aplicações acumuladas`. Resgates podem incluir principal e juros. O saldo já contém os rendimentos; não se soma uma projeção de juros nem o indicador de 12 meses do pós-fixado. Os proventos da API completam somente os fundos e meses sem rendimento declarado, preservando a prioridade de um valor manual, inclusive zero.
 
+Os rendimentos antigos podem ser completados pelos avisos oficiais de **Rendimentos e Amortizações do Fundos.NET**. Cada evento preserva o valor por cota com a precisão publicada, a data-base de direito ao pagamento, a data de pagamento e o documento de origem. O app valida CNPJ, código de negociação e ISIN da cota ordinária; recibos de subscrição e devoluções de capital não viram rendimentos dessas cotas. Pagamentos futuros não entram no resultado realizado até a data consultada. O valor derivado usa o evento oficial e as cotas elegíveis registradas; não cria um comprovante de recebimento na corretora.
+
+Um rendimento informado pelo usuário tem prioridade para o fundo e mês, inclusive quando o total declarado é zero. Entre fontes públicas, eventos com o mesmo fundo, data-base, pagamento e valor são contados uma vez, mesmo que tenham IDs diferentes na B3 e no Fundos.NET. Valores ou datas conflitantes deixam o pagamento pendente de conciliação; o app não escolhe silenciosamente uma versão. O índice oficial de documentos ativos controla substituições e cancelamentos, para que um aviso antigo removido não continue somando dinheiro.
+
+O preenchimento do histórico é separado dos lançamentos: não altera compras, rendimentos manuais, saldos importados ou a fila de sincronização. Ausência de documento ou de data não significa pagamento zero. Quando a data-base cai antes do fim de um mês com compra sem dia informado, o direito dessas novas cotas continua pendente; nenhuma data de compra é inventada. As cotas anteriores permanecem no saldo, e rendimentos conhecidos de outros meses ou fundos não são apagados.
+
+Uma compra antiga sem dia continua sem data inventada. Quando a data-com é o fim do mês civil, ou todos os dias posteriores são fins de semana ou fechamentos de renda variável expressamente conferidos no calendário da B3, a elegibilidade pode ser comprovada sem conhecer o dia. O calendário conferido inclui 29/03/2024 e 31/12/2024; outros feriados não são extrapolados. Se ainda puder existir pregão após a data-com, o cálculo exige o dia da compra. Uma data de compra explicitamente informada sempre prevalece.
+
 Os cartões podem reunir os últimos saldos de datas diferentes; a tabela identifica essas datas. Um registro mensal da carteira inteira exige que todos os componentes ativos tenham valores na mesma data. Saldo ausente ou base de aplicação desconhecida não equivalem a zero.
 
 ## Duas linhas mensais
@@ -44,9 +52,15 @@ São valores brutos, sem cálculo de impostos ou taxas. Proventos dos FIIs entra
 
 ## Fontes e limites
 
-O gráfico reaproveita o histórico diário CDI e os proventos já consultados pelo aplicativo. A primeira reconstrução consulta os fechamentos históricos que faltam por ativo/mês e os arquivos mensais de cotas CVM, priorizando os últimos meses e as datas de entrada. Os resultados são guardados incrementalmente em `public-data/historical-prices.json` e `public-data/fund-nav.json`; as próximas leituras do gráfico e do MCP são locais. O preenchimento inicial ocorre em lotes limitados, sem exigir clique a cada mês. A interface pode ler o progresso do cache enquanto a consulta está em andamento.
+O gráfico reaproveita o histórico diário CDI e os proventos já consultados pelo aplicativo. A primeira reconstrução consulta os fechamentos históricos que faltam por ativo/mês, os arquivos mensais de cotas CVM e os avisos antigos de rendimentos do Fundos.NET. Os resultados são guardados incrementalmente em `public-data/historical-prices.json`, `public-data/fund-nav.json` e `public-data/historical-dividends.json`; as próximas leituras do gráfico e do MCP são locais. O preenchimento inicial ocorre em lotes limitados, sem exigir clique a cada mês. A interface pode ler o progresso do cache enquanto a consulta está em andamento.
 
 O histórico de preços tem orçamento próprio de 160 consultas em 24 horas, até 48 por lote, preservando o limite gratuito do provedor. Cotas CVM usam até 16 arquivos mensais por lote e orçamento de 48 arquivos por dia, incluindo o cadastro. Meses encerrados têm cache semanal; falhas e limites preservam os dados anteriores e respeitam o intervalo de tentativas. Não há consumo adicional da chave brapi para essas fontes. Somente nomes/códigos públicos dos fundos, CNPJs e períodos são usados nas consultas, sem valores dos aportes, carteira, perfil ou conversa.
+
+O Fundos.NET utiliza um limite local prudente de **24 requisições por lote e 240 por dia de Brasília e por janela móvel de 24 horas**. Esse é um controle do aplicativo, não uma promessa de franquia publicada pela fonte. Abertura do índice público, páginas de resultados, documentos e tentativas que falharam consomem o mesmo orçamento; a reserva fica salva antes da chamada HTTP. A paginação é conferida até o fim e os documentos ativos são validados individualmente. Não se usa a exportação em massa protegida por CAPTCHA nem se contornam restrições de acesso.
+
+O índice de avisos tem cache diário. Os documentos já validados são reaproveitados por ID e versão, sem consultar novamente cada pagamento ao abrir o gráfico. Falhas respeitam o intervalo de novas tentativas; respostas de limite respeitam `Retry-After`, e bloqueios de acesso interrompem novas chamadas. Durante uma conferência incompleta, o último arquivo completo preserva os valores conhecidos, inclusive quando o período pedido aumenta. A comparação conclusiva com o CDI fica pendente até que os documentos necessários estejam conferidos. Uma lista vazia não comprova ausência de rendimentos.
+
+As consultas históricas de proventos enviam somente a identidade pública do fundo e o período. Quantidades de cotas, valores investidos, perfil e conversas permanecem locais. O cache guarda eventos públicos e metadados de cobertura, com arquivo separado de controle das tentativas; não contém credenciais de corretora ou a chave brapi. O mesmo cache atende à interface e ao MCP.
 
 A cotação atual não comprova preços históricos. Dados ajustados de mercado não podem ser somados novamente aos proventos como se fossem preços brutos. Os meses antigos não são calculados repetindo o rendimento atual ou usando um indicador de 12 meses. Datas de aplicação e valores já informados são usados como base declarada, sem pressupor depósitos originais diferentes.
 
@@ -55,3 +69,6 @@ A cotação atual não comprova preços históricos. Dados ajustados de mercado 
 - [brapi: regras dos preços históricos ajustados e brutos](https://brapi.dev/docs/acoes/historico).
 - [Dados B3: API e fontes dos preços de FIIs](https://dadosb3.com/api).
 - [CVM: Informe Diário de Fundos e cotas históricas](https://dados.cvm.gov.br/dataset/fi-doc-inf_diario).
+- [Fundos.NET: consulta pública de documentos oficiais](https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosCVM?paginaCertificados=false).
+
+- [B3: calendário de negociação, seção de 2024](https://www.b3.com.br/pt_br/solucoes/plataformas/puma-trading-system/para-participantes-e-traders/calendario-de-negociacao/feriados/).

@@ -419,7 +419,8 @@ pub fn reconstruct_portfolio_evolution(
         };
         match attempt() {
             Ok((invested, result, components, income_complete, mut issues)) => {
-                let (cdi, cdi_issues) = reconstructed_month_cdi(snapshot, rates, cutoff, today)?;
+                let (cdi, cdi_issues, cdi_dates_estimated) =
+                    reconstructed_month_cdi(snapshot, rates, cutoff, today)?;
                 issues.extend(cdi_issues);
                 let mut assumptions = vec![
                     "Fechamento reconstruído com preços públicos reais e quantidades compradas no histórico. Não é um saldo mensal observado na corretora.".into(),
@@ -453,7 +454,9 @@ pub fn reconstruct_portfolio_evolution(
                 }
                 .into();
                 point.issues = issues;
-                point.estimated = false;
+                // The market prices and published income are real observations;
+                // this flag describes only a legacy CDI cash-flow date convention.
+                point.estimated = cdi_dates_estimated;
                 point.is_partial_month = false;
                 point.provenance = Some(HistoricalMonthlyProvenance {
                     kind: "reconstructed".into(),
@@ -650,7 +653,7 @@ mod tests {
             actual.points[0].provenance.as_ref().unwrap().components[0].as_of,
             "2026-01-30"
         );
-        assert!(!actual.points[0].estimated);
+        assert!(actual.points[0].estimated);
         assert!(actual.points[0]
             .issues
             .iter()
@@ -688,6 +691,60 @@ mod tests {
                 .income_complete
         );
         assert!(actual.points[0].difference.is_some());
+    }
+
+    #[test]
+    fn legacy_cdi_date_metadata_does_not_label_real_prices_or_income_as_estimated_values() {
+        let undated = fii();
+        let mut dated = undated.clone();
+        // Friday's purchase and the legacy Saturday month-end convention both
+        // settle after the same last daily interest rate. Their CDI amounts are
+        // identical here; only one purchase actually has its day documented.
+        dated.funds[0].entries[0].purchase_date = Some("2026-01-30".into());
+        let history = HistoricalValuationData {
+            prices: prices(),
+            fixed_income: None,
+        };
+        let original = serde_json::to_value(&undated).unwrap();
+        let approximate = evolution(&undated, &history, &[]);
+        let exact = evolution(&dated, &history, &[]);
+        assert_eq!(
+            approximate
+                .points
+                .iter()
+                .filter(|point| point.provenance.is_some())
+                .count(),
+            2
+        );
+        for (left, right) in approximate
+            .points
+            .iter()
+            .zip(&exact.points)
+            .filter(|(left, _)| left.provenance.is_some())
+        {
+            assert!(left.estimated);
+            assert!(!right.estimated);
+            assert_eq!(left.portfolio_result, right.portfolio_result);
+            assert_eq!(left.invested, right.invested);
+            assert_eq!(left.cdi_result, right.cdi_result);
+            assert_eq!(left.difference, right.difference);
+            assert!(left.provenance.as_ref().unwrap().income_complete);
+            assert_eq!(left.provenance, right.provenance);
+            assert!(left
+                .issues
+                .iter()
+                .any(|issue| issue.contains("compras antigas sem dia")));
+            assert!(!right
+                .issues
+                .iter()
+                .any(|issue| issue.contains("compras antigas sem dia")));
+        }
+        assert_eq!(serde_json::to_value(&undated).unwrap(), original);
+        assert!(undated.funds[0].entries[0].purchase_date.is_none());
+        assert_eq!(
+            dated.funds[0].entries[0].purchase_date.as_deref(),
+            Some("2026-01-30")
+        );
     }
 
     #[test]
@@ -1108,11 +1165,11 @@ mod tests {
             .filter(|rate| rate.date.as_str() <= "2024-03-31")
             .cloned()
             .collect::<Vec<_>>();
-        let (pending_publication, _) =
+        let (pending_publication, _, _) =
             reconstructed_month_cdi(&original, &without_resumption, date("2024-03-31"), today)
                 .unwrap();
         assert!(pending_publication.is_none());
-        let (live, _) = reconstructed_month_cdi(
+        let (live, _, _) = reconstructed_month_cdi(
             &original,
             &without_resumption,
             date("2024-03-31"),
@@ -1122,7 +1179,7 @@ mod tests {
         assert!(live.is_none());
         rates
             .retain(|rate| rate.date.as_str() <= "2024-03-20" || rate.date.as_str() > "2024-03-31");
-        let (stale, _) =
+        let (stale, _, _) =
             reconstructed_month_cdi(&original, &rates, date("2024-03-31"), today).unwrap();
         assert!(stale.is_none());
     }

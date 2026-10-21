@@ -109,7 +109,7 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
           </section>
           <section className="ov-recent-income" aria-label="Últimos rendimentos registrados de FIIs">
             <SectionHeading title="Últimos rendimentos" level={3}><TextLink onClick={() => onNavigate('portfolio', 'history')}>Ver todos</TextLink></SectionHeading>
-            <p className="ov-recent-income-note">Lançamentos do histórico. Os proventos da B3, quando disponíveis, também entram no gráfico e nos totais acima.</p>
+            <p className="ov-recent-income-note">Lançamentos do histórico. Os proventos oficiais, quando disponíveis, também entram no gráfico e nos totais acima.</p>
             {recent.income.length ? <div className="table-wrap">
               <table className="ov-table ov-recent-table">
                 <caption className="sr-only">Rendimentos mais recentes registrados no histórico de FIIs</caption>
@@ -134,7 +134,7 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
               <div className="readouts ov-readouts"><div className="readout"><span className="figure-label"><Def text={`Soma dos proventos informados e calculados pela B3 de ${monthShort(closedKeys[0])} a ${monthShort(closedKeys[11])}, meses fechados, dividida pelo custo de aquisição. Meses sem dados não confirmam rendimento zero. Não inclui a variação do preço dos fundos.`}>Proventos sobre o custo (12 meses)</Def></span><span className="figure-value">{yieldOnCost === null ? '—' : percent(yieldOnCost)}</span></div></div>
             </div>
             <div className="block span-8 ov-income">
-              <SectionHeading title="Proventos por mês" level={3}><span className="ov-head-figure"><Def text={`Soma dos rendimentos informados e preenchidos pela B3 de ${period}. Sem novas compras, as cotas anteriores continuam. Cada cálculo automático usa o provento real e as cotas com direito na data-com; um valor informado por você tem prioridade. ${monthShort(currentKey)} parcial, até ${untilLabel}, aparece hachurado.`}>em 12 meses</Def><span className="num">{hasIncome ? money(total12) : '—'}</span></span></SectionHeading>
+              <SectionHeading title="Proventos por mês" level={3}><span className="ov-head-figure"><Def text={`Soma dos rendimentos informados e preenchidos pelas fontes oficiais de ${period}. Sem novas compras, as cotas anteriores continuam. Cada cálculo automático usa o provento real e as cotas com direito na data-com; um valor informado por você tem prioridade. ${monthShort(currentKey)} parcial, até ${untilLabel}, aparece hachurado.`}>em 12 meses</Def><span className="num">{hasIncome ? money(total12) : '—'}</span></span></SectionHeading>
               <MonthlyIncomeChart points={points} until={untilLabel} />
             </div>
           </div>

@@ -659,7 +659,7 @@ pub(crate) fn reconstructed_month_cdi(
     rates: &[DailyCdiRate],
     cutoff: NaiveDate,
     today: NaiveDate,
-) -> Result<(Option<String>, Vec<String>)> {
+) -> Result<(Option<String>, Vec<String>, bool)> {
     let basis = movements(snapshot, cutoff)?;
     let mut issues = basis.issues.clone();
     if basis.estimated {
@@ -760,7 +760,7 @@ pub(crate) fn reconstructed_month_cdi(
             }
         }
     }
-    Ok((result, issues))
+    Ok((result, issues, basis.estimated))
 }
 
 fn earliest_flow(snapshot: &PortfolioSnapshot, today: NaiveDate) -> Result<Option<NaiveDate>> {
@@ -1892,7 +1892,8 @@ mod tests {
     }
 
     #[test]
-    fn changed_event_identity_that_changes_conflict_resolution_invalidates_result() {
+    fn provider_identity_does_not_resolve_a_rate_conflict_but_a_distinct_dated_payment_changes_basis(
+    ) {
         let original = with_fii();
         let first = event("0.5");
         let mut conflict = event("0.6");
@@ -1904,6 +1905,31 @@ mod tests {
         )
         .unwrap();
         conflict.id = "different-economic-payment".into();
+        // A different provider identifier does not establish a second payout
+        // for the same entitlement and payment dates. Both rates still conflict.
+        assert_eq!(
+            captured.basis_fingerprint,
+            basis_fingerprint(
+                &original,
+                &[first.clone(), conflict.clone()],
+                day("2026-01-09"),
+            )
+            .unwrap()
+        );
+        let report = evolution(
+            &original,
+            &rates(),
+            &[first.clone(), conflict.clone()],
+            &[],
+            Some(&captured),
+            day("2026-01-09"),
+        )
+        .unwrap();
+        assert_eq!(report.points[0].portfolio_result.as_deref(), Some("10"));
+        // The same source independently documents two distinct data-com dates.
+        // Resolving that actual economic distinction changes known income and
+        // invalidates an observation captured with the previously missing total.
+        conflict.record_date = "2026-01-06".into();
         let report = evolution(
             &original,
             &rates(),

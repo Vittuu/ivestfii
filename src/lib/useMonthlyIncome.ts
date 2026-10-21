@@ -4,7 +4,7 @@ import type { MonthlyIncomeReport, Snapshot } from './bridge';
 import { readPublicCache, usePublicData } from './publicData';
 import { applyMonthlyIncomeReport, buildMonthlyIncome } from './monthlyIncome';
 
-/** Reads the local B3 cache only. Network refresh is shared by the app, never by a tooltip. */
+/** Reads the local official payout caches only. Refresh is shared, never triggered by a tooltip. */
 export function useMonthlyIncome(walletId: string, snapshot: Snapshot, monthKeys: string[]) {
   const publicData = usePublicData();
   const input = JSON.stringify([walletId, snapshot.funds.map((fund) => [fund.id, fund.ticker, fund.entries]), monthKeys]);

@@ -256,6 +256,9 @@ fn unknown_purchase_day_and_missing_events_keep_explicit_partial_income_coverage
     record(&repo, &id, "2026-03", "2", None, None);
     let mut events = events();
     events[1].record_date = "2026-03-10".into();
+    // An actual cutoff before month-end remains ambiguous. A literal March 31
+    // data-com would now safely include every possible March purchase day.
+    events[3].record_date = "2026-03-30".into();
     let result = calculate_fii_performance_with_income(
         &repo.snapshot().unwrap(),
         &quote("2026-04-30"),

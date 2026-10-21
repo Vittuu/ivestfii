@@ -8,7 +8,7 @@ use crate::{
 use chrono::{Datelike, NaiveDate};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -207,6 +207,10 @@ pub fn calculate_monthly_income(
             },
         );
     }
+    // Source identifiers are useful for detecting revisions, but are not an
+    // economic identity: a B3 event and an administrator document can describe
+    // the same payment. Reconcile those mirrors before multiplying by shares.
+    let validated = reconcile_events(validated, &mut unresolved_months, &mut ignored_event_count);
     let mut months = Vec::with_capacity(count as usize);
     for offset in 0..count {
         let index = start.year() * 12 + start.month0() as i32 + offset;
@@ -354,6 +358,8 @@ fn fund_month(
         let mut eligible = Decimal::ZERO;
         let record_month = event.record_date.format("%Y-%m").to_string();
         let mut missing_dates = Vec::new();
+        let closed_month_sources = equity_month_closed_after(event.record_date);
+        let mut used_undated_month_bound = false;
         for entry in &fund.entries {
             let shares = parse_nonnegative(&entry.cotas_added, "Quantidade de cotas")?;
             if shares.is_zero() || entry.month > record_month {
@@ -365,20 +371,48 @@ fn fund_month(
                 }
                 Some(_) => {}
                 None if entry.month < record_month => eligible = add(eligible, shares)?,
+                None if closed_month_sources.is_some() => {
+                    // No possible equity-market purchase session remains after
+                    // data-com in this month. This proves eligibility without
+                    // assigning an invented day to the historical purchase.
+                    eligible = add(eligible, shares)?;
+                    used_undated_month_bound = true;
+                }
                 None => missing_dates.push(entry.id.clone()),
             }
         }
         let known = missing_dates.is_empty();
+        let mut reasons = if known {
+            Vec::new()
+        } else {
+            vec!["Há compras no mês da data-com sem dia informado. Informe a data dessas compras para calcular as cotas com direito ao provento.".into()]
+        };
+        if known && used_undated_month_bound {
+            reasons.push("As compras sem dia informado deste mês eram elegíveis: não havia outro dia possível de negociação de renda variável após a data-com até o fim do mês. A data de cada compra foi preservada.".into());
+            reasons.extend(closed_month_sources.unwrap().into_iter().map(|url| {
+                format!("Calendário de negociação da B3 confirmado para esse período: {url}")
+            }));
+        }
         result.events.push(IncomeEventCalculation {
-            id: event.raw.id.clone(), symbol: fund.ticker.clone(),
+            id: event.raw.id.clone(),
+            symbol: fund.ticker.clone(),
             amount_per_share: decimal_string(event.amount_per_share),
-            record_date: event.raw.record_date.clone(), payment_date: event.raw.payment_date.clone(),
-            source_url: event.raw.source_url.clone(), source: event.raw.source.clone(),
+            record_date: event.raw.record_date.clone(),
+            payment_date: event.raw.payment_date.clone(),
+            source_url: event.raw.source_url.clone(),
+            source: event.raw.source.clone(),
             status: if known { "api" } else { "date_required" }.into(),
             eligible_shares: known.then(|| decimal_string(eligible)),
-            amount: if known { Some(decimal_string(money(mul(eligible, event.amount_per_share)?))) } else { None },
+            amount: if known {
+                Some(decimal_string(money(mul(
+                    eligible,
+                    event.amount_per_share,
+                )?)))
+            } else {
+                None
+            },
             missing_purchase_dates: missing_dates,
-            reasons: if known { Vec::new() } else { vec!["Há compras no mês da data-com sem dia informado. Informe a data dessas compras para calcular as cotas com direito ao provento.".into()] },
+            reasons,
         });
     }
     result.events.sort_by(|a, b| {
@@ -427,6 +461,131 @@ fn mark_unresolved_month(
     if let Some(payment_date) = parse_date(&event.payment_date).filter(|date| *date <= today) {
         unresolved.insert((symbol.into(), payment_date.format("%Y-%m").to_string()));
     }
+}
+
+/// Reconcile event mirrors independently from source-specific identifiers.
+/// Different rates on the same dated entitlement are not separate income.
+/// Different dates published by different sources are not summed unless one
+/// source independently lists the complete set of distinct dated payments.
+fn reconcile_events<'a>(
+    mut events: BTreeMap<(String, String, String), ValidEvent<'a>>,
+    unresolved: &mut HashSet<(String, String)>,
+    ignored: &mut usize,
+) -> BTreeMap<(String, String, String), ValidEvent<'a>> {
+    type Identity = (String, String, String);
+    let mut rejected = BTreeSet::<Identity>::new();
+    let mut dated = BTreeMap::<(String, NaiveDate, NaiveDate), Vec<Identity>>::new();
+    for (identity, event) in &events {
+        dated
+            .entry((identity.0.clone(), event.record_date, event.payment_date))
+            .or_default()
+            .push(identity.clone());
+    }
+    for identities in dated.values() {
+        let rates = identities
+            .iter()
+            .map(|identity| events[identity].amount_per_share)
+            .collect::<BTreeSet<_>>();
+        if rates.len() > 1 {
+            rejected.extend(identities.iter().cloned());
+        }
+    }
+    // Check both kinds of boundary revision. A genuine installment can share
+    // data-com with another payment; a genuine extra distribution can share its
+    // payment date. A source listing both establishes that distinct set, while
+    // two sources each listing a different lone boundary do not establish it.
+    for group_by_payment in [true, false] {
+        let mut boundaries = BTreeMap::<(String, NaiveDate), Vec<Identity>>::new();
+        for (identity, event) in &events {
+            let boundary = if group_by_payment {
+                event.payment_date
+            } else {
+                event.record_date
+            };
+            boundaries
+                .entry((identity.0.clone(), boundary))
+                .or_default()
+                .push(identity.clone());
+        }
+        for identities in boundaries.values() {
+            let mut sources = BTreeMap::<&str, BTreeSet<NaiveDate>>::new();
+            let mut all = BTreeSet::new();
+            for identity in identities {
+                let event = &events[identity];
+                let counterpart = if group_by_payment {
+                    event.record_date
+                } else {
+                    event.payment_date
+                };
+                all.insert(counterpart);
+                sources
+                    .entry(event.raw.source.trim())
+                    .or_default()
+                    .insert(counterpart);
+            }
+            if all.len() > 1 && sources.len() > 1 && !sources.values().any(|dates| dates == &all) {
+                rejected.extend(identities.iter().cloned());
+            }
+        }
+    }
+    for identity in rejected {
+        if let Some(event) = events.remove(&identity) {
+            unresolved.insert((identity.0, event.payment_date.format("%Y-%m").to_string()));
+            *ignored += 1;
+        }
+    }
+    let mut reconciled = BTreeMap::new();
+    for identities in dated.into_values() {
+        let mut candidates = identities
+            .into_iter()
+            .filter_map(|identity| events.remove(&identity).map(|event| (identity, event)))
+            .collect::<Vec<_>>();
+        candidates.sort_by(|(_, left), (_, right)| {
+            event_provenance_order(left.raw).cmp(&event_provenance_order(right.raw))
+        });
+        if !candidates.is_empty() {
+            *ignored += candidates.len() - 1;
+            let (identity, event) = candidates.remove(0);
+            reconciled.insert(identity, event);
+        }
+    }
+    reconciled
+}
+
+fn event_provenance_order(event: &IncomeEvent) -> (u8, &str, &str, &str) {
+    let source = event.source.trim();
+    let is_b3 = source.eq_ignore_ascii_case("b3")
+        || source
+            .get(.."B3 ·".len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("B3 ·"));
+    ((!is_b3) as u8, source, &event.source_url, &event.id)
+}
+
+/// An undated purchase can be eligible without guessing its day only when no
+/// equity-trading session was possible after data-com through calendar month-end.
+/// Weekends are deterministic; weekday closures below are pinned to historical
+/// dates explicitly confirmed by B3, never extrapolated into another year.
+fn equity_month_closed_after(date: NaiveDate) -> Option<Vec<&'static str>> {
+    // B3's official calendar, specifically its archived 2024 section: March 29
+    // and December 31 list no equity-market trading. This is not a generated
+    // holiday calendar and does not assume the same closures in any other year.
+    const B3_2024_CALENDAR: &str = "https://www.b3.com.br/pt_br/solucoes/plataformas/puma-trading-system/para-participantes-e-traders/calendario-de-negociacao/feriados/";
+    let mut current = date;
+    let mut sources = BTreeSet::new();
+    while let Some(next) = current.succ_opt() {
+        if next.month() != date.month() {
+            return Some(sources.into_iter().collect());
+        }
+        if !matches!(next.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun) {
+            let source = match (next.year(), next.month(), next.day()) {
+                (2024, 3, 29) | (2024, 12, 31) => B3_2024_CALENDAR,
+                _ => return None,
+            };
+            sources.insert(source);
+        }
+        current = next;
+    }
+    None
 }
 
 fn parse_date(value: &str) -> Option<NaiveDate> {

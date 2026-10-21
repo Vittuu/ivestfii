@@ -176,7 +176,7 @@ export interface MonthlyIncomeReport {
   }[];
 }
 
-export type PublicDataSourceId = 'economics' | 'news' | 'quotes' | 'cvm' | 'cdiHistory' | 'dividends' | 'historicalValuations';
+export type PublicDataSourceId = 'economics' | 'news' | 'quotes' | 'cvm' | 'cdiHistory' | 'dividends' | 'historicalValuations' | 'historicalIncome';
 export interface PublicDataSourceState {
   id: PublicDataSourceId;
   status: 'updated' | 'cached' | 'unavailable' | 'not_configured' | 'deferred' | 'unsupported';
@@ -221,6 +221,13 @@ export interface FiiPerformance {
   portfolioBenchmark?: PortfolioBenchmark | null;
   portfolioEvolution?: PortfolioEvolution | null;
   historicalData?: { status: string; priceObservations: number; pricePending: number; navObservations: number; navPendingMonths: number; issues: string[] } | null;
+  historicalIncome?: {
+    status: string;
+    eventCount: number;
+    pendingDocuments: number;
+    sources: { symbol: string; startDate: string; endDate: string; listingComplete: boolean; documentsTotal: number; documentsPending: number; complete: boolean; fetchedAt: string | null }[];
+    issues: string[];
+  } | null;
 }
 
 export interface CdiPerformance {

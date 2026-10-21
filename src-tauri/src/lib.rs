@@ -346,9 +346,11 @@ fn get_monthly_income(
         .unwrap_or_default();
     // Cached public events supply the rate/date. The calculation is ephemeral:
     // it never inserts a receipt or changes the user's recorded purchases.
+    let events = ivestfii_market_data::income_history::read_cache(&snapshot, &state.data_directory, &panel, performance_today())
+        .map(|data| data.events).unwrap_or_else(|_| ivestfii_market_data::dividends::income_events(&panel));
     ivestfii_core::income::calculate_monthly_income(
         &snapshot,
-        &ivestfii_market_data::dividends::income_events(&panel),
+        &events,
         &start_month,
         &end_month,
         performance_today(),
@@ -408,7 +410,7 @@ async fn refresh_fii_performance(
     let (key, _) = market_settings(&state)?.brapi_key()?;
     // Reuse the B3 cache and its own daily cadence; opening or refreshing the
     // result must not bypass the shared public-source request policy.
-    let (quote_result, dividend_result, historical_result) = tokio::join!(
+    let (quote_result, dividend_result, historical_result, income_result) = tokio::join!(
         ivestfii_market_data::bounded_quotes(&quotes, &symbols, key.as_deref()),
         tokio::time::timeout(
             std::time::Duration::from_secs(45),
@@ -419,7 +421,12 @@ async fn refresh_fii_performance(
             &state.data_directory,
             today,
         ),
+        ivestfii_market_data::income_history::refresh_if_due(&snapshot, &state.data_directory, today),
     );
+    match income_result {
+        Ok(coverage) => errors.extend(coverage.issues),
+        Err(error) => errors.push(error),
+    }
     match historical_result {
         Ok(coverage) => errors.extend(coverage.issues),
         Err(error) => errors.push(error),
@@ -466,22 +473,15 @@ async fn refresh_fii_performance(
             Err(error) => errors.push(error),
         }
     }
-    let report = performance::build_report_with_income(
+    let report = performance::build_report_with_public_history(
         &snapshot,
+        &state.data_directory,
         &panel,
         history.as_ref(),
         &dividend_panel,
         today,
         errors,
     )?;
-    let report = performance::attach_historical_cache(
-        &snapshot,
-        &state.data_directory,
-        report,
-        history.as_ref(),
-        &dividend_panel,
-        today,
-    );
     let repository = selected_repository(&state, wallet_id.as_deref())?;
     Ok(remember_portfolio_observation(&repository, report))
 }
