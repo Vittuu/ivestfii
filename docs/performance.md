@@ -40,6 +40,10 @@ O histórico privado observado fica na tabela SQLite `performance_history` (sche
 
 O relatório fornece `portfolioEvolution.latestKnown` separadamente de `points`, com `fromDate`, `toDate` e as datas dos componentes. Esse valor já faz parte de `portfolio.totalResult`; não deve ser somado novamente nem tratado como saldo histórico na data mais recente do intervalo. O marcador é derivado dos dados disponíveis, sem gravação em `performance_history` e sem novas consultas de API.
 
+Quando os últimos saldos têm datas diferentes ou o CDI ainda não cobre uma cotação recente, a tabela por investimento pode mostrar o último fechamento mensal reconstruído com comparação completa. O título e a explicação identificam a data comum; todas as linhas, os resultados e o CDI são desse fechamento. Os cartões e o marcador de últimos valores continuam com suas datas e valores mais recentes. Não se preenche apenas uma célula CDI antiga ao lado de um resultado novo. Sem fechamento completo, a pendência continua explícita.
+
+O relatório fornece esse bloco separado como `comparableBenchmark`, com a mesma estrutura de `portfolioBenchmark`. Ele não entra novamente nos totais e não cria registros financeiros. As consultas continuam locais, usando os mesmos caches de preços, cotas, proventos e CDI.
+
 ## Cenário CDI
 
 A linha CDI utiliza taxas diárias históricas **SGS12**, em percentual ao dia. Para cada aporte, o juro começa depois da data informada; os resgates reduzem o cenário na data correspondente. Nas compras antigas sem dia conhecido, mantém-se a hipótese de fim do mês, explicitada na interface. Percentual contratado de uma caixinha e a taxa anual fixada para projeções não substituem a série histórica a 100% do CDI.

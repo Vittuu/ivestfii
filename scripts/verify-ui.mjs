@@ -228,6 +228,12 @@ const benchmarkCashOnly={...benchmarkCash,result:'30',invested:'200',returnPerce
 const benchmarkCashNegative={...benchmarkCash,result:'-25',invested:'200',returnPercent:'-12.5',cdi:{endingValue:'213',result:'13',returnPercent:'6.5'},difference:'-38',components:[benchmarkCash.components[0],{...benchmarkCash.components[1],invested:'100',result:'-20',cdi:{endingValue:'105',result:'5',returnPercent:'5'}}]};
 const benchmarkCashPending={...benchmarkCash,status:'incomplete',result:null,invested:null,returnPercent:null,cdi:null,difference:null,issues:['Informe as datas dos depósitos e retiradas nas caixinhas para comparar com o CDI.'],components:[benchmarkCash.components[0],{...benchmarkCash.components[1],startDate:null,asOf:null,invested:null,result:null,cdi:null,issues:['Informe as datas dos depósitos e retiradas.']}]};
 const benchmarkOther={status:'available',startDate:'2020-01-02',asOf:'2020-02-03',result:'40',invested:'480',returnPercent:'8.3333333333',cdi:{endingValue:'495',result:'15',returnPercent:'3.125'},difference:'25',issues:[],assumptions:[],components:[{...benchmarkDefault.components[0],invested:'200',result:'20',cdi:{endingValue:'210',result:'10',returnPercent:'5'}},{...benchmarkDefault.components[1],id:'pocket-other',name:'Reserva da outra carteira',invested:'280',result:'20',cdi:{endingValue:'285',result:'5',returnPercent:'1.7857142857'}}]};
+// A complete past cutoff remains separate from the latest mixed-date balances.
+const benchmarkComparable={status:'available',startDate:'2020-01-02',asOf:'2026-09-30',result:'92',invested:'2540',returnPercent:'3.6220472441',cdi:{endingValue:'2610',result:'70',returnPercent:'2.7559055118'},difference:'22',issues:[],assumptions:['CDI: compras antigas sem dia informado usam o fim do mês; essa convenção não altera as cotas no fechamento mensal.'],components:[
+  {...benchmarkDefault.components[0],asOf:'2026-09-30',result:'12',cdi:{endingValue:'1060',result:'20',returnPercent:'1.9230769231'}},
+  {...benchmarkDefault.components[1],asOf:'2026-09-30',result:'30',cdi:{endingValue:'1210',result:'10',returnPercent:'0.8333333333'}},
+  {...benchmarkFixedComponent,asOf:'2026-09-30',result:'50',cdi:{endingValue:'340',result:'40',returnPercent:'13.3333333333'}},
+]};
 // Literal monthly native responses. The UI must not reconstruct past gains
 // from today's balance, price, CDI percentage, or transaction principal.
 const evolutionPoint=(month,asOf,portfolioResult,cdiResult,difference,issues=[],isPartialMonth=false)=>({month,asOf,portfolioResult,cdiResult,difference,invested:'2540',status:portfolioResult!==null&&cdiResult!==null?'available':'incomplete',issues,estimated:false,isPartialMonth});
@@ -410,6 +416,15 @@ function bootstrap(mode) {
     if(mode==='wallet-benchmark-fixed-only'){
       initial.funds=[];initial.totals={invested:'0',cotas:'0',dividendsReceived:'0',estimatedMonthlyIncome:'0'};initial.recordCount=0;initial.cashPockets=[];initial.cashBalance='0';initial.brokerPosition=structuredClone(position);initial.brokerPosition.fixedIncome.latestObservation=structuredClone(fixedIncomeObservation);
       walletPerformance={...fixedIncomePerformance,status:'empty',invested:'0',dividends:'0',marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,portfolio:{...fixedIncomePerformance.portfolio,invested:'300',knownInvested:'300',income:'60',knownIncome:'60',currentValue:'360',knownCurrentValue:'360',totalResult:'60',knownResult:'60',totalReturnPercent:'20',cash:{balance:'0',invested:'0',income:'0',withdrawals:'0',knownInvested:'0',knownIncome:'0',count:0,missingBasisCount:0,items:[]}},portfolioBenchmark:{...benchmarkFixed,status:'available',startDate:'2023-02-01',asOf:'2026-10-20',result:'60',invested:'300',returnPercent:'20',cdi:benchmarkFixedComponent.cdi,difference:'15',components:[benchmarkFixedComponent]}};
+    }
+    if(mode.startsWith('wallet-benchmark-comparable')){
+      Object.assign(initial,structuredClone(snapshot));initial.cashPockets=[structuredClone(cash)];initial.cashBalance='1234.56';initial.brokerPosition.fixedIncome.latestObservation=structuredClone(fixedIncomeObservation);
+      walletPerformance={...structuredClone(fixedIncomeApiPerformance),portfolioBenchmark:{...structuredClone(benchmarkFixedApi),status:'incomplete',cdi:null,difference:null,issues:['Os saldos têm datas diferentes e falta o CDI da data atual.'],components:benchmarkFixedApi.components.map(component=>({...component,cdi:null,issues:['O CDI ainda não cobre a data deste saldo.']}))},comparableBenchmark:structuredClone(benchmarkComparable)};
+      if(mode==='wallet-benchmark-comparable-zero')walletPerformance.comparableBenchmark={...structuredClone(benchmarkComparable),result:'0',returnPercent:'0',cdi:{endingValue:'2540',result:'0',returnPercent:'0'},difference:'0',components:benchmarkComparable.components.map(component=>({...component,result:'0',cdi:{endingValue:component.invested,result:'0',returnPercent:'0'}}))};
+      if(mode==='wallet-benchmark-comparable-incomplete')walletPerformance.comparableBenchmark={...structuredClone(benchmarkComparable),status:'incomplete',cdi:null,difference:null};
+      if(mode==='wallet-benchmark-comparable-mismatched')walletPerformance.comparableBenchmark.components[2].asOf='2026-09-29';
+      if(mode==='wallet-benchmark-comparable-mixed-current')walletPerformance.portfolioBenchmark=structuredClone(benchmarkFixedApi);
+      if(mode==='wallet-benchmark-comparable-current')walletPerformance.portfolioBenchmark={...structuredClone(benchmarkFixedApi),asOf:'2026-10-20',components:benchmarkFixedApi.components.map(component=>({...component,asOf:'2026-10-20'}))};
     }
   }
   if(mode.startsWith('wallet-evolution')){
@@ -2203,6 +2218,57 @@ try {
       await noOverflow(page,mode+'-no-overflow');await shot(page,'desktop-'+mode);
       assert.equal((await calls(page,'refresh_fii_performance')).length,0);await noUnexpectedCommands(page);
       check(mode+'-keeps-known-result-and-explains-comparison-gap-without-FII-fallback');await fixture.context.close();
+    }
+
+    for(const mode of ['wallet-benchmark-comparable','wallet-benchmark-comparable-zero','wallet-benchmark-comparable-mixed-current']){
+      const fixture=await openPage(mode,{width:1440,height:1000}),page=fixture.page,scope=comparisonOf(page),table=rowsOf(page);
+      const original=await page.evaluate(()=>structuredClone(globalThis.__uiTest.snapshot));
+      await scope.getByRole('heading',{name:'Última comparação completa · 30/09/2026',exact:true}).waitFor();
+      await figureEquals(readout(scope,'Resultado da carteira'),'−R$ 775,54');
+      await textMatches(scope.locator('.performance-comparison-cutoff'),/saldos atuais.*datas diferentes.*aguardam o CDI.*30\/09\/2026.*totais acima.*últimos valores/);
+      assert.equal(await table.locator('tbody time[datetime="2026-09-30"]').count(),3);
+      assert.equal(await table.locator('tbody time[datetime="2026-10-20"]').count(),0);
+      assert.equal(await table.locator('tbody tr').count(),4);
+      const total=table.getByRole('row',{name:/^Carteira inteira /});
+      await figureEquals(total.locator('td').first(),mode.endsWith('-zero')?'R$ 0,00':'+R$ 92,00');
+      await figureEquals(total.locator('td').last(),mode.endsWith('-zero')?'R$ 0,00':'+R$ 70,00');
+      if(!mode.endsWith('-zero')){
+        await textMatches(table.getByRole('row',{name:/^FIIs /}),/\+R\$ 12,00.*\+R\$ 20,00/);
+        await textMatches(table.getByRole('row',{name:/^Reserva sintética /}),/\+R\$ 30,00.*\+R\$ 10,00/);
+        await textMatches(table.getByRole('row',{name:/^Pós-fixado sintético /}),/\+R\$ 50,00.*\+R\$ 40,00/);
+      }
+      assert.match(await tip(scope.locator('.performance-comparison-dates'),'CDI: compras sem dia informado usam o fim do mês.'),/sem dia informado.*fim do mês.*não altera as cotas/);
+      await noOverflow(page,mode+'-desktop-no-overflow');
+      if(mode==='wallet-benchmark-comparable'){
+        await sectionShot(page,'desktop-wallet-benchmark-comparable',scope);
+        for(const viewport of [{width:375,height:812},{width:720,height:500}]){
+          await page.setViewportSize(viewport);await noOverflow(page,mode+'-'+viewport.width+'-no-overflow');
+          assert.deepEqual(await table.locator('td.num').evaluateAll(cells=>cells.filter(cell=>cell.scrollWidth>cell.clientWidth+1).map(cell=>cell.textContent)),[]);
+          await sectionShot(page,(viewport.width===375?'mobile375':'zoom200')+'-wallet-benchmark-comparable',scope);
+        }
+        await page.setViewportSize({width:1440,height:1000});
+        await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-other');
+        await figureEquals(rowsOf(page).getByRole('row',{name:/^Carteira inteira /}).locator('td').first(),'+R$ 40,00');
+        assert.equal(await scope.locator('.performance-comparison-cutoff').count(),0,'A different wallet must not inherit a prior comparable cutoff');
+        await scope.getByRole('heading',{name:'Comparação atual por investimento',exact:true}).waitFor();
+        await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-original');
+        await scope.getByRole('heading',{name:'Última comparação completa · 30/09/2026',exact:true}).waitFor();
+      }
+      assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.snapshot),original);
+      const writes=await page.evaluate(()=>globalThis.__uiTest.calls.filter(({command})=>/^(?:save_|upsert_|delete_|remove_|import_|export_|start_chat_turn$|create_conversation$)/.test(command)));
+      assert.deepEqual(writes,[]);assert.equal((await calls(page,'refresh_fii_performance')).length,0);assert.deepEqual(fixture.externalRequests,[]);await noUnexpectedCommands(page);
+      check(mode+'-uses-the-complete-common-date-for-every-investment-without-changing-latest-cards-or-ledger');await fixture.context.close();
+    }
+    for(const mode of ['wallet-benchmark-comparable-incomplete','wallet-benchmark-comparable-mismatched','wallet-benchmark-comparable-current']){
+      const fixture=await openPage(mode,{width:1440,height:1000}),page=fixture.page,scope=comparisonOf(page),table=rowsOf(page);
+      await scope.getByRole('heading',{name:'Comparação atual por investimento',exact:true}).waitFor();
+      assert.equal(await scope.locator('.performance-comparison-cutoff').count(),0);
+      const total=table.getByRole('row',{name:/^Carteira inteira /});
+      await figureEquals(total.locator('td').first(),'−R$ 775,54');
+      await figureEquals(total.locator('td').last(),mode.endsWith('-current')?'+R$ 135,00':'—');
+      if(mode.endsWith('-current'))assert.equal(await table.locator('tbody time[datetime="2026-10-20"]').count(),3);
+      await noOverflow(page,mode+'-no-overflow');await noUnexpectedCommands(page);
+      check(mode+'-rejects-invalid-fallback-or-prefers-a-complete-current-comparison');await fixture.context.close();
     }
 
     const movements=await openPage('wallet-benchmark',{width:1440,height:1000}),page=movements.page;

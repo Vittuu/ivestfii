@@ -4,6 +4,7 @@
 use super::{
     add, decimal_string, div, mul, normalize_purchase_date, parse_decimal, parse_nonnegative,
     performance::{CdiPerformance, DailyCdiRate, FiiPerformance},
+    portfolio_evolution::{reconstructed_month_cdi, PortfolioEvolutionPoint},
     portfolio_performance::PortfolioPerformance,
     CoreError, PortfolioSnapshot, Result,
 };
@@ -559,6 +560,377 @@ pub fn calculate_portfolio_benchmark(
         issues,
         assumptions,
     })
+}
+
+/// Build a separate comparison at a reconstructed, completed month end. This
+/// never fills a current valuation with an older CDI rate or changes a balance.
+/// The caller can choose the latest qualifying point without mixing its values
+/// with the independently dated current positions.
+pub fn calculate_reconstructed_portfolio_benchmark(
+    snapshot: &PortfolioSnapshot,
+    point: &PortfolioEvolutionPoint,
+    rates: &[DailyCdiRate],
+    today: NaiveDate,
+) -> Result<Option<PortfolioBenchmark>> {
+    let cutoff = date(&point.as_of)?;
+    let next_month = if cutoff.month() == 12 {
+        NaiveDate::from_ymd_opt(cutoff.year() + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(cutoff.year(), cutoff.month() + 1, 1)
+    };
+    if point.is_partial_month
+        || point.status != "available"
+        || cutoff >= today
+        || cutoff.format("%Y-%m").to_string() != point.month
+        || next_month.and_then(|day| day.pred_opt()) != Some(cutoff)
+    {
+        return Ok(None);
+    }
+    let Some(provenance) = point
+        .provenance
+        .as_ref()
+        .filter(|source| source.kind == "reconstructed" && source.income_complete)
+    else {
+        return Ok(None);
+    };
+    let (Some(invested), Some(result), Some(cdi_result), Some(difference)) = (
+        point.invested.as_deref(),
+        point.portfolio_result.as_deref(),
+        point.cdi_result.as_deref(),
+        point.difference.as_deref(),
+    ) else {
+        return Ok(None);
+    };
+    let invested = parse_nonnegative(invested, "Aplicado no fechamento mensal")?;
+    let result = parse_decimal(result)?;
+    let cdi_result = parse_decimal(cdi_result)?;
+    if subtract(result, cdi_result)? != parse_decimal(difference)? {
+        return Ok(None);
+    }
+
+    // Validate the historical principal against the movements that really
+    // existed at the cutoff. An omitted pocket or a later contribution cannot
+    // quietly make an otherwise partial wallet appear complete.
+    let mut expected_funds = BTreeMap::new();
+    for fund in &snapshot.funds {
+        let mut shares = Decimal::ZERO;
+        let mut cost = Decimal::ZERO;
+        for entry in &fund.entries {
+            if entry.month > point.month
+                || entry
+                    .purchase_date
+                    .as_deref()
+                    .is_some_and(|day| day > point.as_of.as_str())
+            {
+                continue;
+            }
+            let quantity = parse_nonnegative(&entry.cotas_added, "Cotas compradas")?;
+            let price = parse_nonnegative(&entry.price_per_cota, "Preço de compra")?;
+            if !quantity.is_zero() && price.is_zero() {
+                return Ok(None);
+            }
+            shares = add(shares, quantity)?;
+            cost = add(cost, mul(quantity, price)?)?;
+        }
+        if !shares.is_zero() && expected_funds.insert(fund.id.clone(), cost).is_some() {
+            return Ok(None);
+        }
+    }
+    let mut expected_fixed = Decimal::ZERO;
+    if let Some(position) = &snapshot.broker_position {
+        match &position.fixed_income.latest_observation {
+            Some(observation) => {
+                let mut all_contributions = Decimal::ZERO;
+                for contribution in &observation.contributions {
+                    let value = parse_nonnegative(&contribution.invested, "Aporte no pós-fixado")?;
+                    all_contributions = add(all_contributions, value)?;
+                    if date(&contribution.application_date)? <= cutoff {
+                        expected_fixed = add(expected_fixed, value)?;
+                    }
+                }
+                if all_contributions
+                    != parse_nonnegative(&observation.invested, "Aplicado no pós-fixado")?
+                    || observation.contributions.is_empty()
+                        && !parse_nonnegative(&observation.balance, "Saldo do pós-fixado")?
+                            .is_zero()
+                {
+                    return Ok(None);
+                }
+            }
+            None if !parse_nonnegative(&position.fixed_income.balance, "Saldo do pós-fixado")?
+                .is_zero() =>
+            {
+                return Ok(None);
+            }
+            None => {}
+        }
+    }
+    let mut expected_cash = BTreeMap::new();
+    for pocket in &snapshot.cash_pockets {
+        let Some(flows) = &pocket.cash_flows else {
+            if pocket
+                .total_deposits
+                .as_deref()
+                .map(parse_decimal)
+                .transpose()?
+                != Some(Decimal::ZERO)
+                || pocket
+                    .total_withdrawals
+                    .as_deref()
+                    .map(parse_decimal)
+                    .transpose()?
+                    != Some(Decimal::ZERO)
+                || !parse_nonnegative(&pocket.balance, "Saldo da caixinha")?.is_zero()
+            {
+                return Ok(None);
+            }
+            continue;
+        };
+        let mut deposits = Decimal::ZERO;
+        let mut withdrawals = Decimal::ZERO;
+        let mut active = false;
+        for flow in flows {
+            let day = date(&flow.date)?;
+            if day <= cutoff {
+                active = true;
+                match flow.kind.as_str() {
+                    "deposit" => {
+                        deposits = add(
+                            deposits,
+                            parse_nonnegative(&flow.amount, "Depósito da caixinha")?,
+                        )?
+                    }
+                    "withdrawal" => {
+                        withdrawals = add(
+                            withdrawals,
+                            parse_nonnegative(&flow.amount, "Retirada da caixinha")?,
+                        )?
+                    }
+                    _ => return Ok(None),
+                }
+            }
+        }
+        if active {
+            if expected_cash
+                .insert(pocket.id.clone(), (deposits, withdrawals))
+                .is_some()
+            {
+                return Ok(None);
+            }
+        } else if flows.is_empty()
+            && (!parse_nonnegative(&pocket.balance, "Saldo da caixinha")?.is_zero()
+                || pocket
+                    .total_deposits
+                    .as_deref()
+                    .map(parse_decimal)
+                    .transpose()?
+                    != Some(Decimal::ZERO)
+                || pocket
+                    .total_withdrawals
+                    .as_deref()
+                    .map(parse_decimal)
+                    .transpose()?
+                    != Some(Decimal::ZERO))
+        {
+            return Ok(None);
+        }
+    }
+
+    let mut components: Vec<PortfolioBenchmarkComponent> = Vec::new();
+    let mut fixed_seen = false;
+    for observed in &provenance.components {
+        let observation_date = date(&observed.as_of)?;
+        if observation_date > cutoff || observation_date.format("%Y-%m").to_string() != point.month
+        {
+            return Ok(None);
+        }
+        let cost = parse_nonnegative(&observed.invested, "Aplicado no investimento histórico")?;
+        let gain = parse_decimal(&observed.result)?;
+        let (kind, id, name) = match observed.kind.as_str() {
+            "fii" => {
+                let Some(id) = &observed.id else {
+                    return Ok(None);
+                };
+                if expected_funds.remove(id) != Some(cost) {
+                    return Ok(None);
+                }
+                ("fiis", None, "FIIs".to_string())
+            }
+            "fixedIncome" => {
+                if fixed_seen || expected_fixed.is_zero() || expected_fixed != cost {
+                    return Ok(None);
+                }
+                fixed_seen = true;
+                ("fixedIncome", None, observed.name.clone())
+            }
+            "cash" => {
+                let Some(id) = &observed.id else {
+                    return Ok(None);
+                };
+                let Some((deposits, withdrawals)) = expected_cash.remove(id) else {
+                    return Ok(None);
+                };
+                if cost != deposits
+                    || gain
+                        != subtract(
+                            add(
+                                parse_nonnegative(
+                                    &observed.market_value,
+                                    "Saldo histórico da caixinha",
+                                )?,
+                                withdrawals,
+                            )?,
+                            cost,
+                        )?
+                {
+                    return Ok(None);
+                }
+                ("cash", Some(id.clone()), observed.name.clone())
+            }
+            _ => return Ok(None),
+        };
+        if let Some(existing) = components
+            .iter_mut()
+            .find(|item| item.kind == kind && item.id == id)
+        {
+            existing.invested = Some(decimal_string(add(
+                parse_decimal(existing.invested.as_deref().expect("initialized cost"))?,
+                cost,
+            )?));
+            existing.result = Some(decimal_string(add(
+                parse_decimal(existing.result.as_deref().expect("initialized result"))?,
+                gain,
+            )?));
+        } else {
+            let mut item = component(
+                kind,
+                name,
+                Some(decimal_string(cost)),
+                Some(decimal_string(gain)),
+                Some(point.as_of.clone()),
+            );
+            item.id = id;
+            components.push(item);
+        }
+    }
+    if !expected_funds.is_empty()
+        || !expected_cash.is_empty()
+        || (!expected_fixed.is_zero() && !fixed_seen)
+        || components.is_empty()
+    {
+        return Ok(None);
+    }
+
+    let mut total_cost = Decimal::ZERO;
+    let mut total_gain = Decimal::ZERO;
+    let mut total_cdi = Decimal::ZERO;
+    let mut total_ending = Decimal::ZERO;
+    let mut assumptions = provenance.assumptions.clone();
+    assumptions.push("Comparação do fechamento mensal reconstruído: todos os resultados e o CDI terminam na mesma data. Não substitui os saldos atuais da corretora.".into());
+    for item in &mut components {
+        let mut selected = snapshot.clone();
+        if item.kind != "fiis" {
+            selected.funds.clear();
+        }
+        if item.kind != "fixedIncome" {
+            selected.broker_position = None;
+        }
+        selected
+            .cash_pockets
+            .retain(|pocket| item.kind == "cash" && item.id.as_deref() == Some(pocket.id.as_str()));
+        let (Some(cdi), issues, _) = reconstructed_month_cdi(&selected, rates, cutoff, today)?
+        else {
+            return Ok(None);
+        };
+        for issue in issues {
+            if !assumptions.contains(&issue) {
+                assumptions.push(issue);
+            }
+        }
+        let cost = parse_nonnegative(
+            item.invested.as_deref().expect("initialized cost"),
+            "Aplicado no fechamento",
+        )?;
+        let gain = parse_decimal(item.result.as_deref().expect("initialized result"))?;
+        let benchmark = parse_decimal(&cdi)?;
+        let mut withdrawals = Decimal::ZERO;
+        item.start_date = match item.kind.as_str() {
+            "fiis" => fii_start(&selected, cutoff)?,
+            "fixedIncome" => selected
+                .broker_position
+                .as_ref()
+                .and_then(|position| position.fixed_income.latest_observation.as_ref())
+                .map(|observation| {
+                    observation
+                        .contributions
+                        .iter()
+                        .filter(|value| {
+                            value.application_date <= point.as_of && value.invested != "0"
+                        })
+                        .map(|value| value.application_date.clone())
+                        .min()
+                })
+                .flatten(),
+            "cash" => {
+                let flows = selected
+                    .cash_pockets
+                    .first()
+                    .and_then(|pocket| pocket.cash_flows.as_ref())
+                    .expect("validated cash movements");
+                for flow in flows
+                    .iter()
+                    .filter(|flow| flow.date <= point.as_of && flow.kind == "withdrawal")
+                {
+                    withdrawals = add(
+                        withdrawals,
+                        parse_nonnegative(&flow.amount, "Retirada da caixinha")?,
+                    )?;
+                }
+                flows
+                    .iter()
+                    .filter(|flow| flow.date <= point.as_of)
+                    .map(|flow| flow.date.clone())
+                    .min()
+            }
+            _ => unreachable!("validated component type"),
+        };
+        let ending = subtract(add(cost, benchmark)?, withdrawals)?;
+        if ending < Decimal::ZERO {
+            return Ok(None);
+        }
+        item.cdi = Some(CdiPerformance {
+            ending_value: decimal_string(ending),
+            result: cdi,
+            return_percent: decimal_string(percent(benchmark, cost)?),
+        });
+        total_cost = add(total_cost, cost)?;
+        total_gain = add(total_gain, gain)?;
+        total_cdi = add(total_cdi, benchmark)?;
+        total_ending = add(total_ending, ending)?;
+    }
+    if total_cost != invested || total_gain != result || total_cdi != cdi_result {
+        return Ok(None);
+    }
+    Ok(Some(PortfolioBenchmark {
+        status: "available".into(),
+        start_date: components
+            .iter()
+            .filter_map(|item| item.start_date.clone())
+            .min(),
+        as_of: Some(point.as_of.clone()),
+        result: Some(decimal_string(result)),
+        invested: Some(decimal_string(invested)),
+        return_percent: Some(decimal_string(percent(result, invested)?)),
+        cdi: Some(CdiPerformance {
+            ending_value: decimal_string(total_ending),
+            result: decimal_string(total_cdi),
+            return_percent: decimal_string(percent(total_cdi, invested)?),
+        }),
+        difference: Some(decimal_string(subtract(result, total_cdi)?)),
+        components,
+        issues: vec![],
+        assumptions,
+    }))
 }
 
 #[cfg(test)]
@@ -1139,5 +1511,326 @@ mod tests {
         assert!(actual.start_date.is_none());
         assert!(actual.as_of.is_none());
         assert!(actual.cdi.is_none());
+    }
+
+    fn historical_rates() -> Vec<DailyCdiRate> {
+        date("2026-01-02")
+            .unwrap()
+            .iter_days()
+            .take_while(|day| *day <= date("2026-02-05").unwrap())
+            .filter(|day| !matches!(day.weekday(), Weekday::Sat | Weekday::Sun))
+            .map(|day| DailyCdiRate {
+                date: day.to_string(),
+                value: "0.01".into(),
+            })
+            .collect()
+    }
+
+    fn historical_point(
+        wallet: &PortfolioSnapshot,
+        rates: &[DailyCdiRate],
+    ) -> PortfolioEvolutionPoint {
+        let cutoff = date("2026-01-31").unwrap();
+        let (cdi, _, estimated) =
+            reconstructed_month_cdi(wallet, rates, cutoff, date("2026-02-05").unwrap()).unwrap();
+        let mut rows = vec![json!({
+            "kind":"fii", "id":"fii", "name":"TEST11", "asOf":"2026-01-30",
+            "invested":"100", "marketValue":"110", "result":"17",
+            "source":"B3 sintética", "sourceUrl":"https://example.test/raw", "fetchedAt":"2026-02-05T12:00:00Z"
+        })];
+        rows.push(json!({
+            "kind":"fixedIncome", "id":"class", "name":"Pós-fixado sintético", "asOf":"2026-01-30",
+            "invested":"150", "marketValue":"165", "result":"15",
+            "source":"CVM sintética", "sourceUrl":"https://example.test/nav", "fetchedAt":"2026-02-05T12:00:00Z"
+        }));
+        rows.push(json!({
+            "kind":"cash", "id":"cash-fixture", "name":"Caixinha sintética", "asOf":"2026-01-30",
+            "invested":"200", "marketValue":"170", "result":"20",
+            "source":"Saldo mensal informado", "sourceUrl":"", "fetchedAt":"2026-02-05T12:00:00Z"
+        }));
+        PortfolioEvolutionPoint {
+            month: "2026-01".into(), as_of: cutoff.to_string(), portfolio_result: Some("52".into()),
+            difference: cdi.as_deref().map(|value| decimal_string(subtract(Decimal::from(52), parse_decimal(value).unwrap()).unwrap())),
+            cdi_result: cdi, invested: Some("450".into()), status: "available".into(), issues: vec![],
+            estimated, is_partial_month: false,
+            provenance: Some(serde_json::from_value(json!({"kind":"reconstructed", "incomeComplete":true, "components":rows, "assumptions":["Preços e cotas históricos reais."]})).unwrap()),
+        }
+    }
+
+    fn historical_wallet() -> PortfolioSnapshot {
+        let mut wallet = snapshot();
+        fii(&mut wallet);
+        wallet.broker_position = Some(fixed());
+        wallet.cash_pockets = vec![cash()];
+        wallet
+    }
+
+    fn closed_benchmark(
+        wallet: &PortfolioSnapshot,
+        point: &PortfolioEvolutionPoint,
+        rates: &[DailyCdiRate],
+    ) -> Option<PortfolioBenchmark> {
+        calculate_reconstructed_portfolio_benchmark(
+            wallet,
+            point,
+            rates,
+            date("2026-02-05").unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn reconstructed_comparison_uses_one_cutoff_and_all_components_without_mutating_current_values()
+    {
+        let wallet = historical_wallet();
+        let original = serde_json::to_value(&wallet).unwrap();
+        let rates = historical_rates();
+        let point = historical_point(&wallet, &rates);
+        let report = closed_benchmark(&wallet, &point, &rates).unwrap();
+        assert_eq!(report.status, "available");
+        assert_eq!(report.start_date.as_deref(), Some("2026-01-02"));
+        assert_eq!(report.as_of.as_deref(), Some("2026-01-31"));
+        assert_eq!(report.result, point.portfolio_result);
+        assert_eq!(report.invested.as_deref(), Some("450"));
+        assert_eq!(
+            report.cdi.as_ref().unwrap().result,
+            point.cdi_result.unwrap()
+        );
+        assert_eq!(report.difference, point.difference);
+        assert_eq!(report.components.len(), 3);
+        assert!(report
+            .components
+            .iter()
+            .all(|item| item.as_of == report.as_of && item.cdi.is_some()));
+        let sum_ending = report
+            .components
+            .iter()
+            .try_fold(Decimal::ZERO, |total, item| {
+                add(
+                    total,
+                    parse_decimal(&item.cdi.as_ref().unwrap().ending_value)?,
+                )
+            })
+            .unwrap();
+        assert_eq!(decimal_string(sum_ending), report.cdi.unwrap().ending_value);
+        assert_eq!(serde_json::to_value(&wallet).unwrap(), original);
+        assert!(report
+            .assumptions
+            .iter()
+            .any(|value| value.contains("Não substitui os saldos atuais")));
+    }
+
+    #[test]
+    fn reconstructed_comparison_keeps_legacy_month_only_cdi_convention_visible() {
+        let mut wallet = historical_wallet();
+        wallet.funds[0].entries[0].purchase_date = None;
+        let rates = historical_rates();
+        let point = historical_point(&wallet, &rates);
+        assert!(point.estimated);
+        let report = closed_benchmark(&wallet, &point, &rates).unwrap();
+        assert_eq!(report.components[0].cdi.as_ref().unwrap().result, "0");
+        assert_eq!(
+            report.components[0].start_date.as_deref(),
+            Some("2026-01-31")
+        );
+        assert!(report
+            .assumptions
+            .iter()
+            .any(|value| value.contains("compras antigas sem dia informado")));
+    }
+
+    #[test]
+    fn reconstructed_comparison_excludes_future_contributions_purchases_and_pockets() {
+        let mut wallet = historical_wallet();
+        let rates = historical_rates();
+        let point = historical_point(&wallet, &rates);
+        let observation = wallet
+            .broker_position
+            .as_mut()
+            .unwrap()
+            .fixed_income
+            .latest_observation
+            .as_mut()
+            .unwrap();
+        let mut future = observation.contributions[0].clone();
+        future.application_date = "2026-02-02".into();
+        future.invested = "50".into();
+        observation.contributions.push(future);
+        observation.invested = "200".into();
+        let mut future_fund = wallet.funds[0].clone();
+        future_fund.id = "future-fund".into();
+        future_fund.ticker = "NEXT11".into();
+        future_fund.entries[0].month = "2026-02".into();
+        future_fund.entries[0].purchase_date = Some("2026-02-02".into());
+        wallet.funds.push(future_fund);
+        let mut future_pocket = cash();
+        future_pocket.id = "future-cash".into();
+        future_pocket
+            .cash_flows
+            .as_mut()
+            .unwrap()
+            .retain(|flow| flow.kind == "deposit");
+        future_pocket.cash_flows.as_mut().unwrap()[0].date = "2026-02-02".into();
+        future_pocket.total_withdrawals = Some("0".into());
+        wallet.cash_pockets.push(future_pocket);
+        let report = closed_benchmark(&wallet, &point, &rates).unwrap();
+        assert_eq!(report.components.len(), 3);
+        assert_eq!(report.invested.as_deref(), Some("450"));
+        assert_eq!(report.cdi.unwrap().result, point.cdi_result.unwrap());
+    }
+
+    #[test]
+    fn reconstructed_comparison_rejects_incomplete_income_cdi_and_inconsistent_money() {
+        let wallet = historical_wallet();
+        let rates = historical_rates();
+        let point = historical_point(&wallet, &rates);
+        for missing in [
+            "income",
+            "cdi",
+            "result",
+            "difference",
+            "invested",
+            "status",
+            "partial",
+            "source",
+        ] {
+            let mut broken = point.clone();
+            match missing {
+                "income" => broken.provenance.as_mut().unwrap().income_complete = false,
+                "cdi" => broken.cdi_result = None,
+                "result" => broken.portfolio_result = Some("99".into()),
+                "difference" => broken.difference = Some("99".into()),
+                "invested" => broken.invested = Some("999".into()),
+                "status" => broken.status = "incomplete".into(),
+                "partial" => broken.is_partial_month = true,
+                "source" => broken.provenance = None,
+                _ => unreachable!(),
+            }
+            assert!(
+                closed_benchmark(&wallet, &broken, &rates).is_none(),
+                "{missing}"
+            );
+        }
+        let missing_rates = rates
+            .into_iter()
+            .filter(|rate| rate.date.as_str() < "2026-01-15" || rate.date.as_str() > "2026-01-31")
+            .collect::<Vec<_>>();
+        assert!(closed_benchmark(&wallet, &point, &missing_rates).is_none());
+    }
+
+    #[test]
+    fn reconstructed_comparison_does_not_drop_or_invent_an_active_cash_pocket() {
+        let mut wallet = historical_wallet();
+        let rates = historical_rates();
+        let point = historical_point(&wallet, &rates);
+        let mut omitted = point.clone();
+        omitted
+            .provenance
+            .as_mut()
+            .unwrap()
+            .components
+            .retain(|item| item.kind != "cash");
+        assert!(closed_benchmark(&wallet, &omitted, &rates).is_none());
+        wallet.cash_pockets[0].cash_flows = None;
+        assert!(closed_benchmark(&wallet, &point, &rates).is_none());
+        wallet.cash_pockets[0] = cash();
+        let mut unknown = point.clone();
+        unknown.provenance.as_mut().unwrap().components[2].id = Some("other".into());
+        assert!(closed_benchmark(&wallet, &unknown, &rates).is_none());
+    }
+
+    #[test]
+    fn reconstructed_comparison_rejects_duplicate_assets_and_dated_principal_changes() {
+        let mut wallet = historical_wallet();
+        let rates = historical_rates();
+        let point = historical_point(&wallet, &rates);
+        let mut duplicated = point.clone();
+        duplicated
+            .provenance
+            .as_mut()
+            .unwrap()
+            .components
+            .push(point.provenance.as_ref().unwrap().components[0].clone());
+        assert!(closed_benchmark(&wallet, &duplicated, &rates).is_none());
+        wallet.funds[0].entries[0].cotas_added = "11".into();
+        assert!(closed_benchmark(&wallet, &point, &rates).is_none());
+    }
+
+    #[test]
+    fn reconstructed_comparison_preserves_the_published_holiday_tail_without_inventing_rates() {
+        let mut wallet = snapshot();
+        fii(&mut wallet);
+        let entry = &mut wallet.funds[0].entries[0];
+        entry.month = "2024-03".into();
+        entry.purchase_date = Some("2024-03-01".into());
+        let mut late = entry.clone();
+        late.id = "legacy-month-only".into();
+        late.purchase_date = None;
+        wallet.funds[0].entries.push(late);
+        let rates = date("2024-03-01")
+            .unwrap()
+            .iter_days()
+            .take_while(|day| *day <= date("2024-04-02").unwrap())
+            .filter(|day| {
+                !matches!(day.weekday(), Weekday::Sat | Weekday::Sun)
+                    && *day != date("2024-03-29").unwrap()
+            })
+            .map(|day| DailyCdiRate {
+                date: day.to_string(),
+                value: "1".into(),
+            })
+            .collect::<Vec<_>>();
+        let cutoff = date("2024-03-31").unwrap();
+        let (cdi, _, estimated) =
+            reconstructed_month_cdi(&wallet, &rates, cutoff, date("2024-04-02").unwrap()).unwrap();
+        let mut point = historical_point(&historical_wallet(), &historical_rates());
+        point.month = "2024-03".into();
+        point.as_of = cutoff.to_string();
+        point.invested = Some("200".into());
+        point.portfolio_result = Some("20".into());
+        point.cdi_result = cdi.clone();
+        point.estimated = estimated;
+        point.difference = Some(decimal_string(
+            subtract(
+                Decimal::from(20),
+                parse_decimal(cdi.as_deref().unwrap()).unwrap(),
+            )
+            .unwrap(),
+        ));
+        let provenance = point.provenance.as_mut().unwrap();
+        provenance.components.truncate(1);
+        provenance.components[0].invested = "200".into();
+        provenance.components[0].market_value = "220".into();
+        provenance.components[0].result = "20".into();
+        provenance.components[0].as_of = "2024-03-28".into();
+        let actual = calculate_reconstructed_portfolio_benchmark(
+            &wallet,
+            &point,
+            &rates,
+            date("2024-04-02").unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(actual.cdi.unwrap().result, cdi.unwrap());
+        assert!(actual
+            .assumptions
+            .iter()
+            .any(|value| value.contains("última taxa publicada em 2024-03-28")));
+        assert!(actual
+            .assumptions
+            .iter()
+            .any(|value| value.contains("compras antigas sem dia informado")));
+        let without_resumption = rates
+            .into_iter()
+            .filter(|value| value.date.as_str() <= "2024-03-31")
+            .collect::<Vec<_>>();
+        assert!(calculate_reconstructed_portfolio_benchmark(
+            &wallet,
+            &point,
+            &without_resumption,
+            date("2024-04-02").unwrap()
+        )
+        .unwrap()
+        .is_none());
     }
 }

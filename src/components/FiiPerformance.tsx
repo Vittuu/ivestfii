@@ -91,7 +91,13 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
       if (current === generation.current) { pending.current = false; setRefreshing(false); }
     }
   };
-  const benchmark = data?.portfolioBenchmark;
+  const currentBenchmark = data?.portfolioBenchmark;
+  const comparableBenchmark = data?.comparableBenchmark;
+  const currentComparable = currentBenchmark?.status === 'available' && currentBenchmark.asOf != null && currentBenchmark.cdi != null && currentBenchmark.difference != null;
+  const historicalComparable = comparableBenchmark?.status === 'available' && comparableBenchmark.asOf != null && comparableBenchmark.cdi != null && comparableBenchmark.result != null && comparableBenchmark.difference != null && comparableBenchmark.components.length > 0 && comparableBenchmark.components.every((component) => component.asOf === comparableBenchmark.asOf && component.result != null && component.cdi != null);
+  const comparisonCutoff = !currentComparable && historicalComparable ? comparableBenchmark.asOf : null;
+  const benchmark = comparisonCutoff ? comparableBenchmark : currentBenchmark;
+  const approximateCdiDates = comparisonCutoff ? benchmark?.assumptions.find((assumption) => /compras.*(?:dia|mês)|dia.*compra/i.test(assumption)) : null;
   const totalInvested = data?.invested ?? invested;
   const totalDividends = data?.dividends ?? dividends;
   const income = data?.income;
@@ -101,7 +107,7 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
   const fixedIncome = portfolio?.fixedIncome;
   const hasFixedIncome = Boolean(fixedIncome && fixedIncome.status !== 'empty');
   const issues = portfolio?.issues ?? [];
-  const cashBenchmarkPending = Boolean(benchmark?.components.some((component) => component.kind === 'cash' && component.issues.length > 0 && snapshot.cashPockets?.find((pocket) => pocket.id === component.id)?.cashFlows == null));
+  const cashBenchmarkPending = Boolean(currentBenchmark?.components.some((component) => component.kind === 'cash' && component.issues.length > 0 && snapshot.cashPockets?.find((pocket) => pocket.id === component.id)?.cashFlows == null));
   const cashPending = Boolean(cash && cash.missingBasisCount > 0);
   const historicalPending = (data?.historicalData?.pricePending ?? 0) + (data?.historicalData?.navPendingMonths ?? 0);
   const historicalIncome = data?.historicalIncome;
@@ -146,9 +152,12 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
           {cashBenchmarkPending && <p className="performance-message performance-warning performance-cash-benchmark-pending">A comparação das caixinhas precisa das datas dos depósitos e retiradas. <TextLink onClick={onCash}>Conferir caixinhas</TextLink></p>}
         </div>
         <div className="performance-breakdown">
-          <SectionHeading title="Comparação atual por investimento" level={3} />
-          <p className="performance-estimate">Últimos valores de cada investimento, com o período e a data do saldo.</p>
-          <div className="table-wrap"><table className="performance-table performance-component-table"><caption className="sr-only">Resultado da carteira e CDI por investimento, com as datas de cada saldo</caption><thead><tr><th scope="col">Investimento e período</th><th scope="col" className="num">Resultado</th><th scope="col" className="num">100% do CDI</th></tr></thead><tbody>
+          <SectionHeading title={comparisonCutoff ? `Última comparação completa · ${dateBR(comparisonCutoff)}` : 'Comparação atual por investimento'} level={3} />
+          {comparisonCutoff ? <>
+            <p className="performance-estimate performance-comparison-cutoff">Os saldos atuais têm datas diferentes ou aguardam o CDI. A tabela compara todos os investimentos até <time dateTime={comparisonCutoff}>{dateBR(comparisonCutoff)}</time>; os totais acima mantêm os últimos valores.</p>
+            {approximateCdiDates && <p className="performance-estimate performance-warning performance-comparison-dates"><Def text={approximateCdiDates}>CDI: compras sem dia informado usam o fim do mês.</Def></p>}
+          </> : <p className="performance-estimate">Últimos valores de cada investimento, com o período e a data do saldo.</p>}
+          <div className="table-wrap"><table className="performance-table performance-component-table"><caption className="sr-only">{comparisonCutoff ? `Resultado da carteira e CDI por investimento até ${dateBR(comparisonCutoff)}` : 'Resultado da carteira e CDI por investimento, com as datas de cada saldo'}</caption><thead><tr><th scope="col">Investimento e período</th><th scope="col" className="num">Resultado</th><th scope="col" className="num">100% do CDI</th></tr></thead><tbody>
             {benchmark?.components.map((component, index) => <tr key={`${component.kind}-${component.id ?? index}`}>
               <th scope="row"><span>{component.name}</span><span className="performance-component-period">{component.startDate ? <><time dateTime={component.startDate}>{dateBR(component.startDate)}</time> → </> : 'Início não informado · '}{component.asOf ? <time dateTime={component.asOf}>{dateBR(component.asOf)}</time> : 'Data do saldo não informada'}</span>{component.issues.length > 0 && <span className="performance-component-note"><Def text={<ul>{component.issues.map((issue, issueIndex) => <li key={issueIndex}>{issue}</li>)}</ul>}>Dados pendentes</Def></span>}</th>
               <td className={`num ${resultClass(component.result)}`}>{signedMoney(component.result)}</td>

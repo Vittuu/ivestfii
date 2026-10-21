@@ -219,6 +219,9 @@ export interface FiiPerformance {
   dividendSources?: { symbol: string; status: string; source: string; sourceUrl: string; fetchedAt: string; coverageWarning: string }[];
   portfolio: PortfolioPerformance;
   portfolioBenchmark?: PortfolioBenchmark | null;
+  /** Last complete closed-month comparison with all investments on one shared date.
+   * Separate from the latest balances and never combined with their results. */
+  comparableBenchmark?: PortfolioBenchmark | null;
   portfolioEvolution?: PortfolioEvolution | null;
   historicalData?: { status: string; priceObservations: number; pricePending: number; navObservations: number; navPendingMonths: number; issues: string[] } | null;
   historicalIncome?: {

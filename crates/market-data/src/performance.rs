@@ -7,7 +7,10 @@ use ivestfii_core::{
         calculate_fii_performance, calculate_fii_performance_with_income, DailyCdiRate,
         FiiPerformance, PerformanceQuote,
     },
-    portfolio_benchmark::{calculate_portfolio_benchmark, PortfolioBenchmark},
+    portfolio_benchmark::{
+        calculate_portfolio_benchmark, calculate_reconstructed_portfolio_benchmark,
+        PortfolioBenchmark,
+    },
     portfolio_evolution::{
         calculate_portfolio_evolution, latest_known_valuation, observe_portfolio,
         PortfolioEvolution, PortfolioHistoryObservation,
@@ -244,7 +247,56 @@ pub fn build_report_with_public_history(
         }
     }
     report.historical_income = Some(coverage);
+    attach_comparable_benchmark(snapshot, &mut report, history, today);
     Ok(report)
+}
+
+/// A lagging daily index must not be combined with a newer market result.
+/// Keep the latest accounting report intact and expose the newest fully
+/// reconciled closed-month comparison separately, with one explicit cutoff.
+fn attach_comparable_benchmark(
+    snapshot: &PortfolioSnapshot,
+    report: &mut PerformanceReport,
+    history: Option<&CdiHistorySnapshot>,
+    today: NaiveDate,
+) {
+    let current = &report.portfolio_benchmark;
+    if current.status == "available"
+        && current.as_of.is_some()
+        && current.cdi.is_some()
+        && current.difference.is_some()
+    {
+        return;
+    }
+    let Some(history) = history else {
+        return;
+    };
+    let rates = history
+        .observations
+        .iter()
+        .map(|row| DailyCdiRate {
+            date: row.date.clone(),
+            value: row.value.clone(),
+        })
+        .collect::<Vec<_>>();
+    let mut first_error = None;
+    for point in report.portfolio_evolution.points.iter().rev() {
+        match calculate_reconstructed_portfolio_benchmark(snapshot, point, &rates, today) {
+            Ok(Some(benchmark)) => {
+                report.comparable_benchmark = Some(benchmark);
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                first_error.get_or_insert_with(|| error.to_string());
+            }
+        }
+    }
+    if let Some(error) = first_error {
+        report.portfolio_benchmark.issues.push(format!(
+            "A comparação de um fechamento histórico não pôde ser validada: {error}"
+        ));
+    }
 }
 
 /// Attach derived historical points without changing today's result or creating
@@ -329,6 +381,10 @@ pub struct PerformanceReport {
     pub calculation: FiiPerformance,
     pub portfolio: PortfolioPerformance,
     pub portfolio_benchmark: PortfolioBenchmark,
+    /// Complete, same-date closed-month alternative when the latest balances
+    /// cannot be compared. Never replaces current portfolio totals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comparable_benchmark: Option<PortfolioBenchmark>,
     pub portfolio_evolution: PortfolioEvolution,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub historical_data: Option<crate::historical_performance::HistoricalDataCoverage>,
@@ -551,6 +607,7 @@ fn build_report_inner(
         historical_income: None,
         history_observation,
         portfolio_benchmark,
+        comparable_benchmark: None,
         calculation,
         quote_source,
         quote_fetched_at,
@@ -738,6 +795,30 @@ mod tests {
         assert_eq!(september.difference.as_deref(), Some("35"));
         assert!(september.provenance.as_ref().unwrap().income_complete);
         assert_eq!(september.provenance.as_ref().unwrap().components.len(), 2);
+        let comparable = report.comparable_benchmark.as_ref().unwrap();
+        assert_eq!(comparable.status, "available");
+        assert_eq!(comparable.as_of.as_deref(), Some("2026-09-30"));
+        assert_eq!(comparable.result.as_deref(), Some("35"));
+        assert_eq!(comparable.invested.as_deref(), Some("200"));
+        assert_eq!(comparable.cdi.as_ref().unwrap().result, "0");
+        assert_eq!(comparable.difference.as_deref(), Some("35"));
+        assert_eq!(comparable.components.len(), 2);
+        for item in &comparable.components {
+            assert_eq!(item.as_of, comparable.as_of);
+            assert_eq!(item.invested.as_deref(), Some("100"));
+            assert_eq!(item.cdi.as_ref().unwrap().result, "0");
+            assert_eq!(
+                item.result.as_deref(),
+                Some(if item.kind == "fiis" { "15" } else { "20" })
+            );
+        }
+        // The older comparable gain is separate from today's marked value.
+        assert_eq!(report.portfolio_benchmark.result.as_deref(), Some("15"));
+        assert_ne!(report.portfolio_benchmark.as_of, comparable.as_of);
+        let latest = report.portfolio_evolution.latest_known.as_ref().unwrap();
+        assert_eq!(latest.portfolio_result, "15");
+        assert_eq!(latest.from_date, "2026-10-19");
+        assert_eq!(latest.to_date, "2026-10-19");
         assert_eq!(report.historical_income.as_ref().unwrap().status, "ready");
         assert_eq!(report.dividend_sources.len(), 2);
         assert!(report
@@ -806,6 +887,111 @@ mod tests {
         assert_eq!(september.cdi_result.as_deref(), Some("0"));
         assert_eq!(september.difference, None);
         assert!(!september.provenance.as_ref().unwrap().income_complete);
+        // September depends on the unfinished public archive. August is fully
+        // recorded by the investor, so only that older month may be exposed.
+        let comparable = report.comparable_benchmark.as_ref().unwrap();
+        assert_eq!(comparable.as_of.as_deref(), Some("2026-08-31"));
+        assert_eq!(comparable.result.as_deref(), Some("2"));
+        assert_eq!(comparable.cdi.as_ref().unwrap().result, "0");
+        assert_eq!(comparable.difference.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn absent_daily_cdi_preserves_known_money_without_manufacturing_a_historical_comparison() {
+        let directory = tempfile::tempdir().unwrap();
+        let snapshot = historical_fixture(directory.path());
+        crate::income_history::tests::archive(directory.path(), &snapshot, false);
+        let report = build_report_with_public_history(
+            &snapshot,
+            directory.path(),
+            &quote("BRL", "2026-10-19T21:00:00Z"),
+            None,
+            &DividendPanel::default(),
+            crate::income_history::tests::day(),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(report.portfolio.total_result.as_deref(), Some("15"));
+        assert_eq!(report.portfolio.income.as_deref(), Some("25"));
+        assert!(report.comparable_benchmark.is_none());
+        assert!(report.portfolio_benchmark.cdi.is_none());
+        assert!(report.portfolio_benchmark.difference.is_none());
+        assert_eq!(
+            report
+                .portfolio_evolution
+                .latest_known
+                .as_ref()
+                .unwrap()
+                .portfolio_result,
+            "15"
+        );
+        let september = report
+            .portfolio_evolution
+            .points
+            .iter()
+            .find(|point| point.month == "2026-09")
+            .unwrap();
+        assert_eq!(september.portfolio_result.as_deref(), Some("35"));
+        assert!(september.cdi_result.is_none());
+        assert!(september.difference.is_none());
+    }
+
+    #[test]
+    fn a_newer_partial_month_cannot_replace_the_last_complete_historical_comparison() {
+        let directory = tempfile::tempdir().unwrap();
+        let snapshot = historical_fixture(directory.path());
+        crate::income_history::tests::archive(directory.path(), &snapshot, false);
+        let mut history =
+            crate::CdiHistoryService::new(directory.path().join("public-data/cdi-history.json"))
+                .unwrap()
+                .read_cache()
+                .unwrap()
+                .unwrap();
+        let mut report = build_report_with_public_history(
+            &snapshot,
+            directory.path(),
+            &quote("BRL", "2026-10-19T21:00:00Z"),
+            Some(&history),
+            &DividendPanel::default(),
+            crate::income_history::tests::day(),
+            vec![],
+        )
+        .unwrap();
+        let mut partial = report
+            .portfolio_evolution
+            .points
+            .iter()
+            .find(|point| point.month == "2026-09")
+            .unwrap()
+            .clone();
+        partial.month = "2026-11".into();
+        partial.as_of = "2026-11-30".into();
+        partial.is_partial_month = true;
+        for item in &mut partial.provenance.as_mut().unwrap().components {
+            item.as_of = partial.as_of.clone();
+        }
+        // The candidate has all monetary fields, valid component principals,
+        // and daily index coverage. Its explicit partial flag must still win.
+        let mut day = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
+        while day <= end {
+            let mut observation = history.observations.last().unwrap().clone();
+            observation.date = day.to_string();
+            history.observations.push(observation);
+            day = day.succ_opt().unwrap();
+        }
+        report.portfolio_evolution.points.push(partial);
+        report.comparable_benchmark = None;
+        attach_comparable_benchmark(
+            &snapshot,
+            &mut report,
+            Some(&history),
+            NaiveDate::from_ymd_opt(2026, 12, 1).unwrap(),
+        );
+        let comparable = report.comparable_benchmark.as_ref().unwrap();
+        assert_eq!(comparable.as_of.as_deref(), Some("2026-09-30"));
+        assert_eq!(comparable.result.as_deref(), Some("35"));
+        assert_eq!(report.portfolio.total_result.as_deref(), Some("15"));
     }
 
     #[test]
@@ -984,6 +1170,7 @@ mod tests {
         assert_eq!(report.portfolio.income.as_deref(), Some("22"));
         assert_eq!(report.portfolio.total_result.as_deref(), Some("12"));
         assert_eq!(report.portfolio_benchmark.difference.as_deref(), Some("12"));
+        assert!(report.comparable_benchmark.is_none());
         assert!(report.history_observation.is_some());
         let september = report
             .portfolio_evolution
