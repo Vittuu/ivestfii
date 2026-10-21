@@ -63,3 +63,8 @@ export const riskLabels: Record<InvestmentProfileInput['riskTolerance'], string>
 export function investmentAnalysisPrompt() {
   return 'Analise a carteira selecionada usando meu perfil e os dados mais recentes disponíveis. Mostre melhorias para meus objetivos de curto e longo prazo, com motivos, riscos e o que ainda preciso informar.';
 }
+
+/** The native analysis context provides purchaseAnalysis through the same MCP flow. */
+export function contributionAnalysisPrompt() {
+  return 'Planeje meus próximos aportes na carteira selecionada usando meu perfil e os dados atualizados. Compare as cotações com meu preço médio, sem tratar um preço menor como motivo suficiente para comprar. Avalie diversificação, objetivos de curto e longo prazo e riscos. Se faltar meu orçamento disponível ou alguma informação do perfil, pergunte antes de sugerir valores e quantidades.';
+}

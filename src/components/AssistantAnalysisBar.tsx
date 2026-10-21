@@ -15,7 +15,7 @@ function quoteDay(value: string) {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
-export default function AssistantAnalysisBar({ walletId, walletName, view, disabled, onAnalyze }: { walletId?: string; walletName?: string; view: AssistantView; disabled: boolean; onAnalyze: () => void }) {
+export default function AssistantAnalysisBar({ walletId, walletName, view, disabled, onAnalyze, onPlanContributions }: { walletId?: string; walletName?: string; view: AssistantView; disabled: boolean; onAnalyze: () => void; onPlanContributions: () => void }) {
   const profile = useInvestmentProfile(walletId);
   const data = usePublicData();
   const [editing, setEditing] = useState(false);
@@ -27,8 +27,9 @@ export default function AssistantAnalysisBar({ walletId, walletName, view, disab
   const cdi = data.economics?.indicators.find((item) => item.id === 'cdi');
   const dates = [quoteDates.length === 1 ? `Cotações de ${dateBR(quoteDates[0])}` : quoteDates.length > 1 ? 'Cotações de datas diferentes' : 'Sem cotação salva', cdi ? `CDI de ${dateBR(cdi.referenceDate)}` : 'Sem CDI salvo', cvmMonths.length === 1 ? `CVM ${monthShort(cvmMonths[0])}` : cvmMonths.length > 1 ? 'CVM de meses diferentes' : 'Sem informe CVM'].join(' · ');
   const pending = profile.loading || !profile.loaded;
+  const analysisDisabled = !desktop || !walletId || disabled || pending || Boolean(profile.error) || data.loading || data.refreshing;
   return <div className="chat-analysis-bar">
-    <div className="chat-analysis-top"><span>Carteira: <strong>{walletName || (walletId ? 'Carteira selecionada' : 'Nenhuma selecionada')}</strong></span><button className="button small" type="button" onClick={onAnalyze} disabled={!desktop || !walletId || disabled || pending || Boolean(profile.error) || data.loading || data.refreshing}>Analisar carteira</button></div>
+    <div className="chat-analysis-top"><span>Carteira: <strong>{walletName || (walletId ? 'Carteira selecionada' : 'Nenhuma selecionada')}</strong></span><button className="button small" type="button" onClick={onAnalyze} disabled={analysisDisabled}>Analisar carteira</button><button className="button small" type="button" onClick={onPlanContributions} disabled={analysisDisabled}>Planejar aportes</button></div>
     <div className="chat-profile-row">
       <span>{pending ? 'Lendo perfil…' : profile.error ? 'Perfil indisponível.' : profile.profile ? <>Perfil salvo · {riskLabels[profile.profile.riskTolerance]}</> : 'Perfil não preenchido.'}</span>
       {profile.error ? <button className="text-link" type="button" onClick={() => void profile.reload()} disabled={pending}>Tentar ler perfil</button> : <button className="text-link" type="button" onClick={() => setEditing(true)} disabled={!desktop || !walletId || pending}>{profile.profile ? 'Editar perfil' : 'Completar perfil'}</button>}

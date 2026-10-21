@@ -5,7 +5,7 @@ import { call, desktop, errorMessage } from '../lib/bridge';
 import type { ChatMessage, ChatRun, Conversation, Provider, ToolEvent } from '../lib/bridge';
 import { Def, Loading, PageActions } from '../components';
 import AssistantAnalysisBar from '../components/AssistantAnalysisBar';
-import { investmentAnalysisPrompt } from '../lib/investmentProfile';
+import { contributionAnalysisPrompt, investmentAnalysisPrompt } from '../lib/investmentProfile';
 
 const storagePrefix = 'ivestfii.assistant.';
 const providerNames: Record<string, string> = { codex: 'Codex', claude: 'Claude', antigravity: 'Antigravity' };
@@ -370,6 +370,12 @@ export default function Assistant({ walletId, walletNames, view = 'page', onOpen
   };
 
   const newConversation = () => { selectConversation(''); setDraft(''); };
+  const planContributions = () => {
+    if (!walletId) return;
+    const prompt = contributionAnalysisPrompt();
+    setDraft((current) => current.includes(prompt) ? current : current.trim() ? `${current.trimEnd()}\n\n${prompt}` : prompt);
+    window.requestAnimationFrame(() => draftRef.current?.focus());
+  };
   const selectedProvider = providers.find((item) => item.id === provider);
   const providerReady = selectedProvider?.ready ?? selectedProvider?.installed ?? false;
   const active = run?.status === 'running';
@@ -424,7 +430,7 @@ export default function Assistant({ walletId, walletNames, view = 'page', onOpen
           <h2 title={current?.title}>{current?.title || 'Nova conversa'}</h2>
         </div>
         {run?.walletId && run.walletId !== walletId && <p className="chat-wallet-notice" role="status">Esta resposta se refere {responseWallet ? <>à carteira <strong>{responseWallet}</strong></> : 'à carteira selecionada no envio'}. Novas perguntas usam a carteira selecionada agora.</p>}
-        <AssistantAnalysisBar walletId={walletId} walletName={walletId ? walletNames?.[walletId] : undefined} view={view} disabled={active || sending || loading || !providerReady} onAnalyze={() => { if (walletId) void sendQuestion(investmentAnalysisPrompt()); }} />
+        <AssistantAnalysisBar walletId={walletId} walletName={walletId ? walletNames?.[walletId] : undefined} view={view} disabled={active || sending || loading || !providerReady} onAnalyze={() => { if (walletId) void sendQuestion(investmentAnalysisPrompt()); }} onPlanContributions={planContributions} />
 
         <div className="chat-toolbar">
           <div className="chat-field"><Def text="Escolha a CLI autenticada na sua assinatura. A conversa mantém seu histórico ao trocar de provedor.">Provedor</Def>

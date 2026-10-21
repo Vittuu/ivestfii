@@ -34,7 +34,8 @@ const focusedFixedIncome=process.env.IVESTFII_UI_FOCUS==='fixed-income';
 const focusedWalletBenchmark=process.env.IVESTFII_UI_FOCUS==='wallet-benchmark';
 const focusedWalletEvolution=process.env.IVESTFII_UI_FOCUS==='wallet-evolution';
 const focusedMarketPrice=process.env.IVESTFII_UI_FOCUS==='market-price';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':focusedMarketPrice?'market-price-report.json':'report.json';
+const focusedContributions=process.env.IVESTFII_UI_FOCUS==='contributions';
+const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':focusedMarketPrice?'market-price-report.json':focusedContributions?'contributions-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -673,7 +674,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark&&!focusedWalletEvolution&&!focusedMarketPrice)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark&&!focusedWalletEvolution&&!focusedMarketPrice&&!focusedContributions)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -752,7 +753,7 @@ try {
     if(sidebarPreference!==undefined)await context.addInitScript(value=>localStorage.setItem('ivestfii.sidebarCollapsed',value),sidebarPreference);
     const page=await context.newPage();page.setDefaultTimeout(12000);
     const externalRequests=[];
-    if(mode==='web'||mode.startsWith('income')||mode.startsWith('market-price'))await page.route('**/*',route=>{
+    if(mode==='web'||mode.startsWith('income')||mode.startsWith('market-price')||mode.startsWith('profile-contributions'))await page.route('**/*',route=>{
       const url=new URL(route.request().url());
       if(/^https?:$/.test(url.protocol)&&url.origin!==base){externalRequests.push(url.href);return route.fulfill({status:503,contentType:'text/plain',body:'External requests are blocked in the synthetic web preview.'});}
       return route.fallback();
@@ -1309,6 +1310,72 @@ try {
       check(`profile-editor-and-assistant-actions-remain-accessible-without-overlap-and-Escape-is-scoped-${viewport.width}`);
     }
   }
+  async function verifyContributionPlanning(){
+    const fixture=await openPage('profile-contributions',{width:1440,height:1000}),page=fixture.page;
+    await navigate(page,'Assistente');const analysis=()=>page.locator('.assistant-page:visible .chat-analysis-bar');
+    const action=()=>analysis().getByRole('button',{name:'Planejar aportes',exact:true});
+    const draft=()=>page.getByRole('textbox',{name:'Sua pergunta',exact:true});
+    await analysis().getByText('Perfil não preenchido.',{exact:true}).waitFor();
+    await page.getByRole('combobox',{name:'Provedor de IA',exact:true}).selectOption('claude');
+    const before=await page.evaluate(()=>({messages:structuredClone(globalThis.__uiTest.chat.messages),conversations:structuredClone(globalThis.__uiTest.chat.conversations),refreshes:globalThis.__uiTest.calls.filter(item=>item.command.startsWith('refresh_')).length}));
+    await action().click();const seed=await draft().inputValue();
+    assert.match(seed,/Planeje meus próximos aportes.*carteira selecionada.*meu perfil.*dados atualizados/);
+    assert.match(seed,/cotações.*meu preço médio.*sem tratar um preço menor como motivo suficiente para comprar/);
+    assert.match(seed,/diversificação.*curto e longo prazo.*riscos.*orçamento disponível.*perfil.*pergunte antes de sugerir valores e quantidades/);
+    assert.doesNotMatch(seed,/wallet-original|walletId|purchaseAnalysis|MCP|preparar_analise|\{|\}/);
+    assert.equal(await isFocused(draft()),true);assert.equal((await calls(page,'start_chat_turn')).length,0);
+    assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.chat.messages),before.messages);
+    assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.chat.conversations),before.conversations);
+    assert.equal(await page.evaluate(()=>globalThis.__uiTest.calls.filter(item=>item.command.startsWith('refresh_')).length),before.refreshes);
+    check('contribution-planning-fills-reviewable-human-draft-and-asks-missing-budget-profile-without-AI-or-source-calls');
+    const budget='Tenho R$ 200 disponíveis para o próximo aporte.';
+    await draft().fill(budget);await action().evaluate(button=>{button.click();button.click();});
+    assert.equal(await draft().inputValue(),budget+'\n\n'+seed,'Keep the user draft and append the planning request only once');
+    await page.getByRole('combobox',{name:'Provedor de IA',exact:true}).selectOption('antigravity');
+    assert.equal(await draft().inputValue(),budget+'\n\n'+seed);await page.getByText('Resposta sintética preservada entre provedores.',{exact:true}).waitFor();
+    await navigate(page,'Mercado');await page.getByRole('button',{name:'Abrir assistente',exact:true}).click();
+    const drawer=page.getByRole('dialog',{name:'Assistente lateral',exact:true});await drawer.waitFor();
+    assert.equal(await draft().inputValue(),budget+'\n\n'+seed);assert.equal(await drawer.getByRole('combobox',{name:'Provedor de IA',exact:true}).inputValue(),'antigravity');
+    await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-other');
+    await analysis().getByText('Perfil salvo · conservador',{exact:true}).waitFor();
+    await textMatches(analysis(),/Carteira: Carteira Nubank teste/);assert.equal((await calls(page,'start_chat_turn')).length,0);
+    await draft().fill(seed);await drawer.getByRole('button',{name:'Enviar',exact:true}).click();await drawer.getByRole('button',{name:'Interromper',exact:true}).waitFor();
+    const sent=(await calls(page,'start_chat_turn')).at(-1).args;
+    assert.equal(sent.conversationId,'conversation-a');assert.equal(sent.provider,'antigravity');assert.equal(sent.walletId,'wallet-other');assert.equal(sent.content,seed);
+    assert.equal((await calls(page,'create_conversation')).length,0);assert.deepEqual(await page.evaluate(count=>globalThis.__uiTest.chat.messages.slice(0,count),before.messages.length),before.messages);
+    assert.equal(await action().isDisabled(),true);
+    await page.evaluate(()=>globalThis.__uiTest.emitChatRun({status:'completed',text:'Plano sintético de aportes solicitado explicitamente.'}));
+    await drawer.getByText('Plano sintético de aportes solicitado explicitamente.',{exact:true}).waitFor();
+    await noOverflow(page,'contribution-planning-desktop-drawer-no-overflow');await shot(page,'desktop-contribution-planning',{fullPage:false});
+    check('contribution-planning-keeps-one-conversation-provider-and-history-and-submits-selected-wallet-only-after-review');
+    await analysis().getByRole('button',{name:'Analisar carteira',exact:true}).click();await drawer.getByRole('button',{name:'Interromper',exact:true}).waitFor();
+    const analysisTurn=(await calls(page,'start_chat_turn')).at(-1).args;
+    assert.equal(analysisTurn.content,'Analise a carteira selecionada usando meu perfil e os dados mais recentes disponíveis. Mostre melhorias para meus objetivos de curto e longo prazo, com motivos, riscos e o que ainda preciso informar.');
+    assert.equal(analysisTurn.conversationId,sent.conversationId);assert.equal(analysisTurn.provider,sent.provider);assert.equal((await calls(page,'start_chat_turn')).length,2);
+    check('contribution-planning-secondary-action-preserves-existing-explicit-wallet-analysis');
+    await noIndividualAutomaticRefresh(page);assert.deepEqual(fixture.externalRequests,[]);await noUnexpectedCommands(page);await fixture.context.close();
+
+    const failed=await openPage('profile-error',{width:1440,height:1000}),failedPage=failed.page;
+    await navigate(failedPage,'Assistente');await failedPage.getByText('Perfil indisponível.',{exact:true}).waitFor();
+    const failedAction=failedPage.getByRole('button',{name:'Planejar aportes',exact:true});assert.equal(await failedAction.isDisabled(),true);
+    await failedPage.evaluate(()=>{globalThis.__uiTest.profileReadError=null;});await failedPage.getByRole('button',{name:'Tentar ler perfil',exact:true}).click();
+    await failedPage.getByText('Perfil não preenchido.',{exact:true}).waitFor();assert.equal(await failedAction.isEnabled(),true);await failedAction.click();
+    assert.equal((await calls(failedPage,'start_chat_turn')).length,0);assert.equal(await failedPage.getByRole('textbox',{name:'Sua pergunta',exact:true}).inputValue(),seed);
+    check('contribution-planning-blocks-unreadable-profile-and-allows-a-question-draft-after-explicit-retry');
+    await noUnexpectedCommands(failedPage);await failed.context.close();
+    for(const viewport of [{width:375,height:812},{width:720,height:500}]){
+      const small=await openPage('profile-contributions-mobile'+(viewport.width===720?'-zoom-200':''),viewport,{expandedSidebar:false}),smallPage=small.page;
+      await smallPage.getByRole('button',{name:'Abrir assistente',exact:true}).click();const panel=smallPage.getByRole('dialog',{name:'Assistente lateral',exact:true});await panel.waitFor();
+      await panel.getByText('Perfil não preenchido.',{exact:true}).waitFor();const button=panel.getByRole('button',{name:'Planejar aportes',exact:true});
+      await revealInViewport(button);await targetVisibleAndClickable(button,'contribution-planning-action-'+viewport.width);await button.click();
+      const composer=panel.getByRole('textbox',{name:'Sua pergunta',exact:true});assert.equal(await composer.inputValue(),seed);await targetVisibleAndClickable(composer,'contribution-planning-draft-'+viewport.width);
+      assert.ok(await panel.locator('.chat-stage').evaluate(element=>element.getBoundingClientRect().height)>=159,'Keep a readable transcript with both analysis actions');
+      assert.equal((await calls(smallPage,'start_chat_turn')).length,0);await noIndividualAutomaticRefresh(smallPage);assert.deepEqual(small.externalRequests,[]);
+      await noOverflow(smallPage,'contribution-planning-'+viewport.width+'-no-global-overflow');await shot(smallPage,'contribution-planning-'+viewport.width,{fullPage:false});await noUnexpectedCommands(smallPage);await small.context.close();
+    }
+    check('contribution-planning-secondary-button-draft-and-transcript-stay-accessible-on-mobile-and-zoom');
+  }
+
   async function verifyAutomaticPublicData(){
     const fixture=await openPage('auto-start',{width:1440,height:1000}),page=fixture.page;
     const result=()=>region(page,'Resultado da carteira');
@@ -2599,6 +2666,12 @@ try {
     console.log(JSON.stringify({status:'PASS',mode:'market-price',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
   }
 
+  if(focusedContributions){
+    await verifyContributionPlanning();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'contributions',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
+
   if(focusedWalletEvolution){
     await verifyWalletEvolution();assert.deepEqual(browserErrors,[]);
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
@@ -2677,6 +2750,7 @@ try {
   await verifyWalletBenchmark();
   await verifyWalletEvolution();
   await verifyMarketPriceComparison();
+  await verifyContributionPlanning();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {

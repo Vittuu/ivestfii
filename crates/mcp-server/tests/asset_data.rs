@@ -288,6 +288,8 @@ fn four_tool_contract_exposes_opt_in_boolean_asset_refresh_flags() {
         .iter()
         .find(|t| t["name"] == "preparar_analise_carteira")
         .unwrap();
+    assert!(analysis["description"].as_str().unwrap().contains("purchaseAnalysis"));
+    assert!(analysis["description"].as_str().unwrap().contains("allocationContext"));
     for flag in ["refreshQuotes", "refreshCvmData"] {
         assert_eq!(
             analysis["inputSchema"]["properties"][flag]["type"],
@@ -370,6 +372,87 @@ fn cached_observations_keep_dates_exact_values_provenance_and_broker_wallet_scop
             bytes
         );
     }
+}
+
+#[test]
+fn contribution_context_uses_current_wallet_costs_dated_quotes_and_never_writes_or_refreshes() {
+    let fixture = fixture();
+    let before = state(&fixture);
+    let (quote_bytes, _) = caches(&fixture);
+    let mut server = ready(fixture.directory.path(), None);
+    let prepared = call(&mut server, json!({}));
+    let prepared = data(&prepared);
+    let analysis = &prepared["purchaseAnalysis"];
+    assert_eq!(analysis["thresholdPercent"], "1");
+    let rows = analysis["rows"].as_array().unwrap();
+    let own = rows.iter().find(|row| row["symbol"] == "TEST11").unwrap();
+    assert_eq!(own["averagePrice"], "10");
+    assert_eq!(own["shares"], "3");
+    assert_eq!(own["invested"], "30");
+    assert_eq!(own["priceBand"], "above");
+    assert_eq!(own["quote"]["observation"]["quotedAt"], QUOTED);
+    assert_eq!(own["quote"]["observation"]["fetchedAt"], FETCHED);
+    assert_eq!(own["quote"]["observation"]["price"], "10.123456789");
+    let broker = rows.iter().find(|row| row["symbol"] == "BRKR11").unwrap();
+    assert_eq!(broker["priceBand"], "unknown");
+    assert!(broker["averagePrice"].is_null());
+    assert!(!analysis["allocation"]["basisComplete"].as_bool().unwrap());
+    assert!(own["investedSharePercent"].is_null());
+    assert_eq!(prepared["allocationContext"]["scope"], "selected-wallet-only");
+    assert_eq!(prepared["allocationContext"]["fundCostAllocationPath"], "purchaseAnalysis.allocation");
+    assert_eq!(prepared["publicDataRefresh"]["requested"], false);
+    assert_eq!(prepared["profileCompleteness"]["canPersonalize"], false);
+
+    let other = call(&mut server, json!({"walletId":fixture.other}));
+    let other = data(&other);
+    let other_rows = other["purchaseAnalysis"]["rows"].as_array().unwrap();
+    assert_eq!(other_rows.len(), 1);
+    assert_eq!(other_rows[0]["symbol"], "OTHR11");
+    assert_eq!(other_rows[0]["averagePrice"], "10");
+    assert_eq!(other_rows[0]["investedSharePercent"], "100");
+    assert_eq!(other["purchaseAnalysis"]["allocation"]["totalInvested"], "30");
+    assert_no_secrets(prepared);
+    assert_no_secrets(other);
+    assert_eq!(state(&fixture), before);
+    assert_eq!(fs::read(fixture.directory.path().join("public-data/quotes.json")).unwrap(), quote_bytes);
+    assert!(!fixture.directory.path().join("public-data/quotes.refresh-policy.json").exists());
+
+    // A newly entered purchase changes the next read's weighted cost without
+    // changing providers, cached quotes, or any existing historical entry.
+    let catalog = WalletCatalog::open(fixture.directory.path()).unwrap();
+    let repository = catalog.repository(Some(&fixture.main)).unwrap();
+    let fund_id = repository.snapshot().unwrap().funds[0].id.clone();
+    repository.save_monthly_record(RecordInput {
+        id: None, fund_id, month: "2020-02".into(), purchase_date: Some("2020-02-01".into()),
+        cotas_added: "1".into(), price_per_cota: "2".into(), dividend_per_cota: "0".into(),
+        dividend_total: Some("0".into()), notes: "Compra sintética explícita".into(),
+    }).unwrap();
+    let changed = state(&fixture);
+    let repeated = call(&mut server, json!({}));
+    let rows = data(&repeated)["purchaseAnalysis"]["rows"].as_array().unwrap();
+    let own = rows.iter().find(|row| row["symbol"] == "TEST11").unwrap();
+    assert_eq!(own["averagePrice"], "8");
+    assert_eq!(own["shares"], "4");
+    assert_eq!(own["quote"]["observation"]["price"], "10.123456789");
+    assert_eq!(state(&fixture), changed);
+}
+
+#[test]
+fn missing_quote_context_keeps_prices_unknown_and_keeps_profile_as_declared() {
+    let fixture = fixture();
+    let before = state(&fixture);
+    let mut server = ready(fixture.directory.path(), Some(&fixture.other));
+    let prepared = call(&mut server, json!({}));
+    let prepared = data(&prepared);
+    let row = &prepared["purchaseAnalysis"]["rows"][0];
+    assert_eq!(row["symbol"], "OTHR11");
+    assert_eq!(row["averagePrice"], "10");
+    assert_eq!(row["priceBand"], "unknown");
+    assert!(row["differencePercent"].is_null());
+    assert!(prepared["investorProfile"].is_null());
+    assert_eq!(prepared["profileCompleteness"]["canPersonalize"], false);
+    assert_eq!(state(&fixture), before);
+    assert!(!fixture.directory.path().join("public-data").exists());
 }
 
 #[test]

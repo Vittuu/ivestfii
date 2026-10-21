@@ -33,6 +33,7 @@ pub mod performance;
 pub mod historical_performance;
 pub mod public_refresh;
 pub mod quotes;
+pub mod purchase_analysis;
 mod refresh_policy;
 pub mod settings;
 pub use cdi_history::{CdiHistoryService, CdiHistorySnapshot};

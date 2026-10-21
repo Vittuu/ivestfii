@@ -59,7 +59,7 @@ pub(crate) fn definitions() -> Vec<Value> {
         (
             NAMES[3],
             "Preparar análise da carteira",
-            "Reúne perfil cadastrado, completude, FIIs, caixinhas, desempenho completo, histórico CDI, proventos B3, renda mensal calculada, contexto e fontes datadas. Para análise atual use refreshPublicDataIfDue:true: mesmos caches e política do aplicativo, atualização pública limitada só se necessária. Flags anteriores permitem consulta explícita BCB/notícias/cotações/CVM/proventos B3. Todas opcionais false: somente cache local. Confira profileCompleteness; pergunte por risco, objetivos, prazos, liquidez e reserva ausentes antes de sugestões personalizadas; nunca infira perfil pelos ativos. Cite fontes, horários e competências; não some cotações, histórico ou caixinhas à posição importada. Prepara dados sem gerar recomendação nem executar ordens.",
+            "Reúne perfil cadastrado, completude, purchaseAnalysis (cotação versus preço médio e concentração por custo), allocationContext (classes da carteira com datas), FIIs, caixinhas, desempenho completo, histórico CDI, proventos B3, renda mensal calculada, contexto e fontes datadas. Para análise atual use refreshPublicDataIfDue:true: mesmos caches e política do aplicativo, atualização pública limitada só se necessária. Flags anteriores permitem consulta explícita BCB/notícias/cotações/CVM/proventos B3. Todas opcionais false: somente cache local. Confira profileCompleteness; pergunte por risco, objetivos, prazos, liquidez e reserva ausentes antes de sugestões personalizadas; nunca infira perfil pelos ativos. Cite fontes, horários e competências; não some cotações, histórico ou caixinhas à posição importada. Prepara dados sem gerar recomendação nem executar ordens.",
             schema(analysis_fields, &[]),
         ),
     ]
@@ -356,6 +356,16 @@ pub(crate) fn execute(
             external["cdiHistory"] = public_data.cdi_history();
             let performance = public_data.performance_context(&snapshot);
             let monthly_income = public_data.monthly_income_context(&snapshot);
+            let quotes = serde_json::from_value::<ivestfii_market_data::QuotePanel>(
+                external["marketData"].clone(),
+            ).unwrap_or_default();
+            let today = chrono::Utc::now()
+                .with_timezone(&chrono::FixedOffset::west_opt(3 * 3600).expect("Brasília offset"))
+                .date_naive();
+            let purchase_analysis = ivestfii_market_data::purchase_analysis::build_purchase_analysis(
+                &snapshot, &quotes, today,
+            );
+            let allocation_context = crate::contribution_context::allocation_context(&performance);
             if let Some(conversation) = id {
                 record_public_sources(assistant, conversation, &external)?;
             }
@@ -373,6 +383,8 @@ pub(crate) fn execute(
                 "portfolio":portfolio,
                 "investorProfile":profile,
                 "profileCompleteness":profile_completeness,
+                "purchaseAnalysis":purchase_analysis,
+                "allocationContext":allocation_context,
                 "performance":performance,
                 "monthlyIncome":monthly_income,
                 "cdiHistory":external["cdiHistory"],
