@@ -4,6 +4,16 @@
 //! belongs to the pocket rather than being an implicit, possibly stale quote.
 use super::*;
 
+/// A user-confirmed cash movement, independent of the pocket creation date.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CashFlow {
+    pub date: String,
+    /// "deposit" for money applied or "withdrawal" for money taken out.
+    pub kind: String,
+    pub amount: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CashPocket {
@@ -19,6 +29,9 @@ pub struct CashPocket {
     /// Effective date of the recorded balance, independent of the CDI rate date.
     #[serde(default)]
     pub balance_date: Option<String>,
+    /// None means movement dates are unknown; never infer them from created_at.
+    #[serde(default)]
+    pub cash_flows: Option<Vec<CashFlow>>,
     /// Percentage of the daily CDI rate; 120 means 120% of CDI.
     pub cdi_percent: String,
     pub annual_cdi_rate: Option<String>,
@@ -48,6 +61,9 @@ pub struct CashPocketInput {
     pub total_withdrawals: Option<String>,
     #[serde(default)]
     pub balance_date: Option<String>,
+    /// Omission preserves saved movements; an explicit array replaces them.
+    #[serde(default)]
+    pub cash_flows: Option<Vec<CashFlow>>,
     /// Omitted reconciliation values preserve an existing group. Only this
     /// explicit flag clears it, keeping older clients safe when editing a row.
     #[serde(default)]
@@ -103,19 +119,29 @@ impl Repository {
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let now = Utc::now().to_rfc3339();
-        let (id, created_at, preserved) = match input.id.filter(|id| !id.trim().is_empty()) {
+        let (id, created_at, preserved, previous_flows) = match input
+            .id
+            .filter(|id| !id.trim().is_empty())
+        {
             Some(id) => {
-                type Previous = (String, Option<String>, Option<String>, Option<String>);
+                type Previous = (
+                    String,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                );
                 let existing: Option<Previous> = tx
                     .query_row(
-                        "SELECT created_at,total_deposits,total_withdrawals,balance_date FROM cash_pockets WHERE id=?1",
+                        "SELECT created_at,total_deposits,total_withdrawals,balance_date,cash_flows FROM cash_pockets WHERE id=?1",
                         [&id],
-                        |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+                        |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
                     )
                     .optional()?;
-                let (created_at, deposits, withdrawals, date) = existing.ok_or_else(|| {
-                    CoreError::Validation("Caixinha não encontrada nesta carteira.".into())
-                })?;
+                let (created_at, deposits, withdrawals, date, previous_flows) = existing
+                    .ok_or_else(|| {
+                        CoreError::Validation("Caixinha não encontrada nesta carteira.".into())
+                    })?;
                 let preserved = if values.reconciliation.is_none() && !input.clear_reconciliation {
                     validate_reconciliation(
                         deposits.as_deref(),
@@ -126,13 +152,23 @@ impl Repository {
                 } else {
                     None
                 };
-                (id, created_at, preserved)
+                (id, created_at, preserved, previous_flows)
             }
-            None => (Uuid::new_v4().to_string(), now.clone(), None),
+            None => (Uuid::new_v4().to_string(), now.clone(), None, None),
         };
-        let (total_deposits, total_withdrawals, balance_date) = values
-            .reconciliation
-            .or(preserved)
+        let reconciliation = values.reconciliation.or(preserved);
+        let previous_flows: Option<Vec<CashFlow>> = previous_flows
+            .map(|value| serde_json::from_str(&value))
+            .transpose()?;
+        let cash_flows = if input.clear_reconciliation {
+            None
+        } else {
+            validate_cash_flows(
+                input.cash_flows.as_deref().or(previous_flows.as_deref()),
+                reconciliation.as_ref(),
+            )?
+        };
+        let (total_deposits, total_withdrawals, balance_date) = reconciliation
             .map(|group| {
                 (
                     Some(group.deposits),
@@ -149,6 +185,7 @@ impl Repository {
             total_deposits,
             total_withdrawals,
             balance_date,
+            cash_flows,
             cdi_percent: decimal_string(values.percent),
             annual_cdi_rate: values.rate.map(decimal_string),
             rate_date: values.rate_date,
@@ -160,13 +197,13 @@ impl Repository {
             updated_at: now.clone(),
         };
         tx.execute(
-            "INSERT INTO cash_pockets(id,name,institution,balance,cdi_percent,annual_cdi_rate,rate_date,notes,created_at,updated_at,rate_source,rate_source_url,rate_fetched_at,total_deposits,total_withdrawals,balance_date)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+            "INSERT INTO cash_pockets(id,name,institution,balance,cdi_percent,annual_cdi_rate,rate_date,notes,created_at,updated_at,rate_source,rate_source_url,rate_fetched_at,total_deposits,total_withdrawals,balance_date,cash_flows)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
              ON CONFLICT(id) DO UPDATE SET name=excluded.name,institution=excluded.institution,
              balance=excluded.balance,cdi_percent=excluded.cdi_percent,annual_cdi_rate=excluded.annual_cdi_rate,
-             rate_date=excluded.rate_date,notes=excluded.notes,rate_source=excluded.rate_source,rate_source_url=excluded.rate_source_url,rate_fetched_at=excluded.rate_fetched_at,total_deposits=excluded.total_deposits,total_withdrawals=excluded.total_withdrawals,balance_date=excluded.balance_date,revision=cash_pockets.revision+1,updated_at=excluded.updated_at",
+             rate_date=excluded.rate_date,notes=excluded.notes,rate_source=excluded.rate_source,rate_source_url=excluded.rate_source_url,rate_fetched_at=excluded.rate_fetched_at,total_deposits=excluded.total_deposits,total_withdrawals=excluded.total_withdrawals,balance_date=excluded.balance_date,cash_flows=excluded.cash_flows,revision=cash_pockets.revision+1,updated_at=excluded.updated_at",
             params![pocket.id,pocket.name,pocket.institution,pocket.balance,pocket.cdi_percent,
-                pocket.annual_cdi_rate,pocket.rate_date,pocket.notes,pocket.created_at,pocket.updated_at,pocket.rate_source,pocket.rate_source_url,pocket.rate_fetched_at,pocket.total_deposits,pocket.total_withdrawals,pocket.balance_date],
+                pocket.annual_cdi_rate,pocket.rate_date,pocket.notes,pocket.created_at,pocket.updated_at,pocket.rate_source,pocket.rate_source_url,pocket.rate_fetched_at,pocket.total_deposits,pocket.total_withdrawals,pocket.balance_date,pocket.cash_flows.as_ref().map(serde_json::to_string).transpose()?],
         )?;
         // Validate aggregate totals before committing either the row or outbox.
         snapshot_connection(&tx)?;
@@ -242,7 +279,7 @@ impl Repository {
 
 pub(super) fn load_cash_pockets(connection: &Connection) -> Result<Vec<CashPocket>> {
     let mut statement = connection.prepare(
-        "SELECT id,name,institution,balance,cdi_percent,annual_cdi_rate,rate_date,notes,created_at,updated_at,rate_source,rate_source_url,rate_fetched_at,total_deposits,total_withdrawals,balance_date
+        "SELECT id,name,institution,balance,cdi_percent,annual_cdi_rate,rate_date,notes,created_at,updated_at,rate_source,rate_source_url,rate_fetched_at,total_deposits,total_withdrawals,balance_date,cash_flows
          FROM cash_pockets ORDER BY institution COLLATE NOCASE,name COLLATE NOCASE,id",
     )?;
     let rows = statement.query_map([], |row| {
@@ -263,6 +300,18 @@ pub(super) fn load_cash_pockets(connection: &Connection) -> Result<Vec<CashPocke
             total_deposits: row.get(13)?,
             total_withdrawals: row.get(14)?,
             balance_date: row.get(15)?,
+            cash_flows: row
+                .get::<_, Option<String>>(16)?
+                .map(|value| {
+                    serde_json::from_str(&value).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            16,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })
+                })
+                .transpose()?,
         })
     })?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
@@ -294,6 +343,7 @@ pub(super) fn parse_embedded(bytes: &[u8]) -> Result<Vec<CashPocket>> {
             total_deposits: pocket.total_deposits.clone(),
             total_withdrawals: pocket.total_withdrawals.clone(),
             balance_date: pocket.balance_date.clone(),
+            cash_flows: pocket.cash_flows.clone(),
             clear_reconciliation: false,
             cdi_percent: pocket.cdi_percent.clone(),
             annual_cdi_rate: pocket.annual_cdi_rate.clone(),
@@ -303,6 +353,10 @@ pub(super) fn parse_embedded(bytes: &[u8]) -> Result<Vec<CashPocket>> {
             rate_fetched_at: pocket.rate_fetched_at.clone(),
             notes: pocket.notes.clone(),
         })?;
+        validate_cash_flows(
+            pocket.cash_flows.as_deref(),
+            validated.reconciliation.as_ref(),
+        )?;
         if pocket.annual_cdi_rate.is_some() != validated.rate.is_some()
             || pocket.rate_date.is_some() != validated.rate_date.is_some()
         {
@@ -334,10 +388,10 @@ pub(super) fn store_imported(
 ) -> Result<()> {
     for pocket in pockets {
         tx.execute(
-            "INSERT INTO cash_pockets(id,name,institution,balance,cdi_percent,annual_cdi_rate,rate_date,notes,created_at,updated_at,rate_source,rate_source_url,rate_fetched_at,total_deposits,total_withdrawals,balance_date)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+            "INSERT INTO cash_pockets(id,name,institution,balance,cdi_percent,annual_cdi_rate,rate_date,notes,created_at,updated_at,rate_source,rate_source_url,rate_fetched_at,total_deposits,total_withdrawals,balance_date,cash_flows)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
             params![pocket.id,pocket.name,pocket.institution,pocket.balance,pocket.cdi_percent,
-                pocket.annual_cdi_rate,pocket.rate_date,pocket.notes,pocket.created_at,pocket.updated_at,pocket.rate_source,pocket.rate_source_url,pocket.rate_fetched_at,pocket.total_deposits,pocket.total_withdrawals,pocket.balance_date],
+                pocket.annual_cdi_rate,pocket.rate_date,pocket.notes,pocket.created_at,pocket.updated_at,pocket.rate_source,pocket.rate_source_url,pocket.rate_fetched_at,pocket.total_deposits,pocket.total_withdrawals,pocket.balance_date,pocket.cash_flows.as_ref().map(serde_json::to_string).transpose()?],
         )?;
         let mut payload = serde_json::to_value(pocket)?;
         payload["revision"] = json!(1);
@@ -402,6 +456,73 @@ fn validate_reconciliation(
     }))
 }
 
+/// Movement totals must reconcile exactly with the manually confirmed totals.
+/// Unknown legacy dates remain None, preserving their accounting result while
+/// preventing an invented historical CDI return.
+fn validate_cash_flows(
+    flows: Option<&[CashFlow]>,
+    reconciliation: Option<&Reconciliation>,
+) -> Result<Option<Vec<CashFlow>>> {
+    let Some(flows) = flows else {
+        return Ok(None);
+    };
+    let group = reconciliation.ok_or_else(|| CoreError::Validation(
+        "Para informar movimentos com data, preencha total aplicado, total resgatado e data do saldo.".into()
+    ))?;
+    if flows.len() > 10_000 {
+        return Err(CoreError::Validation(
+            "Informe até 10.000 movimentos por caixinha.".into(),
+        ));
+    }
+    let balance_date = NaiveDate::parse_from_str(&group.balance_date, "%Y-%m-%d")
+        .map_err(|_| CoreError::Validation("Data do saldo inválida.".into()))?;
+    let mut deposits = Decimal::ZERO;
+    let mut withdrawals = Decimal::ZERO;
+    let mut validated = Vec::with_capacity(flows.len());
+    for flow in flows {
+        let date = NaiveDate::parse_from_str(&flow.date, "%Y-%m-%d")
+            .map_err(|_| CoreError::Validation("Data do movimento da caixinha inválida.".into()))?;
+        if date.year() < 1
+            || date.format("%Y-%m-%d").to_string() != flow.date
+            || date > balance_date
+        {
+            return Err(CoreError::Validation(
+                "A data de cada movimento deve ser válida e não pode ultrapassar a data do saldo."
+                    .into(),
+            ));
+        }
+        let amount = parse_nonnegative(&flow.amount, "Valor do movimento da caixinha")?;
+        if amount <= Decimal::ZERO || amount.normalize().scale() > 2 {
+            return Err(CoreError::Validation(
+                "Cada movimento deve ser maior que zero e ter até duas casas decimais.".into(),
+            ));
+        }
+        match flow.kind.as_str() {
+            "deposit" => deposits = add(deposits, amount)?,
+            "withdrawal" => withdrawals = add(withdrawals, amount)?,
+            _ => {
+                return Err(CoreError::Validation(
+                    "O movimento deve ser uma aplicação ou um resgate.".into(),
+                ))
+            }
+        }
+        validated.push(CashFlow {
+            date: flow.date.clone(),
+            kind: flow.kind.clone(),
+            amount: decimal_string(amount),
+        });
+    }
+    if deposits != parse_nonnegative(&group.deposits, "Total aplicado")?
+        || withdrawals != parse_nonnegative(&group.withdrawals, "Total resgatado")?
+    {
+        return Err(CoreError::Validation(
+            "A soma dos movimentos com data deve ser igual ao total aplicado e ao total resgatado."
+                .into(),
+        ));
+    }
+    Ok(Some(validated))
+}
+
 fn validate_input(input: &CashPocketInput) -> Result<ValidatedInput> {
     let name = required_label(&input.name, "Nome da caixinha")?;
     let institution = required_label(&input.institution, "Instituição")?;
@@ -419,7 +540,8 @@ fn validate_input(input: &CashPocketInput) -> Result<ValidatedInput> {
     if input.clear_reconciliation
         && (input.total_deposits.is_some()
             || input.total_withdrawals.is_some()
-            || input.balance_date.is_some())
+            || input.balance_date.is_some()
+            || input.cash_flows.is_some())
     {
         return Err(CoreError::Validation(
             "Não é possível limpar a reconciliação e informar seus valores na mesma operação."

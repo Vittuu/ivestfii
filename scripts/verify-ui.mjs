@@ -18,7 +18,7 @@ const playwrightModule = process.env.IVESTFII_PLAYWRIGHT_PATH
     return import(pathToFileURL(bundledPlaywright).href);
   });
 const { chromium } = playwrightModule.default || playwrightModule;
-const uiVersion = 'pos-fixado-no-resultado-e-compras-separadas-dos-rendimentos';
+const uiVersion = 'carteira-inteira-comparada-com-cdi-e-movimentos-datados';
 const checks = [];
 const browserErrors = [];
 const screenshots = [];
@@ -31,7 +31,8 @@ const focusedIncome=process.env.IVESTFII_UI_FOCUS==='income';
 const focusedIncomeApi=process.env.IVESTFII_UI_FOCUS==='income-api';
 const focusedIncomePerformance=process.env.IVESTFII_UI_FOCUS==='income-performance';
 const focusedFixedIncome=process.env.IVESTFII_UI_FOCUS==='fixed-income';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':'report.json';
+const focusedWalletBenchmark=process.env.IVESTFII_UI_FOCUS==='wallet-benchmark';
+const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -206,6 +207,26 @@ const fixedIncomeAbsentPerformance={...performance,portfolio:{
   status:'available',invested:'2240',knownInvested:'2240',income:'45.56',knownIncome:'45.56',currentValue:'1374.46',knownCurrentValue:'1374.46',totalResult:'-854.54',knownResult:'-854.54',totalReturnPercent:'-38.1491071429',withdrawals:'0',issues:[],cash:incomePerformance.portfolio.cash,
   fixedIncome:{status:'empty',name:null,balance:'0',invested:null,income:null,result:null,referenceDate:null,sourceHash:null,issues:[]},
 }};
+// Literal responses from the native whole-wallet comparison contract. CDI
+// arithmetic is verified in Rust, never recalculated in these browser fixtures.
+const benchmarkDefault={status:'available',startDate:'2020-01-02',asOf:'2020-02-03',result:'-854.54',invested:'2240',returnPercent:'-38.1491071429',cdi:{endingValue:'2330',result:'90',returnPercent:'4.0178571429'},difference:'-944.54',issues:[],assumptions:['FIIs sem dia de compra usam o fim do mês, limitado à data da cotação.'],components:[
+  {kind:'fiis',id:null,name:'FIIs',startDate:'2020-02-03',asOf:'2020-02-03',invested:'1040',result:'-889.10',cdi:{endingValue:'1120',result:'80',returnPercent:'7.6923076923'},issues:[]},
+  {kind:'cash',id:'pocket-a',name:'Reserva sintética',startDate:'2020-01-02',asOf:'2020-02-03',invested:'1200',result:'34.56',cdi:{endingValue:'1210',result:'10',returnPercent:'0.8333333333'},issues:[]},
+]};
+const benchmarkIncome={...benchmarkDefault,asOf:null,result:'-835.54',returnPercent:'-37.3008928571',difference:'-925.54',components:[{...benchmarkDefault.components[0],asOf:'2026-10-20',result:'-870.10'},benchmarkDefault.components[1]]};
+const benchmarkIncomeZero={...benchmarkIncome,result:'-850.54',returnPercent:'-37.9705357143',difference:'-940.54',components:[{...benchmarkIncome.components[0],result:'-885.10'},benchmarkDefault.components[1]]};
+const benchmarkFixedComponent={kind:'fixedIncome',id:null,name:'Pós-fixado sintético com aportes',startDate:'2023-02-01',asOf:'2026-10-20',invested:'300',result:'60',cdi:{endingValue:'345',result:'45',returnPercent:'15'},issues:[]};
+const benchmarkFixed={...benchmarkDefault,asOf:null,result:'-794.54',invested:'2540',returnPercent:'-31.2811023622',cdi:{endingValue:'2675',result:'135',returnPercent:'5.3149606299'},difference:'-929.54',components:[...benchmarkDefault.components,benchmarkFixedComponent]};
+const benchmarkFixedApi={...benchmarkFixed,result:'-775.54',returnPercent:'-30.5330708661',difference:'-910.54',components:[benchmarkIncome.components[0],benchmarkDefault.components[1],benchmarkFixedComponent]};
+const benchmarkLegacyFixed={...benchmarkDefault,status:'incomplete',result:null,invested:null,returnPercent:null,cdi:null,difference:null,issues:['Informe o valor aplicado e as datas dos aportes do pós-fixado.'],components:[...benchmarkDefault.components,{...benchmarkFixedComponent,startDate:null,asOf:'2020-02-03',invested:null,result:null,cdi:null,issues:['O registro antigo não informa os aportes do pós-fixado.']}]};
+const benchmarkCash={status:'available',startDate:'2020-01-02',asOf:'2020-02-03',result:'25',invested:'300',returnPercent:'8.3333333333',cdi:{endingValue:'308',result:'18',returnPercent:'6'},difference:'7',issues:[],assumptions:['Os mesmos depósitos e retiradas são aplicados ao CDI nas datas informadas.'],components:[
+  {kind:'fiis',id:null,name:'FIIs',startDate:'2020-02-03',asOf:'2020-02-03',invested:'100',result:'-5',cdi:{endingValue:'108',result:'8',returnPercent:'8'},issues:[]},
+  {kind:'cash',id:'pocket-a',name:'Reserva sintética',startDate:'2020-01-02',asOf:'2020-02-03',invested:'200',result:'30',cdi:{endingValue:'200',result:'10',returnPercent:'5'},issues:[]},
+]};
+const benchmarkCashOnly={...benchmarkCash,result:'30',invested:'200',returnPercent:'15',cdi:{endingValue:'200',result:'10',returnPercent:'5'},difference:'20',components:[benchmarkCash.components[1]]};
+const benchmarkCashNegative={...benchmarkCash,result:'-25',invested:'200',returnPercent:'-12.5',cdi:{endingValue:'213',result:'13',returnPercent:'6.5'},difference:'-38',components:[benchmarkCash.components[0],{...benchmarkCash.components[1],invested:'100',result:'-20',cdi:{endingValue:'105',result:'5',returnPercent:'5'}}]};
+const benchmarkCashPending={...benchmarkCash,status:'incomplete',result:null,invested:null,returnPercent:null,cdi:null,difference:null,issues:['Informe as datas dos depósitos e retiradas nas caixinhas para comparar com o CDI.'],components:[benchmarkCash.components[0],{...benchmarkCash.components[1],startDate:null,asOf:null,invested:null,result:null,cdi:null,issues:['Informe as datas dos depósitos e retiradas.']}]};
+const benchmarkOther={status:'available',startDate:'2020-01-02',asOf:'2020-02-03',result:'40',invested:'480',returnPercent:'8.3333333333',cdi:{endingValue:'495',result:'15',returnPercent:'3.125'},difference:'25',issues:[],assumptions:[],components:[{...benchmarkDefault.components[0],invested:'200',result:'20',cdi:{endingValue:'210',result:'10',returnPercent:'5'}},{...benchmarkDefault.components[1],id:'pocket-other',name:'Reserva da outra carteira',invested:'280',result:'20',cdi:{endingValue:'285',result:'5',returnPercent:'1.7857142857'}}]};
 const incomePerformanceDividendPanel={items:['TEST11','MOCK11'].map(symbol=>({symbol,status:'cached',observation:{symbol,fetchedAt:'2026-10-20T12:00:00Z',source:'B3',sourceUrl:'https://sistemaswebb3-listados.b3.com.br/fundsListedPage/events-main/'+symbol.slice(0,4),events:[incomeApiEvent(symbol,'2026-03',symbol==='TEST11'?'1.5':'2',symbol==='TEST11'?'10':'2',symbol==='TEST11'?'15':'4'),incomeApiEvent(symbol,'2020-02','1','10','10'),incomeApiEvent(symbol,'2026-11','1','10','10')]},error:null})),fetchedAt:'2026-10-20T12:00:00Z',errors:[]};
 const chatFixture={
   conversations:[{id:'conversation-a',title:'Conversa sintética preservada',createdAt:'2020-02-03T12:00:00Z',updatedAt:'2020-02-03T12:02:00Z'}],
@@ -338,13 +359,34 @@ function bootstrap(mode) {
     }
     initial.cashBalance=cashPerformance(initial.cashPockets).balance;
   }
+  // Explicit native DTO selection; presentation tests never derive CDI results.
+  walletPerformance=structuredClone(walletPerformance);
+  walletPerformance.portfolioBenchmark=structuredClone(benchmarkDefault);
+  if(mode.startsWith('income-performance'))walletPerformance.portfolioBenchmark=structuredClone(mode==='income-performance-zero'?benchmarkIncomeZero:benchmarkIncome);
+  if(mode.startsWith('fixed-income'))walletPerformance.portfolioBenchmark=structuredClone(mode==='fixed-income-api'?benchmarkFixedApi:mode==='fixed-income-legacy'?benchmarkLegacyFixed:mode==='fixed-income-none'?benchmarkDefault:benchmarkFixed);
+  if(mode.startsWith('cash-'))walletPerformance.portfolioBenchmark=structuredClone(mode==='cash-only'?benchmarkCashOnly:mode==='cash-negative'?benchmarkCashNegative:['cash-legacy','cash-partial'].includes(mode)?benchmarkCashPending:benchmarkCash);
+  if(mode.startsWith('wallet-benchmark')){
+    initial.brokerPosition=null;
+    initial.funds=[{...initial.funds[0],entries:[{...entry('entry-a','10','5'),cotasAdded:'10'}],totalCotas:'10',totalInvested:'100',averagePrice:'10',dividendsReceived:'5',estimatedMonthlyIncome:'5'}];
+    initial.totals={invested:'100',cotas:'10',dividendsReceived:'5',estimatedMonthlyIncome:'5'};initial.recordCount=1;
+    initial.cashPockets=[{...cash,balance:'220',totalDeposits:'200',totalWithdrawals:'10',cashFlows:[{date:'2020-01-02',kind:'deposit',amount:'200'},{date:'2020-02-01',kind:'withdrawal',amount:'10'}]}];initial.cashBalance='220';
+    walletPerformance={...performance,invested:'100',dividends:'5',marketValue:'90',priceResult:'-10',totalResult:'-5',totalReturnPercent:'-5',cdi:{endingValue:'108',result:'8',returnPercent:'8'},difference:'-13',portfolioBenchmark:structuredClone(benchmarkCash)};
+    if(mode==='wallet-benchmark-missing-flows'){delete initial.cashPockets[0].cashFlows;walletPerformance.portfolioBenchmark={...structuredClone(benchmarkCashPending),result:'25',invested:'300',returnPercent:'8.3333333333',components:[benchmarkCash.components[0],{...benchmarkCash.components[1],startDate:null,cdi:null,issues:['Informe as datas dos depósitos e retiradas.']}]};}
+    if(mode==='wallet-benchmark-missing-cdi')walletPerformance.portfolioBenchmark={...structuredClone(benchmarkCash),status:'incomplete',cdi:null,difference:null,issues:['O histórico diário do CDI ainda não cobre a data dos saldos.'],components:benchmarkCash.components.map(component=>({...component,cdi:null,issues:['Falta o CDI do mesmo período.']}))};
+    if(mode==='wallet-benchmark-zero')walletPerformance={...walletPerformance,marketValue:'65',priceResult:'-35',totalResult:'-30',totalReturnPercent:'-30',portfolioBenchmark:{...structuredClone(benchmarkCash),result:'0',returnPercent:'0',difference:'-18',components:[{...benchmarkCash.components[0],result:'-30'},benchmarkCash.components[1]]}};
+    if(mode==='wallet-benchmark-legacy')delete walletPerformance.portfolioBenchmark;
+    if(mode==='wallet-benchmark-fixed-only'){
+      initial.funds=[];initial.totals={invested:'0',cotas:'0',dividendsReceived:'0',estimatedMonthlyIncome:'0'};initial.recordCount=0;initial.cashPockets=[];initial.cashBalance='0';initial.brokerPosition=structuredClone(position);initial.brokerPosition.fixedIncome.latestObservation=structuredClone(fixedIncomeObservation);
+      walletPerformance={...fixedIncomePerformance,status:'empty',invested:'0',dividends:'0',marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,portfolio:{...fixedIncomePerformance.portfolio,invested:'300',knownInvested:'300',income:'60',knownIncome:'60',currentValue:'360',knownCurrentValue:'360',totalResult:'60',knownResult:'60',totalReturnPercent:'20',cash:{balance:'0',invested:'0',income:'0',withdrawals:'0',knownInvested:'0',knownIncome:'0',count:0,missingBasisCount:0,items:[]}},portfolioBenchmark:{...benchmarkFixed,status:'available',startDate:'2023-02-01',asOf:'2026-10-20',result:'60',invested:'300',returnPercent:'20',cdi:benchmarkFixedComponent.cdi,difference:'15',components:[benchmarkFixedComponent]}};
+    }
+  }
   return `
 import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
 import { emit } from '/node_modules/@tauri-apps/api/event.js';
 globalThis.isTauri = true;
 globalThis.__uiTest = { snapshot: ${JSON.stringify(initial)}, otherSnapshot: ${JSON.stringify(other)}, calls: [], unexpected: [], failImports: 1, deferSaves: false, saveWaiters: [], deferImports: false, importWaiters: [], deferMarket: false, marketWaiters: [], connected:${mode === 'connected'}, corruptQuoteCache:${mode === 'corrupt-quotes'}, marketSettings: {brapiKeyConfigured:${keyConfigured},brapiKeySource:${keyConfigured ? "'local'" : 'null'},cvmMappings:{TEST11:'12345678000195'}}, settings: {autostart:false,startMinimized:false,closeToTray:true,autoUpdate:true}, update: {status:'up_to_date',currentVersion:'0.1.0',availableVersion:null,downloadedBytes:0,totalBytes:null,lastCheckedAt:'2020-02-04T12:00:00Z',error:null}, failUpdateCheck:false, failUpdateInstall:false };
 const wallets=${JSON.stringify(wallets)};
-Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformance)},otherPerformance:{...${JSON.stringify(performance)},invested:'200',dividends:'0',marketValue:'220',priceResult:'20',totalResult:'20',totalReturnPercent:'10',cdi:{endingValue:'210',result:'10',returnPercent:'5'},difference:'10'},deferPerformance:false,performanceWaiters:[],deferPerformanceRead:${mode === 'performance-loading'},performanceReadWaiters:[],failPerformance:false});
+Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformance)},otherPerformance:{...${JSON.stringify(performance)},portfolioBenchmark:${JSON.stringify(benchmarkOther)},invested:'200',dividends:'0',marketValue:'220',priceResult:'20',totalResult:'20',totalReturnPercent:'10',cdi:{endingValue:'210',result:'10',returnPercent:'5'},difference:'10'},deferPerformance:false,performanceWaiters:[],deferPerformanceRead:${mode === 'performance-loading'},performanceReadWaiters:[],failPerformance:false});
 Object.assign(globalThis.__uiTest,{chat:${JSON.stringify(chatFixture)},deferChatStart:false,chatStartWaiters:[],eventSubscriptions:[],eventCalls:[]});
 Object.assign(globalThis.__uiTest,{automaticMode:${JSON.stringify(mode)},deferAutoWallets:${JSON.stringify(automaticMode?['wallet-original']:[])},autoWaiters:[],publicCache:{shared:{economics:${JSON.stringify(economics)},news:${JSON.stringify(news)}},wallets:{}},autoCheckedAt:'2026-10-20T12:00:00Z'});
 Object.assign(globalThis.__uiTest,{incomeReport:${JSON.stringify(mode==='income-api-date-required'?incomeApiUnknownReport:mode==='income-api'?incomeApiReport:{months:[]})}});
@@ -463,7 +505,7 @@ mockIPC(async (command, args={}) => {
     }
     case 'get_cash_pockets': return structuredClone(current.cashPockets);
     case 'get_cash_performance': return cashPerformance(current.cashPockets);
-    case 'save_cash_pocket': {if(test.deferSaves)await new Promise(resolve=>test.saveWaiters.push(resolve));const index=current.cashPockets.findIndex(item=>item.id===args.input.id);const previous=index>=0?current.cashPockets[index]:{};const saved={...previous,...args.input,id:args.input.id||'pocket-new'};if(args.input.clearReconciliation)for(const key of ['totalDeposits','totalWithdrawals','balanceDate'])delete saved[key];delete saved.clearReconciliation;if(index>=0)current.cashPockets[index]=saved;else current.cashPockets.push(saved);current.cashBalance=cashPerformance(current.cashPockets).balance;return structuredClone(saved);}
+    case 'save_cash_pocket': {if(test.deferSaves)await new Promise(resolve=>test.saveWaiters.push(resolve));const index=current.cashPockets.findIndex(item=>item.id===args.input.id);const previous=index>=0?current.cashPockets[index]:{};const saved={...previous,...args.input,id:args.input.id||'pocket-new'};if(args.input.clearReconciliation)for(const key of ['totalDeposits','totalWithdrawals','balanceDate','cashFlows'])delete saved[key];delete saved.clearReconciliation;if(index>=0)current.cashPockets[index]=saved;else current.cashPockets.push(saved);current.cashBalance=cashPerformance(current.cashPockets).balance;return structuredClone(saved);}
     case 'fetch_cdi_reference': await new Promise(resolve=>setTimeout(resolve,300));return ${JSON.stringify(cdi)};
     case 'simulate_cash_pocket': return {pocketId:args.input.pocketId,startingBalance:'1234.56',endingBalance:'1246.90',grossEarnings:'12.34',annualCdiRate:'10',cdiPercent:'120',businessDays:args.input.businessDays,rateDate:'2020-02-03',assumptions:['Cenário bruto fictício de teste.']};
     case 'project_income': return ${JSON.stringify(projection)};
@@ -522,7 +564,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -846,7 +888,7 @@ try {
     await figureEquals(readout(result,'Total aplicado'),'R$ 2.240,00');
     await figureEquals(readout(result,'Rendimentos acumulados'),'+R$ 45,56');
     await figureEquals(readout(result,'Resultado da carteira'),'−R$ 854,54');
-    await textEquals(result.getByRole('table',{name:'Composição do resultado total dos FIIs',exact:true}).getByRole('row',{name:/^= Resultado total/}).locator('td'),'−R$ 889,10');
+    await textEquals(result.locator('.performance-component-table').getByRole('row',{name:/^FIIs /}).locator('td').first(),'−R$ 889,10');
     const funds=history.getByRole('table',{name:/^Fundos do histórico, do maior/});
     assert.equal(await funds.evaluate(element=>!!element.closest('details')),false,'Main fund values must remain visible without an accordion');
     assert.match(await tip(funds,'Parte do valor comprado'),/200.*1\.000.*20%/);
@@ -1189,7 +1231,7 @@ try {
     await waitFigure(readout(result(),'Resultado da carteira'),'−R$ 851,94');
     await figureEquals(readout(result(),'Total aplicado'),'R$ 2.240,00');
     await figureEquals(readout(result(),'Rendimentos acumulados'),'+R$ 45,56');
-    await textEquals(result().locator('.performance-table').getByRole('row',{name:/^= Resultado total/}).locator('td'),'−R$ 886,50');
+    await textEquals(result().locator('.performance-portfolio-table').getByRole('row',{name:/^FIIs /}).locator('td').last(),'−R$ 886,50');
     assert.ok((await calls(page,'get_fii_performance')).length>initialPerformanceReads,'Refreshed sources trigger a cached recalculation read');
     assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.snapshot),original,'Public data must not rewrite purchases, imported balances or cash reconciliation');
     await noIndividualAutomaticRefresh(page);
@@ -1770,18 +1812,19 @@ try {
   async function verifyAutomaticIncomePerformance(){
     const resultOf=page=>region(page,'Resultado da carteira');
     const compositionOf=page=>resultOf(page).getByRole('table',{name:'Composição do resultado da carteira: FIIs, caixinhas e pós-fixado',exact:true});
-    const breakdownOf=page=>resultOf(page).getByRole('table',{name:'Composição do resultado total dos FIIs',exact:true});
+    const breakdownOf=page=>resultOf(page).locator('.performance-component-table');
     const fundProceeds=(page,symbol)=>page.locator('.ov-funds-table tbody tr').filter({has:page.locator('.ticker',{hasText:new RegExp('^'+symbol)})}).locator('td').last();
-    async function expectedTotals(page,{income='+R$ 64,56',result='−R$ 835,54',fiiIncome='+R$ 30,00',fiiResult='−R$ 870,10',recorded='R$ 11,00',api='R$ 19,00',difference='−R$ 950,10',alpha='R$ 25,00'}={}){
+    async function expectedTotals(page,{income='+R$ 64,56',result='−R$ 835,54',fiiIncome='+R$ 30,00',fiiResult='−R$ 870,10',recorded='R$ 11,00',api='R$ 19,00',difference='−R$ 925,54',alpha='R$ 25,00'}={}){
       const section=resultOf(page),composition=compositionOf(page),breakdown=breakdownOf(page);
       await figureEquals(readout(section,'Total aplicado'),'R$ 2.240,00');
       await figureEquals(readout(section,'Rendimentos acumulados'),income);
       await figureEquals(readout(section,'Resultado da carteira'),result);
       for(const [name,values] of [['FIIs',['R$ 1.040,00',fiiIncome,fiiResult]],['Caixinhas',['R$ 1.200,00','+R$ 34,56','+R$ 34,56']],['Total',['R$ 2.240,00',income,result]]])
         assert.deepEqual((await composition.getByRole('row',{name:new RegExp('^'+name+' ')}).locator('td').allInnerTexts()).map(normalize),values);
-      await figureEquals(breakdown.getByRole('row',{name:/^\+ Rendimentos registrados/}).locator('td'),recorded);
-      await figureEquals(breakdown.getByRole('row',{name:/^\+ Proventos B3/}).locator('td'),api);
-      await figureEquals(breakdown.getByRole('row',{name:/^= Resultado total/}).locator('td'),fiiResult);
+      await figureEquals(breakdown.getByRole('row',{name:/^FIIs /}).locator('td').first(),fiiResult);
+      await figureEquals(breakdown.getByRole('row',{name:/^Carteira inteira /}).locator('td').first(),result);
+      const incomeTip=await tip(section,'Rendimentos acumulados');
+      assert.ok(compact(incomeTip).includes(compact(recorded))&&compact(incomeTip).includes(compact(api)),'The provenance explains recorded and B3 income without adding them again');
       await textMatches(section.locator('.performance-difference'),new RegExp(escapeRegExp(difference)));
       await figureEquals(fundProceeds(page,'TEST11'),alpha);await figureEquals(fundProceeds(page,'MOCK11'),'R$ 5,00');
     }
@@ -1799,15 +1842,15 @@ try {
     assert.equal(await page.locator('.ov-funds-table thead').getByText('Proventos acumulados',{exact:true}).count(),1);
     check('automatic-income-performance-joins-reconciled-B3-and-manual-income-with-cash-income-once');
     const section=resultOf(page),graph=section.locator('.performance-bars svg');
-    assert.match(await graph.locator('desc').textContent(),/FIIs: −R\$\s*870,10\. CDI: \+R\$\s*80,00/);
-    await graph.focus();await page.keyboard.press('Home');await textMatches(section.locator('.performance-point'),/^FIIs: −R\$ 870,10/);
-    await page.keyboard.press('End');await textMatches(section.locator('.performance-point'),/^100% do CDI: \+R\$ 80,00/);
+    assert.match(await graph.locator('desc').textContent(),/Carteira: −R\$\s*835,54\. CDI: \+R\$\s*90,00/);
+    await graph.focus();await page.keyboard.press('Home');await textMatches(section.locator('.performance-point'),/^Carteira: −R\$ 835,54/);
+    await page.keyboard.press('End');await textMatches(section.locator('.performance-point'),/^100% do CDI: \+R\$ 90,00/);
     await section.locator('.performance-chart-table > summary').click();
-    const comparison=section.getByRole('table',{name:'Resultados acumulados comparados com as mesmas compras',exact:true});
-    await figureEquals(comparison.getByRole('row',{name:/^FIIs /}).locator('td').first(),'−R$ 870,10');
-    await figureEquals(comparison.getByRole('row',{name:/^100% do CDI /}).locator('td').first(),'+R$ 80,00');
+    const comparison=section.getByRole('table',{name:'Resultados acumulados da carteira comparados com os mesmos aportes e resgates',exact:true});
+    await figureEquals(comparison.getByRole('row',{name:/^Carteira /}).locator('td').first(),'−R$ 835,54');
+    await figureEquals(comparison.getByRole('row',{name:/^100% do CDI /}).locator('td').first(),'+R$ 90,00');
     assert.match(await tip(section,'Rendimentos acumulados'),/B3/);
-    check('automatic-income-performance-CDI-chart-keyboard-table-and-difference-use-the-combined-FII-result');
+    check('automatic-income-performance-CDI-chart-keyboard-table-and-difference-use-the-whole-wallet-result');
     await section.getByRole('button',{name:'Atualizar resultado',exact:true}).click();
     await section.getByText('Consulta concluída. Confira as datas dos dados.',{exact:true}).waitFor();
     await expectedTotals(page);
@@ -1842,7 +1885,7 @@ try {
         await expectedTotals(currentPage,{recorded:'R$ 26,00',api:'R$ 4,00'});
         check('automatic-income-performance-confirmed-manual-payment-replaces-the-same-B3-month-without-changing-total');
       }else{
-        await expectedTotals(currentPage,{income:'+R$ 49,56',result:'−R$ 850,54',fiiIncome:'+R$ 15,00',fiiResult:'−R$ 885,10',api:'R$ 4,00',difference:'−R$ 965,10',alpha:'R$ 10,00'});
+        await expectedTotals(currentPage,{income:'+R$ 49,56',result:'−R$ 850,54',fiiIncome:'+R$ 15,00',fiiResult:'−R$ 885,10',api:'R$ 4,00',difference:'−R$ 940,54',alpha:'R$ 10,00'});
         const zero=await currentPage.evaluate(()=>globalThis.__uiTest.snapshot.funds[0].entries.find(entry=>entry.id==='entry-zero'));
         assert.equal(zero.dividendTotal,'0');
         assert.equal(await currentPage.evaluate(()=>globalThis.__uiTest.dividendPanel.items[0].observation.events.find(event=>event.paymentDate==='2026-03-20').amount),'15');
@@ -1962,8 +2005,8 @@ try {
     const apiOriginal=await apiPage.evaluate(()=>structuredClone(globalThis.__uiTest.snapshot));
     const apiExpected={income:'+R$ 124,56',result:'−R$ 775,54',fiiIncome:'+R$ 30,00',fiiResult:'−R$ 870,10'};
     await combinedTotals(apiPage,apiExpected);
-    await textMatches(region(apiPage,'Resultado da carteira').locator('.performance-difference'),/−R\$ 950,10/);
-    assert.match(await apiPage.locator('.performance-bars svg desc').textContent(),/FIIs: −R\$\s*870,10\. CDI: \+R\$\s*80,00/,'The FII/CDI comparison retains only reconciled FII income, while wallet totals include fixed income');
+    await textMatches(region(apiPage,'Resultado da carteira').locator('.performance-difference'),/−R\$ 910,54/);
+    assert.match(await apiPage.locator('.performance-bars svg desc').textContent(),/Carteira: −R\$\s*775,54\. CDI: \+R\$\s*135,00/,'The chart includes reconciled FII income, fixed income and cash exactly once');
     await region(apiPage,'Resultado da carteira').getByRole('button',{name:'Atualizar resultado',exact:true}).click();
     await apiPage.getByText('Consulta concluída. Confira as datas dos dados.',{exact:true}).waitFor();
     await combinedTotals(apiPage,apiExpected);
@@ -1978,7 +2021,7 @@ try {
         for(const label of ['Total aplicado','Rendimentos acumulados','Resultado da carteira'])await figureEquals(readout(scope,label),'—');
         assert.deepEqual((await scope.locator('.performance-fixed-income-row td').allInnerTexts()).map(normalize),['—','—','—']);
         await textMatches(scope.locator('.performance-fixed-income-scope'),/Faltam dados/);
-        assert.equal(await scope.locator('.performance-bars svg').count(),1,'Unknown fixed-income basis must not hide the available FII comparison');
+        assert.equal(await scope.locator('.performance-bars svg').count(),0,'Unknown fixed-income basis must keep the whole-wallet comparison pending');
         check('fixed-income-legacy-positive-balance-without-basis-keeps-total-cost-income-and-result-unknown');
       }else{
         await figureEquals(readout(scope,'Total aplicado'),'R$ 2.240,00');
@@ -2030,6 +2073,121 @@ try {
     assert.equal((await calls(page,'save_record')).length,0);await noUnexpectedCommands(page);
     check('overview-recent-purchase-and-income-actions-reach-the-preserved-history-without-writing-records');
     await fixture.context.close();
+  }
+
+  async function verifyWalletBenchmark(){
+    const comparisonOf=page=>region(page,'Resultado da carteira');
+    const rowsOf=page=>comparisonOf(page).locator('.performance-component-table');
+    const scenarios=[
+      ['fixed-income-api','−R$ 775,54','+R$ 135,00',3],
+      ['wallet-benchmark-fixed-only','+R$ 60,00','+R$ 45,00',1],
+      ['cash-only','+R$ 30,00','+R$ 10,00',1],
+      ['cash-negative','−R$ 25,00','+R$ 13,00',2],
+      ['wallet-benchmark-zero','R$ 0,00','+R$ 18,00',2],
+    ];
+    for(const [mode,result,cdiValue,count] of scenarios){
+      const fixture=await openPage(mode,{width:1440,height:1000}),page=fixture.page;
+      const original=await page.evaluate(()=>structuredClone(globalThis.__uiTest.snapshot));
+      const scope=comparisonOf(page),table=rowsOf(page),graph=scope.locator('.performance-bars svg');
+      await scope.getByRole('heading',{name:'Carteira × 100% do CDI',exact:true}).waitFor();
+      await figureEquals(readout(scope,'Resultado da carteira'),result);
+      assert.equal(await table.locator('tbody tr').count(),count+1);
+      const total=table.getByRole('row',{name:/^Carteira inteira /});
+      await figureEquals(total.locator('td').first(),result);await figureEquals(total.locator('td').last(),cdiValue);
+      assert.match(await graph.locator('desc').textContent(),new RegExp('Carteira: '+escapeRegExp(result).replace(/ /g,'\\s*')+'\\. CDI: '+escapeRegExp(cdiValue).replace(/ /g,'\\s*')));
+      await graph.focus();await page.keyboard.press('Home');await textMatches(scope.locator('.performance-point'),new RegExp('^Carteira: '+escapeRegExp(result)));
+      await page.keyboard.press('End');await textMatches(scope.locator('.performance-point'),new RegExp('^100% do CDI: '+escapeRegExp(cdiValue)));
+      if(mode==='fixed-income-api'){
+        assert.equal(await table.locator('time[datetime="2020-02-03"]').count(),2);
+        assert.equal(await table.locator('time[datetime="2026-10-20"]').count(),2);
+        await textMatches(scope.locator('.performance-period'),/até a data de cada saldo/);
+        await textMatches(table.getByRole('row',{name:/^FIIs /}),/−R\$ 870,10.*\+R\$ 80,00/);
+        await textMatches(table.getByRole('row',{name:/^Pós-fixado sintético /}),/01\/02\/2023.*20\/10\/2026.*\+R\$ 60,00.*\+R\$ 45,00/);
+        await textMatches(table.getByRole('row',{name:/^Reserva sintética /}),/02\/01\/2020.*03\/02\/2020.*\+R\$ 34,56.*\+R\$ 10,00/);
+        await scope.getByRole('button',{name:'Atualizar resultado',exact:true}).click();
+        await scope.getByText('Consulta concluída. Confira as datas dos dados.',{exact:true}).waitFor();
+        await figureEquals(total.locator('td').first(),result);
+        await figureEquals(readout(scope,'Rendimentos acumulados'),'+R$ 124,56');
+        assert.match(await tip(scope,'Rendimentos acumulados'),/R\$\s*11,00.*R\$\s*19,00/);
+        check('wallet-CDI-comparison-includes-FII-recorded-and-public-income-fixed-income-and-cash-once-with-independent-dates');
+      }
+      if(mode==='wallet-benchmark-zero'){
+        assert.equal(Number(await graph.locator('.performance-bar.portfolio').getAttribute('height')),0,'A known zero must remain a zero bar, not a missing result');
+        await textMatches(scope.locator('.performance-point'),/100% do CDI/);
+      }
+      await noOverflow(page,mode+'-desktop-no-overflow');
+      await rowPaintContinuity(page,table,mode+'-component-table');
+      await sectionShot(page,'desktop-'+mode+'-comparison',scope);
+      await page.setViewportSize({width:375,height:812});
+      await noOverflow(page,mode+'-mobile375-no-overflow');
+      assert.deepEqual(await table.locator('td.num').evaluateAll(cells=>cells.filter(cell=>cell.scrollWidth>cell.clientWidth+1).map(cell=>cell.textContent)),[]);
+      const reachable=await table.evaluate(element=>{const wrap=element.closest('.table-wrap');wrap.scrollLeft=wrap.scrollWidth;const value=element.querySelector('tbody tr:last-child td:last-child').getBoundingClientRect(),box=wrap.getBoundingClientRect();const result=value.right<=box.right+1;wrap.scrollLeft=0;return result;});
+      assert.equal(reachable,true,'The CDI value remains reachable through internal table scrolling on mobile');
+      assert.deepEqual(await graph.locator('text').evaluateAll(texts=>texts.filter(text=>{const svg=text.closest('svg').getBoundingClientRect(),box=text.getBoundingClientRect();return box.left<svg.left-1||box.right>svg.right+1;}).map(text=>text.textContent)),[]);
+      await sectionShot(page,'mobile-'+mode+'-comparison375',scope);
+      assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.snapshot),original);
+      assert.equal((await calls(page,'save_record')).length,0);assert.equal((await calls(page,'save_cash_pocket')).length,0);
+      assert.deepEqual(fixture.externalRequests,[]);await noUnexpectedCommands(page);
+      check(mode+'-whole-wallet-CDI-bars-keyboard-dated-breakdown-and-mobile-values');
+      await fixture.context.close();
+    }
+    for(const mode of ['wallet-benchmark-missing-flows','wallet-benchmark-missing-cdi','wallet-benchmark-legacy']){
+      const fixture=await openPage(mode,{width:1440,height:1000}),page=fixture.page,scope=comparisonOf(page);
+      await figureEquals(readout(scope,'Resultado da carteira'),'+R$ 25,00');
+      assert.equal(await scope.locator('.performance-bars svg').count(),0,'An incomplete wallet may never show the FII-only result under a wallet label');
+      if(mode==='wallet-benchmark-missing-flows'){
+        await textMatches(scope.locator('.performance-cash-benchmark-pending'),/datas dos depósitos e retiradas/);
+        await textMatches(rowsOf(page).getByRole('row',{name:/^Reserva sintética /}),/Dados pendentes.*\+R\$ 30,00.*—/);
+        assert.match(await tip(rowsOf(page),'Dados pendentes'),/datas dos depósitos e retiradas/);
+        await scope.getByRole('button',{name:'Conferir caixinhas',exact:true}).click();await title(page,'Caixinhas CDI');
+      }else if(mode==='wallet-benchmark-missing-cdi'){
+        await scope.getByText('O histórico diário do CDI ainda não cobre a data dos saldos.',{exact:true}).waitFor();
+        assert.equal(await scope.locator('.performance-cash-benchmark-pending').count(),0,'A CDI history gap must not ask for deposit dates that are already recorded');
+        await figureEquals(rowsOf(page).getByRole('row',{name:/^Carteira inteira /}).locator('td').first(),'+R$ 25,00');
+      }else await scope.getByText('A comparação da carteira ainda não está disponível. Atualize os dados para consultar.',{exact:true}).waitFor();
+      await noOverflow(page,mode+'-no-overflow');await shot(page,'desktop-'+mode);
+      assert.equal((await calls(page,'refresh_fii_performance')).length,0);await noUnexpectedCommands(page);
+      check(mode+'-keeps-known-result-and-explains-comparison-gap-without-FII-fallback');await fixture.context.close();
+    }
+
+    const movements=await openPage('wallet-benchmark',{width:1440,height:1000}),page=movements.page;
+    await navigate(page,'Caixinhas CDI');
+    await page.getByRole('button',{name:'Editar caixinha Reserva sintética',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'Editar caixinha',exact:true});await dialog.waitFor();
+    assert.equal(await dialog.locator('.cash-flow-table tbody tr').count(),2);
+    assert.equal(await dialog.getByLabel('Data do movimento 1',{exact:true}).inputValue(),'2020-01-02');
+    assert.equal(await dialog.getByLabel('Tipo do movimento 2',{exact:true}).inputValue(),'withdrawal');
+    await dialog.getByRole('button',{name:'Adicionar movimento',exact:true}).click();
+    await dialog.getByRole('button',{name:'Salvar caixinha',exact:true}).click();
+    await dialog.getByRole('alert').filter({hasText:'Preencha a data e o valor de cada movimento'}).waitFor();
+    assert.equal((await calls(page,'save_cash_pocket')).length,0);
+    await dialog.getByLabel('Data do movimento 3',{exact:true}).fill('2020-02-02');
+    await dialog.getByLabel('Tipo do movimento 3',{exact:true}).selectOption('withdrawal');
+    await dialog.getByLabel('Valor do movimento 3',{exact:true}).fill('1,50');
+    await dialog.getByRole('button',{name:'Remover movimento 3',exact:true}).click();
+    await dialog.getByLabel('Valor do movimento 1',{exact:true}).fill('200,00');
+    await noOverflow(page,'cash-dated-movements-form-desktop-no-overflow');await shot(page,'desktop-cash-dated-movements-form',{fullPage:false});
+    await page.setViewportSize({width:375,height:812});await noOverflow(page,'cash-dated-movements-form-mobile375-no-overflow');await shot(page,'mobile-cash-dated-movements-form375',{fullPage:false});
+    await dialog.getByRole('button',{name:'Salvar caixinha',exact:true}).click();await dialog.waitFor({state:'detached'});await dismissToast(page,'Caixinha salva na carteira selecionada.');
+    const saved=(await calls(page,'save_cash_pocket')).at(-1).args.input;
+    assert.deepEqual(saved.cashFlows,[{date:'2020-01-02',kind:'deposit',amount:'200.00'},{date:'2020-02-01',kind:'withdrawal',amount:'10'}]);
+    assert.deepEqual([saved.totalDeposits,saved.totalWithdrawals,saved.balanceDate,saved.balance,saved.cdiPercent],['200','10','2020-02-03','220','120']);
+    await page.getByRole('button',{name:'Editar caixinha Reserva sintética',exact:true}).click();await dialog.waitFor();
+    assert.equal(await dialog.locator('.cash-flow-table tbody tr').count(),2);
+    await dialog.getByRole('button',{name:'Remover dados de rendimento',exact:true}).click();
+    assert.equal(await dialog.locator('.cash-flow-table tbody tr').count(),0);
+    await dialog.getByRole('button',{name:'Salvar caixinha',exact:true}).click();await dialog.waitFor({state:'detached'});await dismissToast(page,'Caixinha salva na carteira selecionada.');
+    const cleared=(await calls(page,'save_cash_pocket')).at(-1).args.input;
+    assert.equal(cleared.clearReconciliation,true);assert.equal(Object.hasOwn(cleared,'cashFlows'),false);
+    assert.equal(await page.evaluate(()=>Object.hasOwn(globalThis.__uiTest.snapshot.cashPockets[0],'cashFlows')),false);
+    check('cash-dated-movements-edit-preserves-dates-and-types-normalizes-amounts-blocks-incomplete-lines-and-clears-explicitly');
+    await noUnexpectedCommands(page);await movements.context.close();
+  }
+
+  if(focusedWalletBenchmark){
+    await verifyWalletBenchmark();await verifyAutomaticIncomePerformance();await verifyFixedIncomeObservation();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'wallet-benchmark',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
   }
 
   if(focusedFixedIncome){
@@ -2095,6 +2253,7 @@ try {
   await verifyAutomaticIncomePerformance();
   await verifyFixedIncomeObservation();
   await verifyRecentMovements();
+  await verifyWalletBenchmark();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {
@@ -2110,17 +2269,17 @@ try {
     await globalTotals('R$ 300,00','+R$ 35,00','+R$ 25,00');
     for(const [name,values] of [['FIIs',['R$ 100,00','+R$ 5,00','−R$ 5,00']],['Caixinhas',['R$ 200,00','+R$ 30,00','+R$ 30,00']],['Total',['R$ 300,00','+R$ 35,00','+R$ 25,00']]])
       assert.deepEqual((await composition.getByRole('row',{name:new RegExp('^'+name+' ')}).locator('td').allInnerTexts()).map(normalize),values);
-    await textEquals(result().locator('.performance-chart-scope'),'Apenas FIIs. Caixinhas e pós-fixado entram nos totais acima, sem participar deste gráfico.');
+    await textEquals(result().locator('.performance-chart-scope'),'FIIs, pós-fixado e caixinhas da carteira. O CDI usa os mesmos aportes e resgates, até a data de cada investimento.');
     const graph=result().locator('.performance-bars svg');
-    assert.match(await graph.locator('desc').textContent(),/FIIs: −R\$\s*5,00\. CDI: \+R\$\s*8,00/);
-    assert.equal(Number(await graph.locator('.performance-bar.fii').getAttribute('y')),Number(await graph.locator('.performance-zero').getAttribute('y1')));
+    assert.match(await graph.locator('desc').textContent(),/Carteira: \+R\$\s*25,00\. CDI: \+R\$\s*18,00/);
+    assert.ok(Number(await graph.locator('.performance-bar.portfolio').getAttribute('y'))<Number(await graph.locator('.performance-zero').getAttribute('y1')));
     assert.equal((await calls(page,'refresh_fii_performance')).length,0);
     assert.equal((await calls(page,'simulate_cash_pocket')).length,0);
     await noOverflow(page,'combined-cash-and-FII-desktop-no-overflow');
     await rowPaintContinuity(page,composition,'desktop-portfolio-table',{capture:true});
     await rowPaintContinuity(page,result().locator('.performance-table'),'desktop-FII-breakdown-table',{capture:true});
     await shot(page,'desktop-overview-with-cash');
-    check('wallet-totals-combine-FII-loss-and-recorded-cash-gain-without-changing-FII-CDI-bars');
+    check('wallet-totals-and-CDI-bars-combine-FII-loss-and-recorded-cash-gain');
     await page.setViewportSize({width:375,height:812});
     await globalTotals('R$ 300,00','+R$ 35,00','+R$ 25,00');
     await noOverflow(page,'combined-cash-and-FII-mobile375-no-overflow');
@@ -2204,8 +2363,7 @@ try {
     const legacyPage=legacy.page;
     const legacyResult=()=>region(legacyPage,'Resultado da carteira');
     for(const label of ['Total aplicado','Rendimentos acumulados','Resultado da carteira'])await figureEquals(readout(legacyResult(),label),'—');
-    assert.equal(await legacyResult().locator('.performance-bars svg').count(),1,'Unknown cash basis must not hide an otherwise complete FII comparison');
-    assert.match(await legacyResult().locator('.performance-bars svg desc').textContent(),/FIIs: −R\$\s*5,00/);
+    assert.equal(await legacyResult().locator('.performance-bars svg').count(),0,'Unknown cash basis must keep the whole-wallet comparison pending');
     assert.deepEqual((await legacyResult().locator('.performance-portfolio-table tbody tr').filter({has:legacyPage.getByRole('button',{name:'Caixinhas',exact:true})}).locator('td').allInnerTexts()).map(normalize),['—','—','—']);
     await legacyResult().getByRole('button',{name:'Completar caixinhas',exact:true}).click();await title(legacyPage,'Caixinhas CDI');
     await figureEquals(readout(legacyPage.locator('.cash-actual-readouts'),'Total nas caixinhas'),'R$ 220,00');
@@ -2242,8 +2400,8 @@ try {
       const fixture=await openPage(mode,{width:1440,height:1000});const page=fixture.page;const result=region(page,'Resultado da carteira');
       await figureEquals(readout(result,'Total aplicado'),applied);await figureEquals(readout(result,'Rendimentos acumulados'),income);await figureEquals(readout(result,'Resultado da carteira'),total);
       if(mode==='cash-only'){
-        assert.equal(await result.locator('.performance-bars svg').count(),0);
-        await result.getByText('Sem compras de FIIs registradas para comparar com o CDI.',{exact:true}).waitFor();
+        assert.equal(await result.locator('.performance-bars svg').count(),1);
+        assert.match(await result.locator('.performance-bars svg desc').textContent(),/Carteira: \+R\$\s*30,00\. CDI: \+R\$\s*10,00/);
         assert.equal((await calls(page,'refresh_fii_performance')).length,0);
       }
       if(mode==='cash-negative'){
@@ -2255,7 +2413,7 @@ try {
         await navigate(page,'Caixinhas CDI');await figureEquals(readout(page.locator('.cash-actual-readouts'),'Total nas caixinhas'),'R$ 270,00');await figureEquals(readout(page.locator('.cash-actual-readouts'),'Rendimento acumulado'),'—');
         await textEquals(page.locator('.cash-table tbody tr').first().locator('td').nth(3),'+R$ 30,00');
       }
-      check(mode==='cash-only'?'cash-only-wallet-does-not-require-quotes-or-CDI-benchmark':mode==='cash-negative'?'negative-recorded-cash-income-reduces-wallet-income-and-result':'mixed-known-and-unknown-cash-never-promotes-partial-income-to-complete-total');
+      check(mode==='cash-only'?'cash-only-wallet-compares-dated-movements-to-CDI-without-requiring-FII-quotes':mode==='cash-negative'?'negative-recorded-cash-income-reduces-wallet-income-and-result':'mixed-known-and-unknown-cash-never-promotes-partial-income-to-complete-total');
       await noUnexpectedCommands(page);await fixture.context.close();
     }
     const zoom=await openPage('cash-zoom-200',{width:720,height:500});
@@ -2687,25 +2845,24 @@ try {
   // Full result includes price changes and registered distributions; the CDI uses the same purchases.
   const comparison=await openPage('performance',{width:1440,height:1000});page=comparison.page;
   const performanceSection=region(page,'Resultado da carteira');
-  const performanceTotal=()=>performanceSection.getByRole('table',{name:'Composição do resultado total dos FIIs',exact:true}).getByRole('row',{name:/^= Resultado total/}).locator('td');
+  const performanceTotal=()=>performanceSection.locator('.performance-component-table').getByRole('row',{name:/^FIIs /}).locator('td').first();
   const refreshPerformance=()=>performanceSection.getByRole('button',{name:'Atualizar resultado',exact:true});
   await figureEquals(performanceTotal(),'−R$ 889,10');
   assert.equal((await calls(page,'refresh_fii_performance')).length,0,'Opening Overview must only read cached performance');
-  const breakdown=performanceSection.getByRole('table',{name:'Composição do resultado total dos FIIs',exact:true});
-  for(const [label,value] of [['Valor de mercado dos FIIs','R$ 139,90'],['− Total investido','R$ 1.040,00'],['= Variação das cotas','−R$ 900,10'],['+ Rendimentos registrados','R$ 11,00'],['= Resultado total','−R$ 889,10']])
-    await textEquals(breakdown.getByRole('row',{name:new RegExp('^'+escapeRegExp(label))}).locator('td'),value);
-  assert.match(await tip(breakdown,'+ Rendimentos registrados'),/calculados.*estimativas/);
-  await performanceSection.getByText('Comparação estimada · compras no fim do mês; no mês da cotação, até a cotação.',{exact:true}).waitFor();
+  const breakdown=performanceSection.locator('.performance-component-table');
+  for(const [label,values] of [['FIIs',['−R$ 889,10','+R$ 80,00']],['Reserva sintética',['+R$ 34,56','+R$ 10,00']],['Carteira inteira',['−R$ 854,54','+R$ 90,00']]])
+    assert.deepEqual((await breakdown.getByRole('row',{name:new RegExp('^'+escapeRegExp(label))}).locator('td').allInnerTexts()).map(normalize),values);
+  assert.match(await tip(performanceSection,'Comparação estimada · CDI bruto, sem impostos.'),/mesmos movimentos.*aportes|mesmos movimentos|mesmos.*dinheiro/);
   const graph=performanceSection.locator('.performance-bars svg');
   const zero=Number(await graph.locator('.performance-zero').getAttribute('y1'));
   assert.equal(Number(await graph.locator('.performance-bar.fii').getAttribute('y')),zero,'A loss must start at zero and extend below it');
   assert.ok(Number(await graph.locator('.performance-bar.fii').getAttribute('height'))>0);
   assert.ok(Number(await graph.locator('.performance-bar.cdi').getAttribute('y'))<zero,'A positive benchmark must extend above zero');
-  await graph.focus();await page.keyboard.press('End');await textMatches(performanceSection.locator('.performance-point'),/^100% do CDI: \+R\$ 80,00/);
-  await page.keyboard.press('Home');await textMatches(performanceSection.locator('.performance-point'),/^FIIs: −R\$ 889,10/);
+  await graph.focus();await page.keyboard.press('End');await textMatches(performanceSection.locator('.performance-point'),/^100% do CDI: \+R\$ 90,00/);
+  await page.keyboard.press('Home');await textMatches(performanceSection.locator('.performance-point'),/^Carteira: −R\$ 854,54/);
   await performanceSection.locator('.performance-chart-table > summary').click();
-  const alternative=performanceSection.getByRole('table',{name:'Resultados acumulados comparados com as mesmas compras',exact:true});
-  await textMatches(alternative.getByRole('row',{name:/^FIIs/}),/^FIIs −R\$ 889,10 −85,49%$/);
+  const alternative=performanceSection.getByRole('table',{name:'Resultados acumulados da carteira comparados com os mesmos aportes e resgates',exact:true});
+  await textMatches(alternative.getByRole('row',{name:/^Carteira/}),/^Carteira −R\$ 854,54 −38,15%$/);
   assert.equal(await performanceSection.locator('.performance-source a').getAttribute('href'),performance.cdiSourceUrl);
   await performanceSection.locator('.performance-source a').click();
   assert.equal((await calls(page,'open_public_source')).at(-1).args.url,performance.cdiSourceUrl);
@@ -2722,13 +2879,13 @@ try {
   assert.equal((await calls(page,'refresh_fii_performance')).length,networkReads);
   check('performance-reloads-local-snapshot-with-unchanged-cost-and-distributions');
 
-  await page.evaluate(()=>{globalThis.__uiTest.performance={...globalThis.__uiTest.performance,marketValue:'1160',priceResult:'120',totalResult:'131',totalReturnPercent:'12.5961538462',difference:'51'};});
+  await page.evaluate(()=>{const old=globalThis.__uiTest.performance;globalThis.__uiTest.performance={...old,marketValue:'1160',priceResult:'120',totalResult:'131',totalReturnPercent:'12.5961538462',difference:'51',portfolioBenchmark:{...old.portfolioBenchmark,result:'165.56',returnPercent:'7.3910714286',difference:'75.56',components:[{...old.portfolioBenchmark.components[0],result:'131'},old.portfolioBenchmark.components[1]]}};});
   await refreshPerformance().click();await figureEquals(performanceTotal(),'+R$ 131,00');
   await figureEquals(readout(performanceSection,'Total aplicado'),'R$ 2.240,00');
   await figureEquals(readout(performanceSection,'Rendimentos acumulados'),'+R$ 45,56');
   await figureEquals(readout(performanceSection,'Resultado da carteira'),'+R$ 165,56');
   assert.ok(Number(await graph.locator('.performance-bar.fii').getAttribute('height'))>Number(await graph.locator('.performance-bar.cdi').getAttribute('height')),'The portfolio bar must exceed CDI when its result is higher');
-  await textMatches(performanceSection.locator('.performance-difference'),/\+R\$ 51,00/);
+  await textMatches(performanceSection.locator('.performance-difference'),/\+R\$ 75,56/);
   await shot(page,'desktop-fii-performance-positive');
   check('full-performance-positive-result-exceeds-CDI-with-signed-difference');
 
@@ -2736,18 +2893,18 @@ try {
   await refreshPerformance().click();await performanceSection.getByRole('alert').filter({hasText:'Fontes de resultado temporariamente indisponíveis no teste.'}).waitFor();
   await figureEquals(performanceTotal(),'+R$ 131,00');assert.equal(await graph.count(),1);
   check('performance-refresh-error-retains-complete-cached-result');
-  await page.evaluate(()=>{globalThis.__uiTest.failPerformance=false;globalThis.__uiTest.performance={...globalThis.__uiTest.performance,status:'incomplete',cdi:null,difference:null,issues:['CDI do período indisponível no cenário sintético.']};});
-  await refreshPerformance().click();await performanceSection.getByText('O resultado dos FIIs está disponível. Falta o CDI do mesmo período para comparar.',{exact:true}).waitFor();
+  await page.evaluate(()=>{globalThis.__uiTest.failPerformance=false;const old=globalThis.__uiTest.performance;globalThis.__uiTest.performance={...old,status:'incomplete',cdi:null,difference:null,issues:['CDI do período indisponível no cenário sintético.'],portfolioBenchmark:{...old.portfolioBenchmark,status:'incomplete',cdi:null,difference:null,issues:['CDI do período indisponível no cenário sintético.'],components:old.portfolioBenchmark.components.map(component=>({...component,cdi:null}))}};});
+  await refreshPerformance().click();await performanceSection.getByText('O resultado da carteira está disponível. Falta completar os dados da comparação com o CDI.',{exact:true}).waitFor();
   await figureEquals(performanceTotal(),'+R$ 131,00');assert.equal(await graph.count(),0);
   await figureEquals(readout(performanceSection,'Resultado da carteira'),'+R$ 165,56');
   check('missing-CDI-preserves-full-FII-result-without-income-only-comparison');
-  await page.evaluate(base=>{globalThis.__uiTest.performance={...base,status:'incomplete',marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,difference:null,issues:['Sem cotação de MOCK11 no cenário sintético.']};},performance);
+  await page.evaluate(base=>{globalThis.__uiTest.performance={...base,status:'incomplete',marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,difference:null,issues:['Sem cotação de MOCK11 no cenário sintético.'],portfolioBenchmark:{...base.portfolioBenchmark,status:'incomplete',result:null,returnPercent:null,cdi:null,difference:null,issues:['Sem cotação de MOCK11 no cenário sintético.'],components:[{...base.portfolioBenchmark.components[0],result:null,cdi:null,issues:['Sem cotação de MOCK11 no cenário sintético.']},base.portfolioBenchmark.components[1]]}};},{...performance,portfolioBenchmark:benchmarkDefault});
   await refreshPerformance().click();await performanceSection.getByText('Sem cotação de MOCK11 no cenário sintético.',{exact:true}).waitFor();
-  await figureEquals(performanceTotal(),'—');await textEquals(breakdown.getByRole('row',{name:/^= Variação das cotas/}).locator('td'),'—');assert.equal(await graph.count(),0);
+  await figureEquals(performanceTotal(),'—');await textEquals(breakdown.getByRole('row',{name:/^Carteira inteira /}).locator('td').first(),'—');assert.equal(await graph.count(),0);
   await figureEquals(readout(performanceSection,'Total aplicado'),'R$ 2.240,00');await figureEquals(readout(performanceSection,'Rendimentos acumulados'),'+R$ 45,56');await figureEquals(readout(performanceSection,'Resultado da carteira'),'—');
   check('missing-quote-is-a-gap-not-zero-or-distributions-only-result');
 
-  await page.evaluate(base=>{globalThis.__uiTest.performance=structuredClone(base);},performance);
+  await page.evaluate(base=>{globalThis.__uiTest.performance=structuredClone(base);},{...performance,portfolioBenchmark:benchmarkDefault});
   await refreshPerformance().click();await figureEquals(performanceTotal(),'−R$ 889,10');
   await page.setViewportSize({width:375,height:812});await noOverflow(page,'performance-mobile375-no-overflow');
   assert.deepEqual(await breakdown.locator('td.num').evaluateAll(cells=>cells.filter(cell=>cell.scrollWidth>cell.clientWidth+1).map(cell=>cell.textContent)),[]);

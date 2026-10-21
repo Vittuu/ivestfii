@@ -1,11 +1,12 @@
 //! Read-only integration of ledger calculations and dated public observations.
 use crate::{CdiHistorySnapshot, DividendPanel, QuotePanel};
-use chrono::{DateTime, FixedOffset, NaiveDate};
+use chrono::{DateTime, Datelike, Days, FixedOffset, NaiveDate};
 use ivestfii_core::{
     performance::{
         calculate_fii_performance, calculate_fii_performance_with_income, DailyCdiRate,
         FiiPerformance, PerformanceQuote,
     },
+    portfolio_benchmark::{calculate_portfolio_benchmark, PortfolioBenchmark},
     portfolio_performance::{calculate_portfolio_performance, PortfolioPerformance},
     PortfolioSnapshot,
 };
@@ -17,9 +18,6 @@ pub fn cached_report(
     directory: &std::path::Path,
     today: NaiveDate,
 ) -> Result<PerformanceReport, String> {
-    if snapshot.funds.is_empty() {
-        return build_report(snapshot, &QuotePanel::default(), None, today, vec![]);
-    }
     let symbols = snapshot
         .funds
         .iter()
@@ -71,6 +69,7 @@ pub struct PerformanceReport {
     #[serde(flatten)]
     pub calculation: FiiPerformance,
     pub portfolio: PortfolioPerformance,
+    pub portfolio_benchmark: PortfolioBenchmark,
     pub quote_source: Option<String>,
     pub quote_fetched_at: Option<String>,
     pub cdi_source: Option<String>,
@@ -207,9 +206,14 @@ fn build_report_inner(
         .map(|source| source.fetched_at.clone())
         .min();
     let dividend_source = dividend_sources.first().map(|source| source.source.clone());
+    let portfolio =
+        calculate_portfolio_performance(snapshot, &calculation).map_err(|e| e.to_string())?;
+    let portfolio_benchmark =
+        calculate_portfolio_benchmark(snapshot, &calculation, &portfolio, &rates, today)
+            .map_err(|e| e.to_string())?;
     Ok(PerformanceReport {
-        portfolio: calculate_portfolio_performance(snapshot, &calculation)
-            .map_err(|e| e.to_string())?,
+        portfolio,
+        portfolio_benchmark,
         calculation,
         quote_source,
         quote_fetched_at,
@@ -222,22 +226,31 @@ fn build_report_inner(
     })
 }
 
-/// Query from the beginning of the first purchase month so that a purchase
-/// estimated on a weekend still has a preceding published CDI observation.
-/// The core accrues interest only after each modelled month-end purchase.
+/// Share one bounded historical query across all portfolio components. Query
+/// from the first flow's month, with a prior-week lookback when that flow is
+/// early in the month, so weekend/holiday applications have a preceding rate.
 pub fn cdi_range(report: &PerformanceReport) -> Result<Option<(NaiveDate, NaiveDate)>, String> {
-    if report.calculation.total_result.is_none() {
-        return Ok(None);
+    let mut range: Option<(NaiveDate, NaiveDate)> = None;
+    for component in &report.portfolio_benchmark.components {
+        let (Some(start), Some(end)) = (&component.start_date, &component.as_of) else {
+            continue;
+        };
+        let start = NaiveDate::parse_from_str(start, "%Y-%m-%d")
+            .map_err(|_| "Data inicial inválida na comparação.".to_string())?;
+        let month_start = start
+            .with_day(1)
+            .ok_or("Mês inicial inválido na comparação.")?;
+        let preceding_week = start.checked_sub_days(Days::new(7)).unwrap_or(start);
+        let series_start = NaiveDate::from_ymd_opt(1986, 3, 6).expect("SGS 12 start date");
+        let start = month_start.min(preceding_week).max(series_start);
+        let end = NaiveDate::parse_from_str(end, "%Y-%m-%d")
+            .map_err(|_| "Data final inválida na comparação.".to_string())?;
+        range = Some(match range {
+            Some((first, last)) => (first.min(start), last.max(end)),
+            None => (start, end),
+        });
     }
-    let (Some(start), Some(end)) = (&report.calculation.start_month, &report.calculation.as_of)
-    else {
-        return Ok(None);
-    };
-    let start = NaiveDate::parse_from_str(&format!("{start}-01"), "%Y-%m-%d")
-        .map_err(|_| "Mês inicial inválido na comparação.".to_string())?;
-    let end = NaiveDate::parse_from_str(end, "%Y-%m-%d")
-        .map_err(|_| "Data final inválida na comparação.".to_string())?;
-    Ok(Some((start, end)))
+    Ok(range)
 }
 
 #[cfg(test)]
@@ -335,6 +348,63 @@ mod tests {
     }
 
     #[test]
+    fn cash_only_cached_report_uses_daily_history_and_requests_its_dated_flows() {
+        let directory =
+            std::env::temp_dir().join(format!("ivestfii-cash-cdi-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(directory.join("public-data")).unwrap();
+        let value: PortfolioSnapshot = serde_json::from_value(json!({
+            "funds":[], "totals":{"invested":"0","cotas":"0","dividendsReceived":"0","estimatedMonthlyIncome":"0"},
+            "recordCount":0,"cashPockets":[{
+                "id":"cash","name":"Reserva sintética","institution":"Teste","balance":"115",
+                "totalDeposits":"100","totalWithdrawals":"10","balanceDate":"2026-10-20",
+                "cashFlows":[{"date":"2026-10-19","kind":"deposit","amount":"100"},
+                    {"date":"2026-10-20","kind":"withdrawal","amount":"10"}],
+                "cdiPercent":"120","annualCdiRate":null,"rateDate":null,"rateSource":"manual","notes":"",
+                "createdAt":"2026-10-19T12:00:00Z","updatedAt":"2026-10-20T12:00:00Z"
+            }]
+        })).unwrap();
+        let before = serde_json::to_value(&value).unwrap();
+        let history = json!({"version":1,"snapshot":{
+            "seriesId":12,"unit":"% a.d.","source":"Banco Central do Brasil · SGS 12",
+            "sourceUrl":"https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados?formato=json&dataInicial=01/10/2026&dataFinal=20/10/2026",
+            "requestedStartDate":"2026-10-01","requestedEndDate":"2026-10-20",
+            "observations":[
+                {"date":"2026-10-01","value":"0"},{"date":"2026-10-05","value":"0"},
+                {"date":"2026-10-09","value":"0"},{"date":"2026-10-13","value":"0"},
+                {"date":"2026-10-16","value":"0"},{"date":"2026-10-19","value":"1"},
+                {"date":"2026-10-20","value":"2"}],
+            "fetchedAt":"2026-10-20T23:00:00Z","stale":false
+        }});
+        std::fs::write(
+            directory.join("public-data/cdi-history.json"),
+            serde_json::to_vec(&history).unwrap(),
+        )
+        .unwrap();
+        let report = cached_report(
+            &value,
+            &directory,
+            NaiveDate::from_ymd_opt(2026, 10, 20).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            report.portfolio_benchmark.status, "available",
+            "{:?}",
+            report.portfolio_benchmark
+        );
+        assert_eq!(report.portfolio_benchmark.result.as_deref(), Some("25"));
+        assert_eq!(report.portfolio_benchmark.cdi.as_ref().unwrap().result, "2");
+        assert_eq!(
+            report.cdi_source.as_deref(),
+            Some("Banco Central do Brasil · SGS 12")
+        );
+        let (start, end) = cdi_range(&report).unwrap().unwrap();
+        assert_eq!(start.to_string(), "2026-10-01");
+        assert_eq!(end.to_string(), "2026-10-20");
+        assert_eq!(serde_json::to_value(&value).unwrap(), before);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn saved_b3_income_flows_into_full_result_cash_totals_and_cdi_without_manual_duplicates() {
         use chrono::{Days, Utc};
         let mut value = serde_json::to_value(snapshot()).unwrap();
@@ -423,5 +493,173 @@ mod tests {
             fetched.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
         );
         assert_eq!(serde_json::to_value(&snapshot).unwrap(), original);
+    }
+
+    #[test]
+    fn first_day_weekend_application_requests_a_prior_week_cdi_observation() {
+        let snapshot: PortfolioSnapshot = serde_json::from_value(json!({
+            "funds":[],"totals":{"invested":"0","cotas":"0","dividendsReceived":"0","estimatedMonthlyIncome":"0"},
+            "recordCount":0,"cashPockets":[{
+                "id":"cash","name":"Reserva sintética","institution":"Teste","balance":"101",
+                "totalDeposits":"100","totalWithdrawals":"0","balanceDate":"2026-11-03",
+                "cashFlows":[{"date":"2026-11-01","kind":"deposit","amount":"100"}],
+                "cdiPercent":"120","annualCdiRate":null,"rateDate":null,"notes":"Sintético",
+                "createdAt":"2026-11-01T12:00:00Z","updatedAt":"2026-11-03T12:00:00Z"
+            }]
+        })).unwrap();
+        let report = build_report(
+            &snapshot,
+            &QuotePanel::default(),
+            None,
+            NaiveDate::from_ymd_opt(2026, 11, 3).unwrap(),
+            vec![],
+        )
+        .unwrap();
+        let (start, end) = cdi_range(&report).unwrap().unwrap();
+        assert_eq!(start.to_string(), "2026-10-25");
+        assert_eq!(end.to_string(), "2026-11-03");
+        assert_eq!(
+            report.portfolio_benchmark.start_date.as_deref(),
+            Some("2026-11-01")
+        );
+        // The lookback is a query boundary, never an invented earlier deposit.
+        assert_eq!(report.portfolio_benchmark.invested.as_deref(), Some("100"));
+        let mut boundary = report;
+        boundary.portfolio_benchmark.components[0].start_date = Some("1986-03-06".into());
+        let (start, _) = cdi_range(&boundary).unwrap().unwrap();
+        assert_eq!(start.to_string(), "1986-03-06");
+    }
+
+    #[test]
+    fn whole_wallet_report_extends_cdi_to_fixed_applications_and_reads_history_without_fiis() {
+        use chrono::{Days, SecondsFormat, Utc};
+        let mut value = serde_json::to_value(snapshot()).unwrap();
+        value["cashPockets"] = json!([{
+            "id":"cash","name":"Reserva sintética","institution":"Teste","balance":"220",
+            "totalDeposits":"200","totalWithdrawals":"10","balanceDate":"2026-10-19",
+            "cashFlows":[{"date":"2026-08-10","kind":"deposit","amount":"200"},
+                {"date":"2026-09-10","kind":"withdrawal","amount":"10"}],
+            "cdiPercent":"120","annualCdiRate":null,"rateDate":null,"notes":"Sintético",
+            "createdAt":"2026-08-01T12:00:00Z","updatedAt":"2026-10-19T12:00:00Z"
+        }]);
+        value["brokerPosition"] = json!({
+            "referenceDate":"2026-10-19","institution":"Corretora sintética",
+            "importedAt":"2026-10-19T12:00:00Z","sourcePath":"fixture.json","sourceHash":"a".repeat(64),
+            "overview":{"totalWithCash":"99999","invested":"99999","cash":"99999","listedFunds":"99999","fixedIncome":"99999","pendingIncome":"99999"},
+            "listedFunds":{"marketValue":"90","costBasis":"100","unrealizedResult":"-10","dailyResult":"0",
+                "holdings":[{"ticker":"TEST11","shares":"10","averagePrice":"10","price":"9","marketValue":"90","unrealizedResult":"-10","costBasis":"100"}]},
+            "fixedIncome":{"name":"Nome antigo sintético","nameTruncated":true,"balance":"99999","netBalance":"99999","reportedEarnings":"99999","return12Months":"99999","redemptionConversion":"D+0","redemptionSettlement":"D+0",
+                "latestObservation":{"referenceDate":"2026-10-19","name":"Pós-fixado sintético","category":"Renda fixa","riskLevel":"1",
+                    "balance":"180","invested":"150","totalEarnings":"30","earnings12Months":"99999","return12Months":"99999","returnReferenceDate":"2026-10-15",
+                    "contributions":[
+                        {"applicationDate":"2026-07-10","invested":"100","currentValue":"120","earnings":"20","returnPercent":"20"},
+                        {"applicationDate":"2026-09-01","invested":"50","currentValue":"60","earnings":"10","returnPercent":"20"}],
+                    "sources":[],"importedAt":"2026-10-19T12:00:00Z","sourcePath":"fixture.json","sourceHash":"b".repeat(64)}},
+            "warnings":[]
+        });
+        let snapshot: PortfolioSnapshot = serde_json::from_value(value).unwrap();
+        let before = serde_json::to_value(&snapshot).unwrap();
+        let fetched = DateTime::parse_from_rfc3339("2026-10-20T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let observation = crate::dividends::parse_b3_dividends(
+            &serde_json::to_vec(&json!({"code":"TEST","cashDividends":[
+                {"isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"99,99","lastDatePrior":"2026-08-01","paymentDate":"2026-08-15"},
+                {"isinCode":"BRTESTCTF000","label":"RENDIMENTO","rate":"1,00","lastDatePrior":"2026-09-01","paymentDate":"2026-09-15"}
+            ]})).unwrap(), "TEST11", fetched,
+        ).unwrap();
+        let dividends = DividendPanel {
+            items: vec![crate::dividends::DividendItem {
+                symbol: "TEST11".into(),
+                status: "cached".into(),
+                observation: Some(observation),
+                error: None,
+            }],
+            fetched_at: Some(fetched.to_rfc3339()),
+            errors: vec![],
+        };
+        let mut day = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        let mut observations = vec![];
+        while day <= end {
+            observations.push(crate::cdi_history::CdiDailyObservation {
+                date: day.to_string(),
+                value: if day.to_string() == "2026-09-01" {
+                    "1"
+                } else {
+                    "0"
+                }
+                .into(),
+            });
+            day = day.checked_add_days(Days::new(1)).unwrap();
+        }
+        let history = CdiHistorySnapshot {
+            series_id:12, unit:"% a.d.".into(), source:"Banco Central do Brasil · SGS 12".into(),
+            source_url:"https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados?formato=json&dataInicial=01/07/2026&dataFinal=19/10/2026".into(),
+            requested_start_date:"2026-07-01".into(), requested_end_date:"2026-10-19".into(),
+            observations,fetched_at:fetched.to_rfc3339_opts(SecondsFormat::Secs,true),stale:false,
+        };
+        let today = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+        let report = build_report_with_income(
+            &snapshot,
+            &quote("BRL", "2026-10-19T21:00:00Z"),
+            Some(&history),
+            &dividends,
+            today,
+            vec![],
+        )
+        .unwrap();
+        let (start, end) = cdi_range(&report).unwrap().unwrap();
+        assert_eq!(start.to_string(), "2026-07-01");
+        assert_eq!(end.to_string(), "2026-10-19");
+        assert_eq!(report.calculation.start_month.as_deref(), Some("2026-08"));
+        let income = report.calculation.income.as_ref().unwrap();
+        assert_eq!(income.recorded_amount, "5");
+        assert_eq!(income.api_amount, "10");
+        assert_eq!(report.portfolio.income.as_deref(), Some("75"));
+        assert_eq!(report.portfolio_benchmark.status, "available");
+        assert_eq!(report.portfolio_benchmark.invested.as_deref(), Some("450"));
+        assert_eq!(report.portfolio_benchmark.result.as_deref(), Some("65"));
+        assert_eq!(report.portfolio_benchmark.cdi.as_ref().unwrap().result, "4");
+        assert_eq!(report.portfolio_benchmark.difference.as_deref(), Some("61"));
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), before);
+
+        let directory =
+            std::env::temp_dir().join(format!("ivestfii-fixed-cdi-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(directory.join("public-data")).unwrap();
+        std::fs::write(
+            directory.join("public-data/cdi-history.json"),
+            serde_json::to_vec(&json!({"version":1,"snapshot":history})).unwrap(),
+        )
+        .unwrap();
+        let mut fixed_only = snapshot.clone();
+        fixed_only.funds.clear();
+        fixed_only.record_count = 0;
+        fixed_only.cash_pockets.clear();
+        fixed_only
+            .broker_position
+            .as_mut()
+            .unwrap()
+            .listed_funds
+            .holdings
+            .clear();
+        let report = cached_report(&fixed_only, &directory, today).unwrap();
+        assert_eq!(report.calculation.status, "empty");
+        assert_eq!(
+            report.portfolio_benchmark.status, "available",
+            "{:?}",
+            report.portfolio_benchmark
+        );
+        assert_eq!(report.portfolio_benchmark.components.len(), 1);
+        assert_eq!(report.portfolio_benchmark.result.as_deref(), Some("30"));
+        assert_eq!(report.portfolio_benchmark.cdi.as_ref().unwrap().result, "1");
+        assert_eq!(
+            report.cdi_source.as_deref(),
+            Some("Banco Central do Brasil · SGS 12")
+        );
+        let (start, end) = cdi_range(&report).unwrap().unwrap();
+        assert_eq!(start.to_string(), "2026-07-01");
+        assert_eq!(end.to_string(), "2026-10-19");
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

@@ -52,6 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 total_deposits: None,
                 total_withdrawals: None,
                 balance_date: None,
+                cash_flows: None,
                 clear_reconciliation: false,
                 cdi_percent: "120".into(),
                 annual_cdi_rate: Some("10".into()),

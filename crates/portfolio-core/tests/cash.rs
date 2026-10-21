@@ -12,6 +12,7 @@ fn pocket(balance: &str, percentage: &str, rate: Option<&str>) -> CashPocketInpu
         total_deposits: None,
         total_withdrawals: None,
         balance_date: None,
+        cash_flows: None,
         clear_reconciliation: false,
         cdi_percent: percentage.into(),
         annual_cdi_rate: rate.map(str::to_string),

@@ -46,6 +46,7 @@ fn wallet_summary_keeps_fii_cost_and_cash_balances_separate() {
                 total_deposits: None,
                 total_withdrawals: None,
                 balance_date: None,
+                cash_flows: None,
                 clear_reconciliation: false,
                 cdi_percent: "120".into(),
                 annual_cdi_rate: None,

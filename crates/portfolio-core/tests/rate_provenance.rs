@@ -18,6 +18,7 @@ fn reference() -> CashPocketInput {
         total_deposits: None,
         total_withdrawals: None,
         balance_date: None,
+        cash_flows: None,
         clear_reconciliation: false,
         cdi_percent: "120".into(),
         annual_cdi_rate: Some("8.2".into()),
@@ -334,7 +335,7 @@ fn schema_three_migration_preserves_cash_history_and_unchanged_outbox() {
         upgraded
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        7
+        8
     );
     let provenance: (String, Option<String>, Option<String>) = upgraded
         .query_row(

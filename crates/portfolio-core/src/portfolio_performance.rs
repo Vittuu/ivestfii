@@ -504,6 +504,7 @@ mod tests {
             total_deposits: deposits.map(str::to_owned),
             total_withdrawals: withdrawals.map(str::to_owned),
             balance_date: deposits.zip(withdrawals).map(|_| "2026-10-20".into()),
+            cash_flows: None,
         }
     }
 

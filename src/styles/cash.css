@@ -170,3 +170,23 @@
   .cash-page .cash-details dl > div { grid-template-columns: minmax(0, 1fr); }
   .cash-page .cash-details dt, .cash-page .cash-details dd { grid-column: 1; }
 }
+
+/* Dated cash movements fit inside the existing pocket editor. */
+.cash-page .cash-flow-table { margin-bottom: var(--sp-3); }
+.cash-page .cash-flow-table table { width: 100%; table-layout: fixed; min-width: 0; }
+.cash-page .cash-flow-table th, .cash-page .cash-flow-table td { padding: var(--sp-2) var(--sp-1); }
+.cash-page .cash-flow-table th:first-child { width: 35%; }
+.cash-page .cash-flow-table th:nth-child(2) { width: 30%; }
+.cash-page .cash-flow-table th:last-child { width: 36px; }
+.cash-page .cash-flow-table input, .cash-page .cash-flow-table select { width: 100%; min-width: 0; padding-inline: var(--sp-2); font-size: var(--fs-12); }
+.cash-page .cash-add-flow { margin-bottom: var(--sp-4); }
+
+@media (max-width: 480px) {
+  .cash-page .cash-flow-table thead { display: none; }
+  .cash-page .cash-flow-table tbody { display: block; }
+  .cash-page .cash-flow-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px; padding-block: var(--sp-2); border-top: 1px solid var(--line); }
+  .cash-page .cash-flow-table td { height: auto; min-width: 0; border: 0; }
+  .cash-page .cash-flow-table td:first-child { grid-column: 1 / -1; }
+  .cash-page .cash-flow-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: var(--sp-1); font-size: var(--fs-12); color: var(--text-3); }
+  .cash-page .cash-flow-table td:last-child { align-self: end; padding-bottom: var(--sp-2); }
+}

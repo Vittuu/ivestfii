@@ -88,3 +88,6 @@ python -B scripts/verify-market-mcp.py --binary target/debug/examples/ivestfii-p
 ```
 
 A versão web e a sincronização Vercel continuam pendentes. As chaves locais não devem ser enviadas por sincronização para um futuro servidor.
+
+
+A comparação **Carteira × 100% do CDI** inclui FIIs, pós-fixado e caixinhas. Cada componente usa o cenário dos mesmos aportes e resgates, até a data observada desse saldo. A tabela mostra essas datas; quando diferem, o total soma comparações encerradas em dias distintos, sem fingir uma posição única atual. O pós-fixado utiliza os aportes datados do complemento importado. As caixinhas utilizam `cashFlows` conciliados com os totais cadastrados; data de cadastro e taxa anual da projeção não substituem o histórico de movimentos ou a série diária. Saldos de fim de semana usam a taxa publicada na sexta-feira; feriados sem cobertura suficiente ficam pendentes. As consultas do histórico são compartilhadas, com a cadência existente, inclusive em carteiras sem FIIs. O MCP expõe esse cálculo em `performance.report.portfolioBenchmark`; os campos anteriores `totalResult` e `cdi` continuam detalhes dos FIIs.

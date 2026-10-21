@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LoaderCircle, Pencil, Plus } from 'lucide-react';
+import { LoaderCircle, Pencil, Plus, Trash2 } from 'lucide-react';
 import { amount, call, dateBR, decimal, desktop, errorMessage, money, percent } from '../lib/bridge';
-import type { CashPerformance, CashPocket, CashSimulation, EconomicIndicator } from '../lib/bridge';
+import type { CashFlow, CashPerformance, CashPocket, CashSimulation, EconomicIndicator } from '../lib/bridge';
 import { Def, Empty, Field, handleForm, Loading, Modal, PageActions, SectionHeading } from '../components';
 import PublicSourceLink from '../components/PublicSourceLink';
 
@@ -194,6 +194,12 @@ function CashPocketForm({ walletId, pocket, onClose, onSaved }: { walletId: stri
   const [values, setValues] = useState({ name: pocket?.name || '', institution: pocket?.institution || '', balance: pocket?.balance || '', totalDeposits: pocket?.totalDeposits ?? '', totalWithdrawals: pocket?.totalWithdrawals ?? '', balanceDate: pocket?.balanceDate ?? '', cdiPercent: pocket?.cdiPercent || '100', annualCdiRate: pocket?.annualCdiRate ?? '', rateDate: pocket?.rateDate ?? '', notes: pocket?.notes || '' });
   const hasSavedReconciliation = pocket?.totalDeposits != null || pocket?.totalWithdrawals != null || pocket?.balanceDate != null;
   const [clearReconciliation, setClearReconciliation] = useState(false);
+  const [cashFlows, setCashFlows] = useState<CashFlow[]>(pocket?.cashFlows ?? []);
+  const [flowsEdited, setFlowsEdited] = useState(false);
+  const updateFlow = (index: number, patch: Partial<CashFlow>) => {
+    setCashFlows((current) => current.map((flow, row) => row === index ? { ...flow, ...patch } : flow));
+    setFlowsEdited(true); setClearReconciliation(false);
+  };
   const [source, setSource] = useState<{ rateSource: 'manual' | 'bcb-sgs'; rateSourceUrl: string | null; rateFetchedAt: string | null }>({ rateSource: pocket?.rateSource ?? 'manual', rateSourceUrl: pocket?.rateSourceUrl ?? null, rateFetchedAt: pocket?.rateFetchedAt ?? null });
   const [busy, setBusy] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -244,11 +250,15 @@ function CashPocketForm({ walletId, pocket, onClose, onSaved }: { walletId: stri
     const filled = reconciliationFields.filter(Boolean).length;
     if (filled !== 0 && filled !== 3) { setError('Para calcular o rendimento, preencha total aplicado, total resgatado e data do saldo juntos. Se não houve resgate, informe 0.'); return; }
     if (!filled && hasSavedReconciliation && !clearReconciliation) { setError('Para apagar os dados já cadastrados, use “Remover dados de rendimento”, ou preencha novamente os três campos.'); return; }
+    const hasFlows = cashFlows.length > 0 || flowsEdited || pocket?.cashFlows != null;
+    if (!clearReconciliation && hasFlows && filled !== 3) { setError('Para comparar com o CDI, informe também os totais aplicados e resgatados e a data do saldo.'); return; }
+    if (!clearReconciliation && cashFlows.some((flow) => !flow.date || !flow.amount.trim())) { setError('Preencha a data e o valor de cada movimento, ou remova a linha incompleta.'); return; }
+    const movements = !clearReconciliation && hasFlows ? { cashFlows: cashFlows.map((flow) => ({ ...flow, amount: decimal(flow.amount) })) } : {};
     const reconciliation = filled === 3 ? { totalDeposits: decimal(values.totalDeposits), totalWithdrawals: decimal(values.totalWithdrawals), balanceDate: values.balanceDate } : clearReconciliation ? { clearReconciliation: true } : {};
     savePending.current = true;
     setBusy(true);
     try {
-      await call('save_cash_pocket', { walletId, input: { id: pocket?.id, name: values.name.trim(), institution: values.institution.trim(), balance: decimal(values.balance), ...reconciliation, cdiPercent: decimal(values.cdiPercent), annualCdiRate: values.annualCdiRate.trim() ? decimal(values.annualCdiRate) : null, rateDate: values.rateDate || null, ...source, notes: values.notes.trim() } });
+      await call('save_cash_pocket', { walletId, input: { id: pocket?.id, name: values.name.trim(), institution: values.institution.trim(), balance: decimal(values.balance), ...reconciliation, ...movements, cdiPercent: decimal(values.cdiPercent), annualCdiRate: values.annualCdiRate.trim() ? decimal(values.annualCdiRate) : null, rateDate: values.rateDate || null, ...source, notes: values.notes.trim() } });
       await onSaved();
     } catch (err) { setError(errorMessage(err)); } finally { savePending.current = false; setBusy(false); }
   };
@@ -264,8 +274,23 @@ function CashPocketForm({ walletId, pocket, onClose, onSaved }: { walletId: stri
         <div className="form-grid"><Field label="Total aplicado (R$)" hint="Some todas as aplicações, inclusive as que depois foram resgatadas. Não inclua juros creditados pelo banco como aplicação."><input inputMode="decimal" value={values.totalDeposits} onChange={(event) => update('totalDeposits', event.target.value)} placeholder="Não informado" disabled={busy} /></Field><Field label="Total resgatado (R$)" hint="Some tudo que saiu da caixinha, incluindo juros retirados. Se nunca resgatou, preencha 0."><input inputMode="decimal" value={values.totalWithdrawals} onChange={(event) => update('totalWithdrawals', event.target.value)} placeholder="0 se nunca resgatou" disabled={busy} /></Field></div>
         <div className="cash-date-entry"><Field label="Data do saldo" hint="Data em que o saldo informado acima foi conferido no banco. Não é a data da taxa CDI."><input type="date" value={values.balanceDate} onChange={(event) => update('balanceDate', event.target.value)} disabled={busy} /></Field><button type="button" className="button small secondary" disabled={busy} onClick={() => { const today = new Date(); update('balanceDate', `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`); }}>Usar data de hoje</button></div>
         <p className="cash-form-explanation">Campo vazio significa dado desconhecido. Para calcular, preencha os três campos; zero precisa ser informado.</p>
-        {hasSavedReconciliation && <button type="button" className="text-link cash-remove-reconciliation" disabled={busy || clearReconciliation} onClick={() => { setValues((current) => ({ ...current, totalDeposits: '', totalWithdrawals: '', balanceDate: '' })); setClearReconciliation(true); setError(''); }}>Remover dados de rendimento</button>}
-        {clearReconciliation && <p className="cash-reference-notice" role="status">Ao salvar, aplicações, resgates e data do saldo serão removidos. O saldo e a taxa contratada continuam cadastrados; o rendimento ficará desconhecido.</p>}
+        {hasSavedReconciliation && <button type="button" className="text-link cash-remove-reconciliation" disabled={busy || clearReconciliation} onClick={() => { setValues((current) => ({ ...current, totalDeposits: '', totalWithdrawals: '', balanceDate: '' })); setClearReconciliation(true); setCashFlows([]); setFlowsEdited(false); setError(''); }}>Remover dados de rendimento</button>}
+        {clearReconciliation && <p className="cash-reference-notice" role="status">Ao salvar, aplicações, resgates, datas dos movimentos e data do saldo serão removidos. O saldo e a taxa contratada continuam cadastrados; o rendimento ficará desconhecido.</p>}
+      </fieldset>
+      <fieldset className="cash-rate cash-flows">
+        <legend>Datas para comparar com o CDI <span>opcional</span></legend>
+        <p className="cash-form-explanation">Informe cada aplicação e resgate com a data em que aconteceu. Assim, a comparação usa o mesmo dinheiro pelo mesmo tempo. A soma deve bater com os totais acima; juros que ficaram na caixinha não são uma nova aplicação.</p>
+        {cashFlows.length > 0 ? <div className="table-wrap cash-flow-table"><table>
+          <caption className="sr-only">Aplicações e resgates com data</caption>
+          <thead><tr><th scope="col">Data</th><th scope="col">Movimento</th><th scope="col">Valor (R$)</th><th scope="col"><span className="sr-only">Ações</span></th></tr></thead>
+          <tbody>{cashFlows.map((flow, index) => <tr key={index}>
+            <td data-label="Data"><input type="date" aria-label={`Data do movimento ${index + 1}`} value={flow.date} max={values.balanceDate || undefined} onChange={(event) => updateFlow(index, { date: event.target.value })} disabled={busy} /></td>
+            <td data-label="Movimento"><select aria-label={`Tipo do movimento ${index + 1}`} value={flow.kind} onChange={(event) => updateFlow(index, { kind: event.target.value as CashFlow['kind'] })} disabled={busy}><option value="deposit">Aplicação</option><option value="withdrawal">Resgate</option></select></td>
+            <td data-label="Valor (R$)"><input type="text" inputMode="decimal" aria-label={`Valor do movimento ${index + 1}`} value={flow.amount} placeholder="0,00" onChange={(event) => updateFlow(index, { amount: event.target.value })} disabled={busy} /></td>
+            <td><button type="button" className="icon-button" aria-label={`Remover movimento ${index + 1}`} disabled={busy} onClick={() => { setCashFlows((current) => current.filter((_, row) => row !== index)); setFlowsEdited(true); }}><Trash2 size={15} /></button></td>
+          </tr>)}</tbody>
+        </table></div> : <p className="cash-form-explanation">Sem essas datas, o rendimento cadastrado continua nos totais. A comparação com o CDI fica aguardando os movimentos.</p>}
+        <button type="button" className="button small cash-add-flow" disabled={busy} onClick={() => { setCashFlows((current) => [...current, { date: '', kind: 'deposit', amount: '' }]); setFlowsEdited(true); setClearReconciliation(false); }}><Plus size={14} />Adicionar movimento</button>
       </fieldset>
       <fieldset className="cash-rate">
         <legend>CDI para simular <span>opcional</span></legend>

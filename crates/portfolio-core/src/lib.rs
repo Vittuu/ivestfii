@@ -23,6 +23,7 @@ mod broker;
 mod cash;
 pub mod income;
 pub mod performance;
+pub mod portfolio_benchmark;
 pub mod portfolio_performance;
 mod profile;
 mod wallets;
@@ -31,7 +32,7 @@ pub use broker::{
     BrokerFixedIncome, BrokerFixedIncomeContribution, BrokerFixedIncomeObservation, BrokerHolding,
     BrokerListedFunds, BrokerObservationSource, BrokerOverview, BrokerPosition,
 };
-pub use cash::{CashPocket, CashPocketInput, CashSimulation, CashSimulationInput};
+pub use cash::{CashFlow, CashPocket, CashPocketInput, CashSimulation, CashSimulationInput};
 pub use profile::{InvestmentProfile, InvestmentProfileInput};
 pub use wallets::{Wallet, WalletCatalog, WalletInput, DEFAULT_WALLET_ID};
 pub use wealth::{WalletWealth, WealthOverview, WealthTotals};
@@ -264,7 +265,7 @@ impl Repository {
             "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;",
         )?;
         let version: u32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if version > 7 {
+        if version > 8 {
             return Err(CoreError::Validation(
                 "Este banco foi criado por uma versão mais recente do aplicativo.".into(),
             ));
@@ -343,7 +344,7 @@ impl Repository {
         let migration = (|| -> Result<()> {
             let locked_version: u32 =
                 connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            if locked_version > 7 {
+            if locked_version > 8 {
                 return Err(CoreError::Validation(
                     "Este banco foi criado por uma versão mais recente do aplicativo.".into(),
                 ));
@@ -359,6 +360,7 @@ impl Repository {
                 ("total_deposits", "TEXT"),
                 ("total_withdrawals", "TEXT"),
                 ("balance_date", "TEXT"),
+                ("cash_flows", "TEXT"),
             ] {
                 if !columns.contains(name) {
                     connection.execute_batch(&format!(
@@ -374,7 +376,7 @@ impl Repository {
                 connection
                     .execute_batch("ALTER TABLE monthly_records ADD COLUMN purchase_date TEXT;")?;
             }
-            connection.execute_batch("PRAGMA user_version = 7; COMMIT;")?;
+            connection.execute_batch("PRAGMA user_version = 8; COMMIT;")?;
             Ok(())
         })();
         if let Err(error) = migration {

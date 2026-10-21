@@ -164,8 +164,8 @@ pub async fn refresh_if_due(
     ];
     let quote_panel = quotes.data.unwrap_or_default();
     let dividend_panel = dividends.data.unwrap_or_default();
-    // Use exactly the quote date used for the full FII result. Re-fetching quotes
-    // through refresh_fii_performance here would waste a second brapi batch.
+    // One CDI range covers dated FII purchases, fixed-income applications and
+    // cash movements. Reuse quotes without spending a second brapi batch.
     let range = crate::performance::build_report_with_income(
         snapshot,
         &quote_panel,

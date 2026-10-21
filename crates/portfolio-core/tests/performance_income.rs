@@ -208,6 +208,7 @@ fn cash(complete: bool) -> CashPocket {
         total_deposits: complete.then(|| "200".into()),
         total_withdrawals: complete.then(|| "10".into()),
         balance_date: complete.then(|| "2026-04-30".into()),
+        cash_flows: None,
         cdi_percent: "120".into(),
         annual_cdi_rate: Some("15".into()),
         rate_date: None,

@@ -153,6 +153,7 @@ fn scoped_snapshot(catalog: &WalletCatalog, wallet_id: &str) -> Result<Value, St
         "cashPockets":{
             "status":"manually-recorded-balances",
             "balance":"Saldo cadastrado manualmente nesta carteira; a projeção não credita rendimentos.",
+            "cashFlows":"Depósitos e retiradas datados, reconciliados com os totais cadastrados, usados no cenário histórico a 100% do CDI. Datas ausentes mantêm o comparativo incompleto; não use createdAt como data de aporte.",
             "cdiPercent":"Percentual contratado do CDI; 120 significa 120% da taxa diária do CDI, não retorno de 120% ao ano.",
             "annualCdiRate":"Referência anual fixada no cadastro com rateDate, manual ou consultada no BCB; rateSource, rateSourceUrl e rateFetchedAt identificam a origem. Não é cotação consultada agora.",
             "addCashPocketsToBrokerTotal":false

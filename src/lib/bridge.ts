@@ -62,6 +62,8 @@ export interface WealthOverview {
   totals: { fiiInvested: string; cashBalance: string };
 }
 
+export interface CashFlow { date: string; kind: 'deposit' | 'withdrawal'; amount: string }
+
 export interface CashPocket {
   id: string;
   name: string;
@@ -70,6 +72,7 @@ export interface CashPocket {
   totalDeposits?: string | null;
   totalWithdrawals?: string | null;
   balanceDate?: string | null;
+  cashFlows?: CashFlow[] | null;
   cdiPercent: string;
   annualCdiRate: string | null;
   rateDate: string | null;
@@ -215,6 +218,38 @@ export interface FiiPerformance {
   dividendFetchedAt?: string | null;
   dividendSources?: { symbol: string; status: string; source: string; sourceUrl: string; fetchedAt: string; coverageWarning: string }[];
   portfolio: PortfolioPerformance;
+  portfolioBenchmark?: PortfolioBenchmark | null;
+}
+
+export interface CdiPerformance {
+  endingValue: string;
+  result: string;
+  returnPercent: string;
+}
+
+/** Compares each investment's dated movements to CDI through its own balance date. */
+export interface PortfolioBenchmark {
+  status: 'available' | 'incomplete' | 'empty';
+  startDate: string | null;
+  asOf: string | null;
+  result: string | null;
+  invested: string | null;
+  returnPercent: string | null;
+  cdi: CdiPerformance | null;
+  difference: string | null;
+  components: {
+    kind: 'fiis' | 'fixedIncome' | 'cash';
+    id?: string | null;
+    name: string;
+    startDate: string | null;
+    asOf: string | null;
+    invested: string | null;
+    result: string | null;
+    cdi: CdiPerformance | null;
+    issues: string[];
+  }[];
+  issues: string[];
+  assumptions: string[];
 }
 
 export interface FiiIncomeBreakdown {

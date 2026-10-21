@@ -99,7 +99,7 @@
 .overview-page .ov-essential .ov-received :is(.figure-label, .figure-value) { color: var(--pos); }
 .overview-page .ov-purchase-quantity { display: block; margin-top: var(--sp-1); font-family: var(--font-ui); font-size: var(--fs-12); color: var(--text-3); }
 
-/* Resultado da carteira; o gráfico compara somente as compras dos FIIs com CDI. */
+/* Resultado e comparação da carteira inteira com CDI. */
 .overview-page .performance-readouts { border-bottom: 1px solid var(--line); }
 .overview-page .performance-income-label { color: var(--pos); }
 .overview-page .performance-scope { padding: var(--sp-2) var(--sp-4); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
@@ -146,6 +146,16 @@
 .overview-page .performance-chart-table td { font-size: var(--fs-12); }
 .overview-page .performance-table th { width: 64%; height: var(--row-h); white-space: normal; font-size: var(--fs-13); color: var(--text-2); }
 .overview-page .performance-table td { font-size: var(--fs-13); }
+.overview-page .performance-component-table { table-layout: auto; min-width: 420px; margin-top: var(--sp-3); }
+.overview-page .performance-component-table th { width: auto; }
+.overview-page .performance-component-table th:first-child { width: 44%; }
+.overview-page .performance-component-table tbody :is(th, td) { padding-block: var(--sp-3); }
+.overview-page .performance-component-table tbody th { color: var(--text-1); }
+.overview-page .performance-component-table :is(th, td).num { white-space: nowrap; overflow: visible; text-overflow: clip; }
+.overview-page .performance-component-period { display: block; margin-top: var(--sp-1); font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.overview-page .performance-component-note { display: block; margin-top: var(--sp-1); font-size: var(--fs-12); color: var(--warn); }
+.overview-page .performance-cash-benchmark-pending { flex-wrap: wrap; }
+.overview-page .performance-cash-benchmark-pending .text-link { font-size: inherit; }
 .overview-page .performance-total :is(th, td) { border-top: 1px solid var(--line-strong); font-weight: 500; }
 .overview-page .performance-difference { padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-12); color: var(--text-2); }
 .overview-page .performance-source { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); font-size: var(--fs-12); color: var(--text-3); }

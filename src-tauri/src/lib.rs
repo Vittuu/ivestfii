@@ -378,15 +378,6 @@ async fn refresh_fii_performance(
     let snapshot = selected_repository(&state, wallet_id.as_deref())?
         .snapshot()
         .map_err(|e| e.to_string())?;
-    if snapshot.funds.is_empty() {
-        return performance::build_report(
-            &snapshot,
-            &QuotePanel::default(),
-            None,
-            performance_today(),
-            Vec::new(),
-        );
-    }
     let symbols = snapshot
         .funds
         .iter()
@@ -1517,6 +1508,7 @@ mod tests {
                 total_deposits: None,
                 total_withdrawals: None,
                 balance_date: None,
+                cash_flows: None,
                 clear_reconciliation: false,
                 cdi_percent: "120".into(),
                 annual_cdi_rate: None,
