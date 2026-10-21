@@ -136,3 +136,6 @@ Ainda falta validar interativamente bandeja, registro de autostart e diálogos n
 ## Implementação Python anterior
 
 O código Python e o backend Flask anterior permanecem no repositório para referência. São independentes do aplicativo Rust/Tauri e não implementam sua sincronização web. As instruções anteriores estão em [legado Python](docs/legado-python.md).
+
+
+A comparação mensal aparece em duas linhas: ganho acumulado da carteira inteira e cenário de 100% do CDI, com os mesmos aportes e resgates. O detalhe de cada mês mostra se a carteira ficou acima ou abaixo quando ambos os valores são conhecidos na mesma data. Os saldos reais são guardados automaticamente por carteira; meses sem registro ficam com lacunas explicadas, sem inventar o histórico. O histórico acompanha os backups e a leitura pelo chat MCP. Veja [o cálculo e o armazenamento](docs/performance.md).

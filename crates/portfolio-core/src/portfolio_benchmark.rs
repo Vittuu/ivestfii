@@ -74,12 +74,12 @@ fn percent(result: Decimal, invested: Decimal) -> Result<Decimal> {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct Flow {
-    deposits: Decimal,
-    withdrawals: Decimal,
+pub(crate) struct Flow {
+    pub(crate) deposits: Decimal,
+    pub(crate) withdrawals: Decimal,
 }
 
-fn add_flow(
+pub(crate) fn add_flow(
     flows: &mut BTreeMap<NaiveDate, Flow>,
     day: NaiveDate,
     deposit: Decimal,
@@ -103,7 +103,7 @@ fn apply_flow(balance: Decimal, flow: &Flow) -> Result<Decimal> {
     subtract(available, flow.withdrawals)
 }
 
-fn calculate_flow_cdi(
+pub(crate) fn calculate_flow_cdi(
     flows: &BTreeMap<NaiveDate, Flow>,
     rates: &[DailyCdiRate],
     as_of: NaiveDate,
@@ -606,6 +606,7 @@ mod tests {
             broker_position: None,
             cash_pockets: vec![],
             cash_balance: "99999".into(),
+            performance_history: vec![],
         }
     }
 

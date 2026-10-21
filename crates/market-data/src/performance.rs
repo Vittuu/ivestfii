@@ -7,6 +7,10 @@ use ivestfii_core::{
         FiiPerformance, PerformanceQuote,
     },
     portfolio_benchmark::{calculate_portfolio_benchmark, PortfolioBenchmark},
+    portfolio_evolution::{
+        calculate_portfolio_evolution, observe_portfolio, PortfolioEvolution,
+        PortfolioHistoryObservation,
+    },
     portfolio_performance::{calculate_portfolio_performance, PortfolioPerformance},
     PortfolioSnapshot,
 };
@@ -70,6 +74,9 @@ pub struct PerformanceReport {
     pub calculation: FiiPerformance,
     pub portfolio: PortfolioPerformance,
     pub portfolio_benchmark: PortfolioBenchmark,
+    pub portfolio_evolution: PortfolioEvolution,
+    #[serde(skip_serializing)]
+    pub history_observation: Option<PortfolioHistoryObservation>,
     pub quote_source: Option<String>,
     pub quote_fetched_at: Option<String>,
     pub cdi_source: Option<String>,
@@ -143,14 +150,11 @@ fn build_report_inner(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let events = dividends
+        .map(crate::dividends::income_events)
+        .unwrap_or_default();
     let mut calculation = match dividends {
-        Some(dividends) => calculate_fii_performance_with_income(
-            snapshot,
-            &quotes,
-            &rates,
-            &crate::dividends::income_events(dividends),
-            today,
-        ),
+        Some(_) => calculate_fii_performance_with_income(snapshot, &quotes, &rates, &events, today),
         None => calculate_fii_performance(snapshot, &quotes, &rates, today),
     }
     .map_err(|error| error.to_string())?;
@@ -211,8 +215,28 @@ fn build_report_inner(
     let portfolio_benchmark =
         calculate_portfolio_benchmark(snapshot, &calculation, &portfolio, &rates, today)
             .map_err(|e| e.to_string())?;
+    let history_observation = observe_portfolio(
+        snapshot,
+        &calculation,
+        &portfolio,
+        &portfolio_benchmark,
+        &events,
+        today,
+    )
+    .map_err(|error| error.to_string())?;
+    let portfolio_evolution = calculate_portfolio_evolution(
+        snapshot,
+        &rates,
+        &events,
+        &snapshot.performance_history,
+        history_observation.as_ref(),
+        today,
+    )
+    .map_err(|error| error.to_string())?;
     Ok(PerformanceReport {
         portfolio,
+        portfolio_evolution,
+        history_observation,
         portfolio_benchmark,
         calculation,
         quote_source,
@@ -245,6 +269,24 @@ pub fn cdi_range(report: &PerformanceReport) -> Result<Option<(NaiveDate, NaiveD
         let start = month_start.min(preceding_week).max(series_start);
         let end = NaiveDate::parse_from_str(end, "%Y-%m-%d")
             .map_err(|_| "Data final inválida na comparação.".to_string())?;
+        range = Some(match range {
+            Some((first, last)) => (first.min(start), last.max(end)),
+            None => (start, end),
+        });
+    }
+    if let (Some(start), Some(end)) = (
+        &report.portfolio_evolution.start_date,
+        &report.portfolio_evolution.as_of,
+    ) {
+        let start = NaiveDate::parse_from_str(start, "%Y-%m-%d")
+            .map_err(|_| "Data inicial inválida na evolução.".to_string())?;
+        let start = start
+            .with_day(1)
+            .ok_or("Mês inicial inválido na evolução.")?
+            .min(start.checked_sub_days(Days::new(7)).unwrap_or(start))
+            .max(NaiveDate::from_ymd_opt(1986, 3, 6).expect("SGS start"));
+        let end = NaiveDate::parse_from_str(end, "%Y-%m-%d")
+            .map_err(|_| "Data final inválida na evolução.".to_string())?;
         range = Some(match range {
             Some((first, last)) => (first.min(start), last.max(end)),
             None => (start, end),
@@ -314,8 +356,122 @@ mod tests {
         .unwrap();
         assert!(report.calculation.market_value.is_none());
         assert!(report.calculation.total_result.is_none());
-        assert!(cdi_range(&report).unwrap().is_none());
+        let (start, end) = cdi_range(&report).unwrap().unwrap();
+        assert_eq!(start.to_string(), "2026-08-01");
+        assert_eq!(end.to_string(), "2026-10-20");
+        assert!(report.history_observation.is_none());
+        assert!(report
+            .portfolio_evolution
+            .points
+            .iter()
+            .all(|point| point.portfolio_result.is_none()));
         assert_eq!(report.calculation.invested, "100");
+    }
+
+    #[test]
+    fn monthly_evolution_keeps_real_history_and_independent_cdi_without_serializing_capture_inputs()
+    {
+        let mut snapshot = snapshot();
+        snapshot.funds[0].entries[0].purchase_date = Some("2026-08-03".into());
+        let september = build_report(
+            &snapshot,
+            &quote("BRL", "2026-09-30T21:00:00Z"),
+            None,
+            NaiveDate::from_ymd_opt(2026, 9, 30).unwrap(),
+            vec![],
+        )
+        .unwrap();
+        // A common real valuation remains useful while CDI publication is
+        // pending. The private fingerprint must not become part of the report
+        // delivered to the web view or MCP model.
+        let observed = september.history_observation.as_ref().unwrap();
+        assert_eq!(observed.portfolio_result, "-5");
+        let last = september.portfolio_evolution.points.last().unwrap();
+        assert_eq!(last.portfolio_result.as_deref(), Some("-5"));
+        assert!(last.cdi_result.is_none());
+        let serialized = serde_json::to_value(&september).unwrap();
+        assert!(serialized.get("historyObservation").is_none());
+        assert!(!serialized.to_string().contains("basisFingerprint"));
+        snapshot.performance_history.push(observed.clone());
+        let original = serde_json::to_value(&snapshot).unwrap();
+
+        let mut observations = vec![];
+        let mut day = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        while day <= end {
+            observations.push(crate::cdi_history::CdiDailyObservation {
+                date: day.to_string(),
+                value: if day.to_string() == "2026-09-01" {
+                    "1"
+                } else {
+                    "0"
+                }
+                .into(),
+            });
+            day = day.succ_opt().unwrap();
+        }
+        let history = CdiHistorySnapshot {
+            series_id: 12,
+            unit: "% a.d.".into(),
+            source: "BCB sintético".into(),
+            source_url: "https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados".into(),
+            requested_start_date: "2026-08-01".into(),
+            requested_end_date: "2026-10-19".into(),
+            observations,
+            fetched_at: "2026-10-20T12:00:00Z".into(),
+            stale: false,
+        };
+        let october = build_report(
+            &snapshot,
+            &quote("BRL", "2026-10-19T21:00:00Z"),
+            Some(&history),
+            NaiveDate::from_ymd_opt(2026, 10, 20).unwrap(),
+            vec![],
+        )
+        .unwrap();
+        let points = &october.portfolio_evolution.points;
+        assert_eq!(points.len(), 3);
+        // No August valuation exists; a real zero return must not be invented
+        // to make the wallet line follow the fully covered CDI scenario.
+        assert_eq!(points[0].month, "2026-08");
+        assert!(points[0].portfolio_result.is_none());
+        assert_eq!(points[0].cdi_result.as_deref(), Some("0"));
+        assert_eq!(points[1].month, "2026-09");
+        assert_eq!(points[1].as_of, "2026-09-30");
+        assert_eq!(points[1].portfolio_result.as_deref(), Some("-5"));
+        assert_eq!(points[1].cdi_result.as_deref(), Some("1"));
+        assert_eq!(points[2].month, "2026-10");
+        assert_eq!(points[2].as_of, "2026-10-19");
+        assert_eq!(points[2].portfolio_result.as_deref(), Some("-5"));
+        assert_eq!(points[2].cdi_result.as_deref(), Some("1"));
+        assert_eq!(points[2].difference.as_deref(), Some("-6"));
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), original);
+
+        // The benchmark remains available from dated deposits even when no
+        // current quote can value the wallet.
+        let unavailable = build_report(
+            &snapshot,
+            &QuotePanel::default(),
+            Some(&history),
+            end,
+            vec![],
+        )
+        .unwrap();
+        assert!(unavailable.history_observation.is_none());
+        assert!(unavailable.portfolio_evolution.points[0]
+            .portfolio_result
+            .is_none());
+        assert_eq!(
+            unavailable.portfolio_evolution.points[1]
+                .portfolio_result
+                .as_deref(),
+            Some("-5")
+        );
+        assert!(unavailable
+            .portfolio_evolution
+            .points
+            .iter()
+            .all(|point| point.cdi_result.is_some()));
     }
 
     #[test]
@@ -622,6 +778,18 @@ mod tests {
         assert_eq!(report.portfolio_benchmark.result.as_deref(), Some("65"));
         assert_eq!(report.portfolio_benchmark.cdi.as_ref().unwrap().result, "4");
         assert_eq!(report.portfolio_benchmark.difference.as_deref(), Some("61"));
+        let observed = report.history_observation.as_ref().unwrap();
+        assert_eq!(observed.invested, "450");
+        assert_eq!(observed.portfolio_result, "65");
+        let current = report.portfolio_evolution.points.last().unwrap();
+        assert_eq!(current.portfolio_result.as_deref(), Some("65"));
+        assert_eq!(current.cdi_result.as_deref(), Some("4"));
+        assert_eq!(current.difference.as_deref(), Some("61"));
+        // August's manual amount masks its API event; September's API amount,
+        // post-fixed gain and pocket gain each appear exactly once.
+        assert!(report.portfolio_evolution.points[..3]
+            .iter()
+            .all(|point| point.portfolio_result.is_none()));
         assert_eq!(serde_json::to_value(&snapshot).unwrap(), before);
 
         let directory =

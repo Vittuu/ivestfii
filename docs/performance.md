@@ -1,100 +1,41 @@
-# Resultado da carteira e comparação dos FIIs com o CDI
+# Resultado da carteira e evolução mensal frente ao CDI
 
-A visão geral reúne os FIIs e as caixinhas cadastradas na carteira selecionada.
-Os valores importados da corretora continuam em seu quadro próprio: o seu total,
-saldo em conta e pós-fixado não são somados de novo aos registros, evitando
-contagem duplicada. O gráfico de comparação com o CDI cobre explicitamente os
-FIIs, cujas compras mensais estão registradas.
+A visão geral reúne FIIs, pós-fixado identificado e caixinhas da carteira selecionada. O total importado da corretora fica no quadro próprio, com sua data original. Caixa em conta, proventos a receber e patrimônio agregado não são somados novamente aos investimentos registrados.
 
-## Caixinhas e totais consolidados
+## Resultado acumulado
 
-O saldo atual sozinho não identifica o capital aplicado ou o lucro. Cada
-caixinha pode guardar um conjunto opcional de três informações, referentes ao
-mesmo período desde o início: total aplicado, total resgatado e data efetiva do
-saldo. Resgates incluem tanto capital quanto juros retirados.
+- Total aplicado: custo das compras de FIIs, aplicações acumuladas das caixinhas e valor aplicado conhecido no pós-fixado.
+- Rendimentos acumulados: proventos conhecidos dos FIIs, resultado das caixinhas e ganho acumulado no saldo do pós-fixado.
+- Resultado da carteira: variação das cotas e rendimentos dos FIIs, mais os resultados do pós-fixado e das caixinhas.
 
-`rendimento_caixinha = saldo_atual + resgates_acumulados − aplicações_acumuladas`
+Para uma caixinha, `resultado = saldo + resgates acumulados − aplicações acumuladas`. Resgates podem incluir principal e juros. O saldo já contém os rendimentos; não se soma uma projeção de juros nem o indicador de 12 meses do pós-fixado. Os proventos da API completam somente os fundos e meses sem rendimento declarado, preservando a prioridade de um valor manual, inclusive zero.
 
-Isso mantém o rendimento correto inclusive com resgate parcial, resgate total
-ou retirada dos juros. O resultado segue o saldo informado pelo usuário; não
-pressupõe saldo bruto, calcula imposto ou credita os juros projetados.
+Os cartões podem reunir os últimos saldos de datas diferentes; a tabela identifica essas datas. Um registro mensal da carteira inteira exige que todos os componentes ativos tenham valores na mesma data. Saldo ausente ou base de aplicação desconhecida não equivalem a zero.
 
-- **Total aplicado:** compras de FIIs + aplicações acumuladas nas caixinhas.
-  É um valor histórico bruto de aplicações, que pode incluir reaplicações; os
-  resgates são apresentados separadamente. Não é o principal remanescente.
-- **Rendimentos acumulados:** proventos registrados dos FIIs + resultado das
-  caixinhas calculado pela fórmula acima.
-- **Resultado da carteira:** resultado completo dos FIIs + resultado das
-  caixinhas. A variação do preço das cotas entra uma única vez.
+## Duas linhas mensais
 
-Sem os três dados de alguma caixinha, os totais que dependem deles ficam
-indisponíveis; subtotais conhecidos são identificados como parciais. Ausência
-não equivale a zero. O saldo continua disponível mesmo sem o histórico de
-aplicações. Zero informado é um valor conhecido, e resultado negativo é válido.
+O gráfico mostra **ganho acumulado em reais**, desde os primeiros investimentos, para a carteira inteira e um cenário de 100% do CDI. Aportes não aparecem como lucro. O detalhe de cada mês informa a data observada, os dois resultados e a diferença. A diferença só é calculada quando ambos os resultados são conhecidos na mesma data e usam a mesma base de movimentos.
 
-Cada caixinha mantém sua data do saldo, enquanto os FIIs usam a data da cotação.
-O consolidado reúne os últimos valores registrados de cada componente; não
-afirma representar uma única data histórica. A data da taxa CDI, a data de
-cadastro e o horário de edição não substituem a data efetiva do saldo.
+A linha da carteira usa registros reais dos saldos e os rendimentos disponíveis. Meses sem um registro ficam com uma lacuna: não são preenchidos com zero, repetidos do mês anterior ou interpolados a partir do saldo atual. Não é possível afirmar em que momento a carteira cruzou o CDI dentro de uma lacuna. Um único mês registrado aparece como ponto, até existirem outros registros mensais. O último registro pode ser anterior ao fim do mês, e sua data permanece visível.
 
-Na migração SQLite 4→5, as novas colunas recebem NULL. Saldos, compras,
-proventos, identificadores, revisões e fila de alterações existentes são
-preservados. Clientes que omitem os novos campos não apagam dados já informados;
-a limpeza exige `clearReconciliation=true`. Exportação e importação carregam
-os três campos e preservam os arquivos de origem.
+O aplicativo guarda automaticamente o último registro completo de cada mês, por carteira, ao carregar ou atualizar o resultado na interface. Isso não cria compras, rendimentos recebidos ou itens na fila de sincronização. Datas mais recentes substituem o registro anterior do mesmo mês; correções na mesma data também são aceitas. Uma impressão dos dados financeiros daquele período permite identificar mudanças retroativas: uma compra ou rendimento antigo corrigido invalida o valor derivado antigo, enquanto movimentos posteriores preservam os pontos anteriores. Renomeações e horários de consulta não alteram a base econômica.
 
-Sem as datas de cada aplicação e resgate, não há um cenário CDI equivalente
-para as caixinhas. A sua taxa contratada continua servindo à simulação separada;
-nem a simulação nem o CDI atual são tratados como rendimento realizado.
+O histórico privado fica na tabela SQLite `performance_history` (schema9) e acompanha a exportação/restauração como `performanceHistory`. Backups anteriores têm histórico vazio. A migração acrescenta a tabela sem reescrever dados financeiros existentes. A leitura pelo MCP é somente leitura e não captura novos registros; o relatório contém a mesma série mensal da interface.
 
-## Cálculo dos FIIs
+## Cenário CDI
 
-- **Total investido:** soma de quantidade comprada × preço da compra.
-- **Variação das cotas:** valor de mercado das cotas − custo das compras.
-- **Resultado total:** variação das cotas + proventos do histórico.
-- **Percentual acumulado:** resultado ÷ custo das compras × 100. Não é uma taxa
-  anualizada, TWR, XIRR ou medida ajustada ao tempo dos fluxos.
+A linha CDI utiliza taxas diárias históricas **SGS12**, em percentual ao dia. Para cada aporte, o juro começa depois da data informada; os resgates reduzem o cenário na data correspondente. Nas compras antigas sem dia conhecido, mantém-se a hipótese de fim do mês, explicitada na interface. Percentual contratado de uma caixinha e a taxa anual fixada para projeções não substituem a série histórica a 100% do CDI.
 
-Os proventos seguem o núcleo existente: o total explicitamente informado,
-inclusive zero, prevalece. Na ausência de total, o sistema usa as cotas ao fim
-do mês × provento por cota, com o mesmo arredondamento do histórico. Notas e
-registros originais nunca são alterados para produzir uma comparação.
+O CDI pode estar disponível em um mês sem saldo real da carteira. Sem histórico diário suficiente ou sem datas de movimentos, o respectivo resultado fica indisponível. Não se inventam taxas de dias ainda não publicados. Fins de semana usam a cobertura publicada de sexta-feira; para meses sem registro real, a data do último CDI publicado daquele mês é informada no ponto.
 
-O gráfico compara dois resultados acumulados em reais, sem criar preços
-históricos intermediários. Todas as cotações precisam ter a mesma data de
-mercado, e o CDI precisa chegar à mesma data. Cotação ausente, custo incompleto,
-quantidades incompatíveis ou cobertura insuficiente produzem uma indicação de
-dados incompletos; ausência de informação não vira zero.
+São valores brutos, sem cálculo de impostos ou taxas. Proventos dos FIIs entram uma vez no resultado e não são reinvestidos automaticamente no cenário. Ganho dividido pelo total aplicado não é uma taxa anualizada, TWR ou XIRR.
 
-## Hipótese mensal para o CDI
+## Fontes e limites
 
-O histórico guarda o mês, mas não o dia da compra. O comparativo trata cada
-compra como uma aplicação independente feita no último dia do mês; para compras
-no mês da cotação, utiliza a data da cotação, sem atribuir juros anteriores à
-compra. Para cada compra C na data estimada d e data final D:
+O gráfico reaproveita as cotações e o histórico diário CDI já consultados pelo aplicativo. Não faz uma chamada de API para cada mês e mantém os limites, cache, intervalo de tentativas e tratamento de falhas existentes. Somente códigos públicos e datas são enviados aos provedores, sem os saldos da carteira.
 
-`saldo_CDI(C) = C × produto(1 + taxa_dia / 100), para d < dia <= D`
+A cotação atual não comprova preços históricos. Dados ajustados de mercado não podem ser somados novamente aos proventos como se fossem preços brutos. Saldos antigos das caixinhas e do pós-fixado não são reconstruídos usando o rendimento atual ou um indicador de 12 meses. Onde não há observação real, o aplicativo informa a falta de registro.
 
-`resultado_CDI = soma(saldo_CDI) − soma(C)`
-
-As taxas são as observações diárias históricas da série **SGS 12**, em **% ao
-dia**, publicadas pelo Banco Central. Não se aplica retroativamente a taxa
-anualizada atual. Fins de semana e feriados não recebem taxas inventadas.
-
-É uma comparação estimada, antes de impostos e taxas, dos mesmos valores e
-meses de compras. O histórico não informa se uma compra veio de dinheiro novo
-ou de reinvestimento. Os proventos entram no resultado dos FIIs sem rendimento
-adicional neste modelo; o CDI capitaliza diariamente. A interface explica as
-hipóteses junto à comparação e nas ajudas dos respectivos valores.
-
-## Fontes e armazenamento
-
-- [Banco Central: metadados da série SGS 12](https://www3.bcb.gov.br/sgspub/consultarvalores/consultarValoresSeries.do?hdOidSeriesSelecionadas=12&method=consultarGraficoPorId).
-- [API pública SGS 12](https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados?formato=json).
+- [Banco Central: série diária SGS12](https://www3.bcb.gov.br/sgspub/consultarvalores/consultarValoresSeries.do?hdOidSeriesSelecionadas=12&method=consultarGraficoPorId).
 - [brapi: cotação atual](https://brapi.dev/docs/acoes/cotacao).
-
-Abrir a visão geral apenas lê os caches locais. O botão de atualização consulta
-a brapi e o Banco Central, com limites de tempo e tamanho. Somente os códigos
-dos ativos e o intervalo de datas saem do computador. A chave brapi permanece no
-cofre do sistema operacional. O cache público do CDI fica separado do SQLite
-financeiro; falhas de rede preservam os dados salvos.
+- [brapi: regras dos preços históricos ajustados e brutos](https://brapi.dev/docs/acoes/historico).

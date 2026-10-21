@@ -163,6 +163,63 @@
 .overview-page .performance-source a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; }
 .overview-page .performance-source .public-source-error { color: var(--neg); }
 
+/* Evolução mensal: faltas de observação interrompem cada linha, sem prolongar saldos. */
+.overview-page .portfolio-evolution { min-width: 0; padding: var(--sp-3) var(--sp-4); }
+.overview-page .evolution-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .evolution-range { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.overview-page .evolution-range button { min-height: 28px; padding: var(--sp-1) var(--sp-2); border: 1px solid transparent; border-radius: var(--r-1); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.overview-page .evolution-range button[aria-pressed='true'] { border-color: var(--line-control); background: var(--surface-2); color: var(--text-1); }
+.overview-page .evolution-range button:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; }
+.overview-page .evolution-legend { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: var(--sp-3) 0 var(--sp-1); padding: 0; list-style: none; font-size: var(--fs-12); color: var(--text-2); }
+.overview-page .evolution-legend li { display: flex; align-items: center; gap: var(--sp-2); }
+.overview-page .evolution-swatch { width: 24px; height: 0; border-top: 2px solid var(--pos); }
+.overview-page .evolution-swatch.cdi { border-color: #99aab6; border-top-style: dashed; }
+.overview-page .evolution-viewport { position: relative; min-width: 0; }
+.overview-page .evolution-viewport svg { display: block; max-width: 100%; outline-offset: -1px; }
+.overview-page .evolution-viewport svg:focus-visible { outline: 1px solid var(--text-2); }
+.overview-page .evolution-grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 4; }
+.overview-page .evolution-grid.zero { stroke: var(--line-control); stroke-dasharray: none; }
+.overview-page .evolution-guide { stroke: var(--line-control); stroke-width: 1; stroke-dasharray: 2 4; }
+.overview-page .evolution-axis, .overview-page .evolution-month { fill: var(--text-3); font-family: var(--font-num); font-size: 10px; }
+.overview-page .evolution-line { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.overview-page .evolution-line.portfolio { stroke: var(--pos); }
+.overview-page .evolution-line.cdi { stroke: #99aab6; stroke-dasharray: 6 4; }
+.overview-page .evolution-dot { stroke: var(--surface); stroke-width: 1; pointer-events: none; }
+.overview-page .evolution-dot.portfolio { fill: var(--pos); }
+.overview-page .evolution-dot.portfolio.is-below { fill: var(--neg); }
+.overview-page .evolution-dot.cdi { fill: #99aab6; }
+.overview-page .evolution-missing { stroke: var(--warn); stroke-width: 1; }
+.overview-page .evolution-hit { fill: transparent; pointer-events: all; cursor: crosshair; }
+.overview-page .evolution-tooltip { position: absolute; top: var(--sp-2); z-index: 2; display: flex; flex-direction: column; gap: var(--sp-1); width: 224px; max-width: 100%; padding: var(--sp-3); border: 1px solid var(--line-control); border-radius: var(--r-1); background: var(--surface); box-shadow: 0 3px 12px #0005; font-size: var(--fs-12); line-height: 1.5; pointer-events: none; }
+.overview-page .evolution-tooltip > strong { color: var(--text-1); font-weight: 500; }
+.overview-page .evolution-tooltip > span { color: var(--text-3); }
+.overview-page .evolution-tooltip dl { padding-block: var(--sp-2); border-block: 1px solid var(--line); }
+.overview-page .evolution-tooltip dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-1) var(--sp-2); }
+.overview-page .evolution-tooltip dt { color: var(--text-2); }
+.overview-page .evolution-tooltip dd { margin: 0; font-family: var(--font-num); }
+.overview-page .evolution-selected { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) 0; border-top: 1px solid var(--line); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.overview-page .evolution-selected > p > strong { color: var(--text-1); font-weight: 500; }
+.overview-page .evolution-selected dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.overview-page .evolution-selected dt { font-size: var(--fs-12); color: var(--text-3); }
+.overview-page .evolution-selected dd { margin: var(--sp-1) 0 0; font-family: var(--font-num); overflow-wrap: anywhere; }
+.overview-page :is(.evolution-hint, .evolution-warning, .evolution-empty) { padding-block: var(--sp-2); font-size: var(--fs-12); line-height: 1.6; color: var(--text-3); }
+.overview-page .evolution-hint > span { display: block; margin-top: var(--sp-1); }
+.overview-page :is(.evolution-warning, .evolution-pending) { color: var(--warn); }
+.overview-page .evolution-empty { min-height: 160px; display: flex; align-items: center; max-width: 58ch; }
+.overview-page .evolution-table { margin-top: var(--sp-2); }
+.overview-page .evolution-table > .table-wrap { padding: 0; }
+.overview-page .evolution-table table { min-width: 410px; table-layout: auto; }
+.overview-page .evolution-table :is(th, td) { padding-inline: var(--sp-2); font-size: var(--fs-12); white-space: normal; }
+.overview-page .evolution-table tbody th { min-width: 100px; max-width: 220px; }
+.overview-page .evolution-table td.num { white-space: nowrap; overflow: visible; text-overflow: clip; }
+.overview-page .evolution-table-note { display: block; margin-top: var(--sp-1); font-family: var(--font-ui); font-size: 11px; font-weight: 400; color: var(--text-3); }
+.overview-page .evolution-table-note.evolution-pending { color: var(--warn); }
+@media (max-width: 480px) {
+  .overview-page .portfolio-evolution { padding-inline: var(--sp-3); }
+  .overview-page .evolution-selected dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-page .evolution-selected dl > div:last-child { grid-column: 1 / -1; }
+}
+
 /* Referências públicas: valores pequenos e datados, sem competir com o resultado da carteira. */
 .overview-page .public-data-state, .overview-page .public-data-guidance { padding: var(--sp-2) var(--sp-4); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
 .overview-page .public-data-guidance, .overview-page .public-data-warning { color: var(--warn); }

@@ -219,12 +219,36 @@ export interface FiiPerformance {
   dividendSources?: { symbol: string; status: string; source: string; sourceUrl: string; fetchedAt: string; coverageWarning: string }[];
   portfolio: PortfolioPerformance;
   portfolioBenchmark?: PortfolioBenchmark | null;
+  portfolioEvolution?: PortfolioEvolution | null;
 }
 
 export interface CdiPerformance {
   endingValue: string;
   result: string;
   returnPercent: string;
+}
+
+/** Monthly accumulated gains with matching cash movements. Missing observations remain null. */
+export interface PortfolioEvolutionPoint {
+  month: string;
+  asOf: string;
+  portfolioResult: string | null;
+  cdiResult: string | null;
+  invested: string | null;
+  difference: string | null;
+  status: 'available' | 'incomplete';
+  issues: string[];
+  estimated?: boolean;
+  isPartialMonth: boolean;
+}
+
+export interface PortfolioEvolution {
+  status: 'available' | 'partial' | 'empty';
+  startDate?: string | null;
+  asOf?: string | null;
+  points: PortfolioEvolutionPoint[];
+  issues: string[];
+  assumptions: string[];
 }
 
 /** Compares each investment's dated movements to CDI through its own balance date. */

@@ -1,6 +1,6 @@
 [package]
 name = "ivestfii-desktop"
-version = "0.1.17"
+version = "0.1.18"
 description = "Carteira local de FIIs com Rust e Tauri"
 edition = "2021"
 

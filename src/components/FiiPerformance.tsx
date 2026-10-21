@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
 import { LoaderCircle, RefreshCw } from 'lucide-react';
 import { call, dateBR, desktop, errorMessage, money, percent } from '../lib/bridge';
 import type { FiiPerformance as PerformanceData, Snapshot } from '../lib/bridge';
 import { Def, Empty, SectionHeading, TextLink } from '../components';
 import PublicSourceLink from './PublicSourceLink';
+import PortfolioEvolutionChart from './PortfolioEvolutionChart';
 import { readPublicCache, usePublicData } from '../lib/publicData';
 
 interface Props { walletId: string; snapshot: Snapshot; onProjection: () => void; onCash: () => void; onFixedIncome?: () => void; onData?: (data: PerformanceData | null) => void }
@@ -70,8 +70,6 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
     }
   };
   const benchmark = data?.portfolioBenchmark;
-  const hasResult = number(benchmark?.result) !== null;
-  const comparable = benchmark?.status === 'available' && hasResult && number(benchmark.cdi?.result) !== null;
   const totalInvested = data?.invested ?? invested;
   const totalDividends = data?.dividends ?? dividends;
   const income = data?.income;
@@ -81,7 +79,6 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
   const fixedIncome = portfolio?.fixedIncome;
   const hasFixedIncome = Boolean(fixedIncome && fixedIncome.status !== 'empty');
   const issues = portfolio?.issues ?? [];
-  const benchmarkIssues = benchmark?.issues ?? [];
   const cashBenchmarkPending = Boolean(benchmark?.components.some((component) => component.kind === 'cash' && component.issues.length > 0 && snapshot.cashPockets?.find((pocket) => pocket.id === component.id)?.cashFlows == null));
   const cashPending = Boolean(cash && cash.missingBasisCount > 0);
   return <section className="group fii-performance" aria-labelledby={headingId} aria-busy={loading || refreshing || undefined}>
@@ -115,19 +112,15 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
       {hasFixedIncome && fixedIncome && <p className="performance-scope performance-fixed-income-scope">Pós-fixado{fixedIncome.name ? `: ${fixedIncome.name}` : ''}{fixedIncome.referenceDate && <> · saldo de <time dateTime={fixedIncome.referenceDate}>{dateBR(fixedIncome.referenceDate)}</time></>}. {fixedIncome.status === 'available' ? 'O rendimento já está no saldo; o valor dos últimos 12 meses não é somado novamente.' : 'Faltam dados para fechar o rendimento deste investimento.'}</p>}
       <div className="performance-comparison">
         <div className="performance-chart-block">
-          <SectionHeading title="Carteira × 100% do CDI" level={3} />
-          {benchmarkIssues.length > 0 && <p className="performance-message performance-warning" role="status">{benchmarkIssues[0]}</p>}
-          {benchmarkIssues.length > 1 && <details className="extra-details performance-issues"><summary>Ver observações da comparação ({benchmarkIssues.length})</summary><ul>{benchmarkIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul></details>}
-          <p className="performance-estimate performance-chart-scope">FIIs, pós-fixado e caixinhas da carteira. O CDI usa os mesmos aportes e resgates, até a data de cada investimento.</p>
-          <p className="performance-period">{benchmark?.startDate ? <>Desde <time dateTime={benchmark.startDate}>{dateBR(benchmark.startDate)}</time>{benchmark.asOf ? <> até <time dateTime={benchmark.asOf}>{dateBR(benchmark.asOf)}</time>.</> : ' · até a data de cada saldo. Confira as datas na tabela.'}</> : 'Período da comparação ainda indisponível.'}</p>
-          <p className="performance-estimate"><Def text={<><p>A comparação aplica 100% do CDI aos mesmos movimentos de dinheiro de cada investimento. O ganho de cada parte é somado uma vez; aplicações e resgates não são rendimentos.</p>{benchmark?.assumptions.map((assumption, index) => <p key={index}>{assumption}</p>)}</>}>Comparação estimada · CDI bruto, sem impostos.</Def></p>
-          {comparable && benchmark?.result != null && benchmark.cdi ? <ResultBars result={benchmark.result} cdi={benchmark.cdi.result} resultPercent={benchmark.returnPercent} cdiPercent={benchmark.cdi.returnPercent} /> : <p className="performance-unavailable">{benchmark?.status === 'empty' ? 'Sem investimentos registrados para comparar com o CDI.' : !benchmark ? 'A comparação da carteira ainda não está disponível. Atualize os dados para consultar.' : hasResult ? 'O resultado da carteira está disponível. Falta completar os dados da comparação com o CDI.' : 'Complete os valores e as datas dos investimentos para comparar a carteira inteira com o CDI.'}</p>}
+          <SectionHeading title="Evolução da carteira × 100% do CDI" level={3} />
+          <p className="performance-estimate performance-chart-scope">FIIs, pós-fixado e caixinhas. As linhas comparam o ganho acumulado, sem contar os aportes como lucro.</p>
+          <PortfolioEvolutionChart data={data?.portfolioEvolution} loading={loading} />
+          <p className="performance-estimate"><Def text={<><p>O CDI usa os mesmos aportes e resgates, até a data do registro real de cada mês. Os registros só entram quando todos os investimentos têm valores na mesma data.</p><p>Meses sem saldo da carteira ficam com uma lacuna. O app guarda automaticamente os próximos registros reais por carteira. Valores antigos não são estimados a partir do saldo de hoje.</p>{data?.portfolioEvolution?.assumptions.map((assumption, index) => <p key={index}>{assumption}</p>)}</>}>Como ler a evolução mensal</Def></p>
           {cashBenchmarkPending && <p className="performance-message performance-warning performance-cash-benchmark-pending">A comparação das caixinhas precisa das datas dos depósitos e retiradas. <TextLink onClick={onCash}>Conferir caixinhas</TextLink></p>}
-          {benchmark?.difference != null && comparable && <p className="performance-difference">Diferença para o CDI: <strong className={`num ${resultClass(benchmark.difference)}`}>{signedMoney(benchmark.difference)}</strong></p>}
         </div>
         <div className="performance-breakdown">
-          <SectionHeading title="O que entra na comparação" level={3} />
-          <p className="performance-estimate">Cada linha compara o investimento e o CDI no mesmo período. Os valores abaixo já fazem parte do resultado da carteira.</p>
+          <SectionHeading title="Comparação atual por investimento" level={3} />
+          <p className="performance-estimate">Últimos valores de cada investimento, com o período e a data do saldo.</p>
           <div className="table-wrap"><table className="performance-table performance-component-table"><caption className="sr-only">Resultado da carteira e CDI por investimento, com as datas de cada saldo</caption><thead><tr><th scope="col">Investimento e período</th><th scope="col" className="num">Resultado</th><th scope="col" className="num">100% do CDI</th></tr></thead><tbody>
             {benchmark?.components.map((component, index) => <tr key={`${component.kind}-${component.id ?? index}`}>
               <th scope="row"><span>{component.name}</span><span className="performance-component-period">{component.startDate ? <><time dateTime={component.startDate}>{dateBR(component.startDate)}</time> → </> : 'Início não informado · '}{component.asOf ? <time dateTime={component.asOf}>{dateBR(component.asOf)}</time> : 'Data do saldo não informada'}</span>{component.issues.length > 0 && <span className="performance-component-note"><Def text={<ul>{component.issues.map((issue, issueIndex) => <li key={issueIndex}>{issue}</li>)}</ul>}>Dados pendentes</Def></span>}</th>
@@ -150,43 +143,4 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
       {notice && !refreshing && <p className="performance-message" role="status">{notice}</p>}
     </div>
   </section>;
-}
-
-function ResultBars({ result, cdi, resultPercent, cdiPercent }: { result: string; cdi: string; resultPercent: string | null; cdiPercent: string }) {
-  const chartId = useId();
-  const [active, setActive] = useState(0);
-  const values = [number(result)!, number(cdi)!];
-  const minimum = Math.min(0, ...values);
-  const maximum = Math.max(0, ...values);
-  const range = maximum - minimum || 1;
-  const y = (value: number) => 40 + (maximum - value) / range * 166;
-  const zero = y(0);
-  const names = ['Carteira', '100% do CDI'];
-  const percentages = [resultPercent, cdiPercent];
-  const select = (event: KeyboardEvent<SVGSVGElement>) => {
-    const index = event.key === 'ArrowRight' || event.key === 'End' ? 1 : event.key === 'ArrowLeft' || event.key === 'Home' ? 0 : null;
-    if (index === null) return;
-    event.preventDefault(); setActive(index);
-  };
-  return <div className="performance-bars">
-    <svg width="100%" height="258" role="img" tabIndex={0} onKeyDown={select} aria-labelledby={`${chartId}-title ${chartId}-desc`}>
-      <title id={`${chartId}-title`}>Ganhos acumulados em reais: carteira inteira e 100% do CDI</title>
-      <desc id={`${chartId}-desc`}>Carteira: {signedMoney(result)}. CDI: {signedMoney(cdi)}. Inclui FIIs, pós-fixado e caixinhas. A linha horizontal marca zero. Use as setas para consultar cada barra.</desc>
-      <line className="performance-zero" x1="6%" x2="94%" y1={zero} y2={zero} />
-      {values.map((value, index) => {
-        const x = index ? '59%' : '19%';
-        const center = index ? '70%' : '30%';
-        const top = Math.min(zero, y(value));
-        const height = Math.abs(y(value) - zero);
-        return <g key={names[index]} onPointerEnter={() => setActive(index)} className={active === index ? 'is-active' : undefined}>
-          <rect className="performance-hit" x={index ? '55%' : '15%'} y="28" width="30%" height="214" />
-          <rect className={index ? 'performance-bar cdi' : `performance-bar portfolio fii ${value < 0 ? 'negative' : ''}`} x={x} y={top} width="22%" height={height} />
-          <text className="performance-bar-value" x={center} y={value < 0 ? y(value) + 20 : y(value) - 10} textAnchor="middle">{signedMoney(index ? cdi : result)}</text>
-          <text className="performance-bar-label" x={center} y="248" textAnchor="middle">{names[index]}</text>
-        </g>;
-      })}
-    </svg>
-    <p className="performance-point" role="status">{names[active]}: <strong>{signedMoney(active ? cdi : result)}</strong>{percentages[active] != null && <> · {signedPercent(percentages[active]!)} sobre o total aplicado</>}</p>
-    <details className="extra-details performance-chart-table"><summary>Ver valores da comparação</summary><div className="table-wrap"><table><caption className="sr-only">Resultados acumulados da carteira comparados com os mesmos aportes e resgates</caption><thead><tr><th scope="col">Investimento</th><th scope="col" className="num">Resultado</th><th scope="col" className="num">Sobre aplicações</th></tr></thead><tbody>{names.map((name, index) => <tr key={name}><th scope="row">{name}</th><td className="num">{signedMoney(index ? cdi : result)}</td><td className="num">{percentages[index] == null ? '—' : signedPercent(percentages[index]!)}</td></tr>)}</tbody></table></div></details>
-  </div>;
 }

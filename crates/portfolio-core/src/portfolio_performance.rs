@@ -543,6 +543,7 @@ mod tests {
             broker_position: None,
             cash_pockets: pockets,
             cash_balance: "999999".into(),
+            performance_history: vec![],
         }
     }
 

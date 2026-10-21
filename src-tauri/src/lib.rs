@@ -362,10 +362,26 @@ fn get_fii_performance(
     wallet_id: Option<String>,
 ) -> CommandResult<performance::PerformanceReport> {
     let _operation = state.operations.begin()?;
-    let snapshot = selected_repository(&state, wallet_id.as_deref())?
-        .snapshot()
-        .map_err(|e| e.to_string())?;
-    performance::cached_report(&snapshot, &state.data_directory, performance_today())
+    let repository = selected_repository(&state, wallet_id.as_deref())?;
+    let snapshot = repository.snapshot().map_err(|e| e.to_string())?;
+    let report = performance::cached_report(&snapshot, &state.data_directory, performance_today())?;
+    Ok(remember_portfolio_observation(&repository, report))
+}
+
+/// Observations are derived chart measurements, separate from purchases,
+/// received income and the sync outbox. A capture error does not hide results.
+fn remember_portfolio_observation(
+    repository: &Repository,
+    mut report: performance::PerformanceReport,
+) -> performance::PerformanceReport {
+    if let Some(observation) = &report.history_observation {
+        if let Err(error) = repository.record_performance_observation(observation) {
+            report.portfolio_evolution.issues.push(format!(
+                "Não foi possível guardar o registro mensal da carteira: {error}"
+            ));
+        }
+    }
+    report
 }
 
 #[tauri::command]
@@ -441,14 +457,16 @@ async fn refresh_fii_performance(
             Err(error) => errors.push(error),
         }
     }
-    performance::build_report_with_income(
+    let report = performance::build_report_with_income(
         &snapshot,
         &panel,
         history.as_ref(),
         &dividend_panel,
         today,
         errors,
-    )
+    )?;
+    let repository = selected_repository(&state, wallet_id.as_deref())?;
+    Ok(remember_portfolio_observation(&repository, report))
 }
 
 #[tauri::command]
@@ -1495,6 +1513,52 @@ fn tray_rgba() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn displayed_real_result_is_captured_once_without_changing_financial_rows() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = Repository::open(root.path().join("portfolio.sqlite")).unwrap();
+        let source = root.path().join("synthetic.json");
+        fs::write(&source, r#"{"fiis":[{"id":"f","ticker":"TEST11","name":"Fundo sintético","sector":"Teste","entries":[{"id":"e","month":"2020-05","purchase_date":"2020-05-04","cotas_added":"10","price_per_cota":"10","dividend_per_cota":"0","dividend_total":"5","notes":""}]}]}"#).unwrap();
+        repository.import_legacy_file(&source).unwrap();
+        let before = repository.snapshot().unwrap();
+        let pending = serde_json::to_value(repository.pending_changes().unwrap()).unwrap();
+        let panel: QuotePanel = serde_json::from_value(json!({"items":[{
+            "symbol":"TEST11","status":"cached","error":null,
+            "observation":{"symbol":"TEST11","price":"12","currency":"BRL",
+                "quotedAt":"2020-06-30T21:00:00Z","fetchedAt":"2020-07-01T12:00:00Z",
+                "source":"brapi","sourceUrl":"https://brapi.dev/","delayMinutes":30}
+        }],"fetchedAt":"2020-07-01T12:00:00Z","credentialConfigured":false,"errors":[]}))
+        .unwrap();
+        for _ in 0..2 {
+            let snapshot = repository.snapshot().unwrap();
+            let report = performance::build_report(
+                &snapshot,
+                &panel,
+                None,
+                chrono::NaiveDate::from_ymd_opt(2020, 7, 1).unwrap(),
+                vec![],
+            )
+            .unwrap();
+            let report = remember_portfolio_observation(&repository, report);
+            assert!(report.history_observation.is_some());
+        }
+        let after = repository.snapshot().unwrap();
+        assert_eq!(after.performance_history.len(), 1);
+        assert_eq!(after.performance_history[0].portfolio_result, "25");
+        assert_eq!(
+            serde_json::to_value(after.funds).unwrap(),
+            serde_json::to_value(before.funds).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(after.totals).unwrap(),
+            serde_json::to_value(before.totals).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(repository.pending_changes().unwrap()).unwrap(),
+            pending
+        );
+    }
+
     #[test]
     fn startup_keeps_a_cash_only_wallet_authoritative() {
         let root = tempfile::tempdir().unwrap();

@@ -21,9 +21,11 @@ use uuid::Uuid;
 
 mod broker;
 mod cash;
+mod evolution_history;
 pub mod income;
 pub mod performance;
 pub mod portfolio_benchmark;
+pub mod portfolio_evolution;
 pub mod portfolio_performance;
 mod profile;
 mod wallets;
@@ -115,6 +117,9 @@ pub struct PortfolioSnapshot {
     pub cash_pockets: Vec<CashPocket>,
     #[serde(default = "zero_string")]
     pub cash_balance: String,
+    /// Private monthly observations, independent of financial transactions.
+    #[serde(default)]
+    pub performance_history: Vec<portfolio_evolution::PortfolioHistoryObservation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,7 +270,7 @@ impl Repository {
             "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;",
         )?;
         let version: u32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if version > 8 {
+        if version > 9 {
             return Err(CoreError::Validation(
                 "Este banco foi criado por uma versão mais recente do aplicativo.".into(),
             ));
@@ -324,6 +329,10 @@ impl Repository {
                  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
                  payload TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS performance_history (
+                 month TEXT PRIMARY KEY,
+                 payload TEXT NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS cash_pockets (
                  id TEXT PRIMARY KEY,
                  name TEXT NOT NULL,
@@ -344,7 +353,7 @@ impl Repository {
         let migration = (|| -> Result<()> {
             let locked_version: u32 =
                 connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            if locked_version > 8 {
+            if locked_version > 9 {
                 return Err(CoreError::Validation(
                     "Este banco foi criado por uma versão mais recente do aplicativo.".into(),
                 ));
@@ -376,7 +385,7 @@ impl Repository {
                 connection
                     .execute_batch("ALTER TABLE monthly_records ADD COLUMN purchase_date TEXT;")?;
             }
-            connection.execute_batch("PRAGMA user_version = 8; COMMIT;")?;
+            connection.execute_batch("PRAGMA user_version = 9; COMMIT;")?;
             Ok(())
         })();
         if let Err(error) = migration {
@@ -426,6 +435,7 @@ impl Repository {
         let embedded_position = broker::parse_embedded(&bytes)?;
         let embedded_cash = cash::parse_embedded(&bytes)?;
         let embedded_profile = profile::parse_embedded(&bytes)?;
+        let embedded_history = evolution_history::parse_embedded(&bytes)?;
         for fund in &imported {
             calculate_fund(
                 fund.id.clone(),
@@ -449,7 +459,7 @@ impl Repository {
             return Ok(receipt);
         }
         let fund_count: i64 = tx.query_row(
-            "SELECT (SELECT COUNT(*) FROM funds)+(SELECT COUNT(*) FROM cash_pockets)",
+            "SELECT (SELECT COUNT(*) FROM funds)+(SELECT COUNT(*) FROM cash_pockets)+(SELECT COUNT(*) FROM performance_history)",
             [],
             |row| row.get(0),
         )?;
@@ -489,6 +499,7 @@ impl Repository {
         if let Some(profile) = embedded_profile {
             profile::store_imported(&tx, &profile)?;
         }
+        evolution_history::store_imported(&tx, &embedded_history)?;
         snapshot_connection(&tx)?;
         let receipt = ImportReceipt {
             sha256,
@@ -683,6 +694,9 @@ impl Repository {
         }
         if let Some(profile) = profile {
             value["investment_profile"] = serde_json::to_value(profile)?;
+        }
+        if !snapshot.performance_history.is_empty() {
+            value["performanceHistory"] = serde_json::to_value(snapshot.performance_history)?;
         }
         Ok(serde_json::to_string_pretty(&value)?)
     }
@@ -896,6 +910,7 @@ fn snapshot_connection(connection: &Connection) -> Result<PortfolioSnapshot> {
         broker_position: broker::load_position(connection)?,
         cash_pockets,
         cash_balance: decimal_string(cash_balance),
+        performance_history: evolution_history::load(connection)?,
     })
 }
 
