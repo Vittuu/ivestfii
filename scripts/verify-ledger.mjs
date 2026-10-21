@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { parseArgs } from 'node:util';
-import { ledgerKindLabel, ledgerRows } from '../src/lib/ledger.ts';
+import { ledgerKindLabel, ledgerRows, recentLedgerRows } from '../src/lib/ledger.ts';
 
 const { values } = parseArgs({ options: { binary: { type: 'string' } } });
 const entry = (id, month, fields = {}) => ({ id, month, cotasAdded: '0', pricePerCota: '0', dividendPerCota: '0', dividendTotal: null, notes: 'Fixture sintética', ...fields });
@@ -134,6 +134,39 @@ test('labels describe the four movements and malformed decimals never become inv
   for (const invalid of ['', 'NaN', '-1', '1,5', '1e2']) {
     assert.throws(() => ledgerRows(fund([entry('invalid', '2025-01', { cotasAdded: invalid })])), RangeError);
   }
+});
+
+test('recent movements show older actual purchases separately from the latest income without mutating records', () => {
+  const input = structuredClone([mixed]);
+  const before = JSON.stringify(input);
+  for (const record of input[0].entries) Object.freeze(record);
+  Object.freeze(input[0].entries);
+  const recent = recentLedgerRows(input);
+  assert.deepEqual(recent.purchases.map((row) => row.entry.id), ['jul-buy', 'jun-both', 'apr-buy', 'jan-buy']);
+  assert.deepEqual(recent.income.map((row) => row.entry.id), ['aug-explicit', 'jun-both', 'jun-income', 'may-explicit']);
+  assert.equal(recent.purchases.find((row) => row.entry.id === 'jun-both').entry.cotasAdded, '3');
+  assert.equal(recent.purchases.find((row) => row.entry.id === 'jun-both').held, '15');
+  assert.equal(recent.purchases.find((row) => row.entry.id === 'jun-both').purchaseCost, '30');
+  assert.equal(recent.purchases.some((row) => row.entry.id === 'feb-explicit-zero'), false);
+  assert.equal(JSON.stringify(input), before);
+});
+
+test('recent purchases retain actual dates, leave old dates unknown, and distinguish missing price from information-only rows', () => {
+  const input = fund([
+    entry('unknown-day', '2026-06', { cotasAdded: '2', pricePerCota: '10' }),
+    entry('dated-early', '2026-06', { cotasAdded: '3', pricePerCota: '11', purchaseDate: '2026-06-04' }),
+    entry('dated-late', '2026-06', { cotasAdded: '1', pricePerCota: '12', purchaseDate: '2026-06-25' }),
+    entry('price-only', '2026-07', { pricePerCota: '20' }),
+    entry('unknown-price', '2026-07', { cotasAdded: '1' }),
+    entry('income', '2026-08', { dividendTotal: '5' }),
+  ]);
+  const recent = recentLedgerRows([input]);
+  assert.deepEqual(recent.purchases.map((row) => row.entry.id), ['unknown-price', 'dated-late', 'dated-early', 'unknown-day']);
+  assert.equal(recent.purchases.at(-1).entry.purchaseDate, undefined);
+  assert.equal(recent.purchases[0].purchaseCost, '0');
+  assert.equal(recent.purchases.some((row) => row.entry.id === 'price-only'), false);
+  assert.deepEqual(recent.income.map((row) => row.entry.id), ['income']);
+  assert.deepEqual(recentLedgerRows([]), { purchases: [], income: [] });
 });
 
 test('generated fixtures agree with the native Rust snapshot in an isolated directory', { skip: !values.binary }, () => {

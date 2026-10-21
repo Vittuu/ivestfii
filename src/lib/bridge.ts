@@ -252,6 +252,18 @@ export interface CashPerformance {
   items: CashPerformanceItem[];
 }
 
+export interface FixedIncomePerformance {
+  status: 'available' | 'incomplete' | 'empty';
+  invested: string | null;
+  balance: string;
+  income: string | null;
+  result: string | null;
+  referenceDate: string | null;
+  sourceHash: string | null;
+  name: string | null;
+  issues: string[];
+}
+
 export interface PortfolioPerformance {
   status: 'available' | 'incomplete' | 'empty';
   invested: string | null;
@@ -265,6 +277,7 @@ export interface PortfolioPerformance {
   totalReturnPercent: string | null;
   withdrawals: string | null;
   cash: CashPerformance;
+  fixedIncome?: FixedIncomePerformance;
   issues: string[];
 }
 

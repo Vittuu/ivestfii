@@ -2,7 +2,7 @@ import { useCallback, useId, useState } from 'react';
 import { Plus, Upload } from 'lucide-react';
 import { desktop, money, monthShort, percent, quantity } from '../lib/bridge';
 import type { FiiPerformance, Snapshot } from '../lib/bridge';
-import { ledgerRows } from '../lib/ledger';
+import { recentLedgerRows } from '../lib/ledger';
 import { useMonthlyIncome } from '../lib/useMonthlyIncome';
 import { Def, Empty, PageActions, SectionHeading, ShareBar, TextLink } from '../components';
 import CompletePortfolio from './CompletePortfolio';
@@ -27,7 +27,6 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
   const income = performance?.scope === incomeScope ? performance.data?.income : null;
   const invested = Number(totals.invested);
   const sorted = [...funds].sort((a, b) => Number(b.totalInvested) - Number(a.totalInvested));
-  const rows = funds.flatMap((fund) => ledgerRows(fund).map((row) => ({ ...row, ticker: fund.ticker, month: row.entry.month.slice(0, 7) })));
 
   const today = new Date();
   const currentKey = monthKey(today);
@@ -47,7 +46,7 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
 
   const fundRows = sorted.slice(0, 6);
   const others = sorted.slice(6);
-  const recent = [...rows].sort((a, b) => b.month.localeCompare(a.month) || Number(b.dividend) - Number(a.dividend) || a.ticker.localeCompare(b.ticker)).slice(0, 4);
+  const recent = recentLedgerRows(funds);
 
   return <div className="page overview-page">
     <PageActions>
@@ -56,7 +55,7 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
     </PageActions>
 
     <CompletePortfolio position={snapshot.brokerPosition} onImportPosition={onImportPosition} showImportAction={false} onShowFixedIncome={() => onNavigate('portfolio', 'position')} />
-    {desktop && <FiiPerformancePanel key={walletId} walletId={walletId} snapshot={snapshot} onProjection={() => onNavigate('projections')} onCash={() => onNavigate('cash')} onData={receivePerformance} />}
+    {desktop && <FiiPerformancePanel key={walletId} walletId={walletId} snapshot={snapshot} onProjection={() => onNavigate('projections')} onCash={() => onNavigate('cash')} onFixedIncome={() => onNavigate('portfolio', 'position')} onData={receivePerformance} />}
     {desktop && <MarketSummary snapshot={snapshot} onMarket={() => onNavigate('market')} />}
 
     <section className="group ov-history" aria-labelledby={historyId}>
@@ -91,24 +90,40 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
         </div>
 
         <div className="block span-12 ov-recent">
-          <SectionHeading title="Últimos lançamentos" level={3}><TextLink onClick={() => onNavigate('portfolio', 'history')}>Ver todos</TextLink></SectionHeading>
-          {recent.length ? <div className="table-wrap">
-            <table className="ov-table ov-recent-table">
-              <caption className="sr-only">Lançamentos mais recentes do histórico</caption>
-              <colgroup><col className="ov-col-month" /><col className="ov-col-ticker" /><col /><col /></colgroup>
-              <thead><tr><th scope="col">Mês</th><th scope="col">Fundo</th><th scope="col" className="num ov-purchase"><Def text="Dinheiro usado para comprar as cotas deste lançamento. Um traço indica que não houve compra registrada nessa linha.">Compras</Def></th><th scope="col" className="num ov-received"><Def text="Total recebido neste lançamento: informado por você ou calculado pelo Histórico. Um traço indica que não houve rendimento positivo registrado nessa linha.">Rendimentos</Def></th></tr></thead>
-              <tbody>{recent.map((row) => {
-                const bought = row.kind === 'purchase' || row.kind === 'both';
-                const received = row.kind === 'income' || row.kind === 'both';
-                return <tr key={row.entry.id}>
-                  <td className="ov-month" title={row.month === currentKey ? `Mês parcial, até ${untilLabel}` : undefined}><span className="num">{monthShort(row.month)}</span></td>
+          <p className="ov-recent-note">Compras e rendimentos ficam separados. Receber um rendimento não significa que houve uma nova compra.</p>
+          <div className="ov-recent-columns">
+          <section className="ov-recent-purchases" aria-label="Últimas compras de FIIs">
+            <SectionHeading title="Últimas compras" level={3}><TextLink onClick={() => onNavigate('portfolio', 'history')}>Ver todas</TextLink></SectionHeading>
+            {recent.purchases.length ? <div className="table-wrap">
+              <table className="ov-table ov-recent-table">
+                <caption className="sr-only">Compras mais recentes, com a quantidade comprada e seu preço registrado</caption>
+                <colgroup><col className="ov-col-purchase-date" /><col className="ov-col-ticker" /><col /></colgroup>
+                <thead><tr><th scope="col"><Def text="Data informada na compra. Nos registros antigos sem o dia exato, mostramos apenas o mês; nenhum dia é presumido.">Data da compra</Def></th><th scope="col">Fundo</th><th scope="col" className="num ov-purchase"><Def text="Quantidade comprada neste lançamento multiplicada pelo preço por cota registrado. São compras efetivas, mesmo quando mais antigas que os últimos rendimentos.">Valor da compra</Def></th></tr></thead>
+                <tbody>{recent.purchases.map((row) => <tr key={`${row.fundId}-${row.entry.id}`}>
+                  <td className="ov-month">{row.entry.purchaseDate ? <time className="num" dateTime={row.entry.purchaseDate}>{row.entry.purchaseDate.split('-').reverse().join('/')}</time> : <><span className="num">{monthShort(row.entry.month.slice(0, 7))}</span><span className="ov-purchase-date-note">dia não informado</span></>}</td>
                   <td className="ticker">{row.ticker}</td>
-                  <td className="num ov-purchase">{bought ? <>{money(row.purchaseCost)}<span className="ov-purchase-quantity">{quantity(row.entry.cotasAdded)} {Number(row.entry.cotasAdded) === 1 ? 'cota' : 'cotas'} × {money(row.entry.pricePerCota)}</span></> : <span className="dash">—</span>}</td>
-                  <td className="num ov-received">{received ? row.computed ? <Def text={`Calculado: ${quantity(row.held)} cotas no mês × R$ ${perCota(row.entry.dividendPerCota)} por cota.`}>{money(row.dividend)}</Def> : money(row.dividend) : <span className="dash">—</span>}</td>
-                </tr>;
-              })}</tbody>
-            </table>
-          </div> : <Empty title="Nenhum lançamento">Registre compras e proventos em FIIs e posições.</Empty>}
+                  <td className="num ov-purchase">{Number(row.entry.pricePerCota) > 0 ? <>{money(row.purchaseCost)}<span className="ov-purchase-quantity">{quantity(row.entry.cotasAdded)} {Number(row.entry.cotasAdded) === 1 ? 'cota' : 'cotas'} × R$ {perCota(row.entry.pricePerCota)}</span></> : <><Def text="Esta compra tem quantidade de cotas, mas o preço foi registrado como zero. Confira o preço no histórico para completar o valor comprado.">Preço a conferir</Def><span className="ov-purchase-quantity">{quantity(row.entry.cotasAdded)} {Number(row.entry.cotasAdded) === 1 ? 'cota' : 'cotas'} · preço registrado R$ 0,00</span></>}</td>
+                </tr>)}</tbody>
+              </table>
+            </div> : <Empty title="Nenhuma compra registrada">As compras aparecem aqui quando você informa cotas adicionadas no histórico.</Empty>}
+          </section>
+          <section className="ov-recent-income" aria-label="Últimos rendimentos registrados de FIIs">
+            <SectionHeading title="Últimos rendimentos" level={3}><TextLink onClick={() => onNavigate('portfolio', 'history')}>Ver todos</TextLink></SectionHeading>
+            <p className="ov-recent-income-note">Lançamentos do histórico. Os proventos da B3, quando disponíveis, também entram no gráfico e nos totais acima.</p>
+            {recent.income.length ? <div className="table-wrap">
+              <table className="ov-table ov-recent-table">
+                <caption className="sr-only">Rendimentos mais recentes registrados no histórico de FIIs</caption>
+                <colgroup><col className="ov-col-month" /><col className="ov-col-ticker" /><col /></colgroup>
+                <thead><tr><th scope="col">Mês</th><th scope="col">Fundo</th><th scope="col" className="num ov-received"><Def text="Rendimento positivo informado por você ou calculado pelo histórico. Comprar cotas não é necessário para receber: as cotas anteriores continuam no saldo.">Rendimento recebido</Def></th></tr></thead>
+                <tbody>{recent.income.map((row) => <tr key={`${row.fundId}-${row.entry.id}`}>
+                  <td className="ov-month" title={row.entry.month.slice(0, 7) === currentKey ? `Mês parcial, até ${untilLabel}` : undefined}><span className="num">{monthShort(row.entry.month.slice(0, 7))}</span></td>
+                  <td className="ticker">{row.ticker}</td>
+                  <td className="num ov-received">{row.computed ? <Def text={`Calculado pelo histórico: ${quantity(row.held)} cotas no mês × R$ ${perCota(row.entry.dividendPerCota)} por cota.`}>{money(row.dividend)}</Def> : money(row.dividend)}</td>
+                </tr>)}</tbody>
+              </table>
+            </div> : <Empty title="Nenhum rendimento registrado">Os rendimentos lançados no histórico aparecem aqui.</Empty>}
+          </section>
+          </div>
         </div>
         </div>
         <details className="extra-details ov-extra">

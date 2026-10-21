@@ -7,7 +7,7 @@ import { Def, Empty, SectionHeading, TextLink } from '../components';
 import PublicSourceLink from './PublicSourceLink';
 import { readPublicCache, usePublicData } from '../lib/publicData';
 
-interface Props { walletId: string; snapshot: Snapshot; onProjection: () => void; onCash: () => void; onData?: (data: PerformanceData | null) => void }
+interface Props { walletId: string; snapshot: Snapshot; onProjection: () => void; onCash: () => void; onFixedIncome?: () => void; onData?: (data: PerformanceData | null) => void }
 
 const number = (value: string | null | undefined) => {
   if (value == null || value.trim() === '') return null;
@@ -28,7 +28,7 @@ const signedPercent = (value: string) => {
 };
 
 /** Native commands calculate performance; this view only formats cached results and chart geometry. */
-export default function FiiPerformancePanel({ walletId, snapshot, onProjection, onCash, onData }: Props) {
+export default function FiiPerformancePanel({ walletId, snapshot, onProjection, onCash, onFixedIncome, onData }: Props) {
   const publicData = usePublicData();
   const { invested, dividendsReceived: dividends } = snapshot.totals;
   const headingId = useId();
@@ -79,6 +79,8 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
   const recordedDividends = income?.recordedAmount ?? totalDividends;
   const portfolio = data?.portfolio;
   const cash = portfolio?.cash;
+  const fixedIncome = portfolio?.fixedIncome;
+  const hasFixedIncome = Boolean(fixedIncome && fixedIncome.status !== 'empty');
   const issues = portfolio?.issues ?? [];
   const fiiIssues = data?.issues ?? [];
   const cashPending = Boolean(cash && cash.missingBasisCount > 0);
@@ -86,11 +88,11 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
     <div className="group-head"><h2 id={headingId}>Resultado da carteira</h2><div className="group-actions"><TextLink onClick={onProjection}>Ver projeção</TextLink><button className="button small" type="button" onClick={() => void refresh()} disabled={!desktop || !walletId || loading || refreshing || publicData.loading || publicData.refreshing}>{refreshing ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}{refreshing ? 'Atualizando…' : 'Atualizar resultado'}</button></div></div>
     <div className="block">
       <div className="readouts ov-essential performance-readouts">
-        <div className="readout ov-purchase"><span className="figure-label"><Def text="Compras de FIIs mais todas as aplicações nas caixinhas desta carteira. Inclui dinheiro depois resgatado: os resgates não são descontados do total aplicado.">Total aplicado</Def></span><span className="figure-value lg">{portfolio?.invested == null ? '—' : money(portfolio.invested)}</span></div>
-        <div className="readout"><span className="figure-label performance-income-label"><Def text={<>Rendimentos dos FIIs mais o ganho das caixinhas (saldo + resgates − aplicações).{income && <p>FIIs: {money(income.recordedAmount)} do histórico + {money(income.apiAmount)} da B3 = {money(totalDividends)}, até {dateBR(income.asOf)}. A B3 completa os meses sem rendimento informado; um valor seu, inclusive zero, tem prioridade.</p>}</>}>Rendimentos acumulados</Def></span><span className={`figure-value lg ${resultClass(portfolio?.income)}`}>{signedMoney(portfolio?.income)}</span></div>
-        <div className="readout"><span className="figure-label"><Def text="Resultado dos FIIs (variação das cotas + rendimentos do histórico e da B3, contados uma vez) mais o ganho das caixinhas cadastradas nesta carteira. Não inclui outros valores da posição importada.">Resultado da carteira</Def></span><span className={`figure-value lg ${resultClass(portfolio?.totalResult)}`}>{signedMoney(portfolio?.totalResult)}</span>{portfolio?.totalReturnPercent != null && <span className="performance-return"><Def text="Resultado dividido pelo total aplicado, que inclui aplicações depois resgatadas. É um percentual acumulado; não é uma taxa anual nem uma rentabilidade ponderada pelo tempo.">Estimado · {signedPercent(portfolio.totalReturnPercent)} sobre o total aplicado</Def></span>}</div>
+        <div className="readout ov-purchase"><span className="figure-label"><Def text="Compras de FIIs, aplicações nas caixinhas e valor aplicado no pós-fixado identificado nesta carteira. Nas caixinhas, inclui dinheiro depois resgatado: os resgates não são descontados do total aplicado.">Total aplicado</Def></span><span className="figure-value lg">{portfolio?.invested == null ? '—' : money(portfolio.invested)}</span></div>
+        <div className="readout"><span className="figure-label performance-income-label"><Def text={<>Rendimentos dos FIIs mais o ganho das caixinhas (saldo + resgates − aplicações) e do pós-fixado identificado. O ganho do pós-fixado já está no saldo; a rentabilidade dos últimos 12 meses não é somada novamente.{income && <p>FIIs: {money(income.recordedAmount)} do histórico + {money(income.apiAmount)} da B3 = {money(totalDividends)}, até {dateBR(income.asOf)}. A B3 completa os meses sem rendimento informado; um valor seu, inclusive zero, tem prioridade.</p>}</>}>Rendimentos acumulados</Def></span><span className={`figure-value lg ${resultClass(portfolio?.income)}`}>{signedMoney(portfolio?.income)}</span></div>
+        <div className="readout"><span className="figure-label"><Def text="Resultado dos FIIs (variação das cotas + rendimentos do histórico e da B3, contados uma vez), mais o ganho das caixinhas e do pós-fixado identificado nesta carteira. Cada saldo mantém sua própria data. Saldo em conta e proventos a receber da corretora não entram neste cálculo.">Resultado da carteira</Def></span><span className={`figure-value lg ${resultClass(portfolio?.totalResult)}`}>{signedMoney(portfolio?.totalResult)}</span>{portfolio?.totalReturnPercent != null && <span className="performance-return"><Def text="Resultado dividido pelo total aplicado, que inclui aplicações depois resgatadas. É um percentual acumulado; não é uma taxa anual nem uma rentabilidade ponderada pelo tempo.">Estimado · {signedPercent(portfolio.totalReturnPercent)} sobre o total aplicado</Def></span>}</div>
       </div>
-      <p className="performance-scope">FIIs do Histórico e caixinhas cadastradas nesta carteira. Os saldos das caixinhas são informados por você.</p>
+      <p className="performance-scope">{hasFixedIncome ? 'FIIs do Histórico, caixinhas cadastradas e pós-fixado da corretora' : 'FIIs do Histórico e caixinhas cadastradas'} nesta carteira. Cada saldo mantém a data informada na sua origem.</p>
       {apiIncome > 0 && income && <p className="performance-message performance-api-income">Inclui <strong className="num">{money(income.apiAmount)}</strong> em proventos calculados pela B3 até <time dateTime={income.asOf}>{dateBR(income.asOf)}</time>. Os valores informados por você têm prioridade.{income.status === 'partial' && <span> Há meses sem dados; o resultado usa os rendimentos disponíveis.</span>}</p>}
       {loading && <p className="performance-message" role="status"><LoaderCircle className="spin" size={15} />Lendo dados salvos…</p>}
       {refreshing && <p className="performance-message" role="status">Consultando cotações, proventos e CDI. Os dados salvos continuam visíveis.</p>}
@@ -99,22 +101,24 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
       {cash && cash.missingBasisCount > 0 && <p className="performance-message performance-warning performance-cash-pending" role="status">Complete aplicações, resgates e data do saldo em {cash.missingBasisCount} {cash.missingBasisCount === 1 ? 'caixinha' : 'caixinhas'} para fechar os totais. <TextLink onClick={onCash}>Completar caixinhas</TextLink></p>}
       {!cashPending && issues.length > 0 && <p className="performance-message performance-warning" role="status">{issues[0]}</p>}
       {issues.length > 1 && <details className="extra-details performance-issues"><summary>Ver observações do cálculo ({issues.length})</summary><ul>{issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul></details>}
-      {portfolio?.status === 'empty' ? <Empty title="Nenhum investimento registrado">Registre compras de FIIs no Histórico ou cadastre suas caixinhas para acompanhar o resultado.</Empty> : <>
+      {portfolio?.status === 'empty' ? <Empty title="Nenhum investimento registrado">Registre compras de FIIs no Histórico, cadastre suas caixinhas ou importe os dados do pós-fixado para acompanhar o resultado.</Empty> : <>
       <div className="performance-portfolio-summary">
-        <div className="table-wrap"><table className="performance-portfolio-table"><caption className="sr-only">Composição do resultado da carteira: FIIs e caixinhas</caption><thead><tr>
-          <th scope="col">Investimento</th><th scope="col" className="num ov-purchase"><Def text="Compras dos FIIs e aplicações brutas das caixinhas, sem descontar resgates.">Aplicado</Def></th><th scope="col" className="num"><Def text="Nos FIIs, histórico mais os proventos da B3 que faltavam, sem duplicar o mesmo fundo e mês. Nas caixinhas, saldo + resgates − aplicações.">Rendimentos</Def></th><th scope="col" className="num"><Def text="Nos FIIs, soma variação das cotas e rendimentos. Nas caixinhas, o próprio ganho acumulado, calculado pelos valores cadastrados.">Resultado</Def></th>
+        <div className="table-wrap"><table className="performance-portfolio-table"><caption className="sr-only">Composição do resultado da carteira: FIIs, caixinhas e pós-fixado</caption><thead><tr>
+          <th scope="col">Investimento</th><th scope="col" className="num ov-purchase"><Def text="Compras dos FIIs, aplicações brutas das caixinhas (sem descontar resgates) e valor aplicado no pós-fixado identificado.">Aplicado</Def></th><th scope="col" className="num"><Def text="Nos FIIs, histórico mais os proventos da B3 que faltavam, sem duplicar o mesmo fundo e mês. Nas caixinhas, saldo + resgates − aplicações. No pós-fixado, ganho acumulado já incluído no saldo informado.">Rendimentos</Def></th><th scope="col" className="num"><Def text="Nos FIIs, soma variação das cotas e rendimentos. Nas caixinhas e no pós-fixado, o próprio ganho acumulado. Cada investimento entra uma vez nos totais.">Resultado</Def></th>
         </tr></thead><tbody>
           <tr><th scope="row">FIIs</th><td className="num ov-purchase">{money(totalInvested)}</td><td className={`num ${resultClass(totalDividends)}`}>{signedMoney(totalDividends)}</td><td className={`num ${resultClass(data?.totalResult)}`}>{signedMoney(data?.totalResult)}</td></tr>
           <tr><th scope="row"><TextLink onClick={onCash}>Caixinhas</TextLink></th><td className="num ov-purchase">{cash?.invested == null ? '—' : money(cash.invested)}</td><td className={`num ${resultClass(cash?.income)}`}>{signedMoney(cash?.income)}</td><td className={`num ${resultClass(cash?.income)}`}>{signedMoney(cash?.income)}</td></tr>
+          {hasFixedIncome && fixedIncome && <tr className="performance-fixed-income-row"><th scope="row">{onFixedIncome ? <TextLink onClick={onFixedIncome}>Pós-fixado</TextLink> : 'Pós-fixado'}</th><td className="num ov-purchase">{fixedIncome.invested == null ? '—' : money(fixedIncome.invested)}</td><td className={`num ${resultClass(fixedIncome.income)}`}>{signedMoney(fixedIncome.income)}</td><td className={`num ${resultClass(fixedIncome.result)}`}>{signedMoney(fixedIncome.result)}</td></tr>}
           <tr className="performance-total"><th scope="row">Total</th><td className="num ov-purchase">{portfolio?.invested == null ? '—' : money(portfolio.invested)}</td><td className={`num ${resultClass(portfolio?.income)}`}>{signedMoney(portfolio?.income)}</td><td className={`num ${resultClass(portfolio?.totalResult)}`}>{signedMoney(portfolio?.totalResult)}</td></tr>
         </tbody></table></div>
       </div>
+      {hasFixedIncome && fixedIncome && <p className="performance-scope performance-fixed-income-scope">Pós-fixado{fixedIncome.name ? `: ${fixedIncome.name}` : ''}{fixedIncome.referenceDate && <> · saldo de <time dateTime={fixedIncome.referenceDate}>{dateBR(fixedIncome.referenceDate)}</time></>}. {fixedIncome.status === 'available' ? 'O rendimento já está no saldo; o valor dos últimos 12 meses não é somado novamente.' : 'Faltam dados para fechar o rendimento deste investimento.'}</p>}
       <div className="performance-comparison">
         <div className="performance-chart-block">
           <SectionHeading title="FIIs × 100% do CDI" level={3} />
           {fiiIssues.length > 0 && <p className="performance-message performance-warning" role="status">{fiiIssues[0]}</p>}
           {fiiIssues.length > 1 && <details className="extra-details performance-issues"><summary>Ver observações dos FIIs ({fiiIssues.length})</summary><ul>{fiiIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul></details>}
-          <p className="performance-estimate performance-chart-scope">Apenas FIIs. As caixinhas entram nos totais acima, sem participar deste gráfico.</p>
+          <p className="performance-estimate performance-chart-scope">Apenas FIIs. Caixinhas e pós-fixado entram nos totais acima, sem participar deste gráfico.</p>
           <p className="performance-period">{data?.startMonth && data.asOf ? <>De {monthShort(data.startMonth)} até <time dateTime={data.asOf}>{dateBR(data.asOf)}</time></> : 'Período da comparação ainda indisponível.'}</p>
           <p className="performance-estimate">{hasDatedPurchases ? 'Comparação estimada · compras nas datas informadas; sem dia, usa o fim do mês ou a data da cotação.' : 'Comparação estimada · compras no fim do mês; no mês da cotação, até a cotação.'}</p>
           {comparable && data?.totalResult != null && data.cdi ? <ResultBars fii={data.totalResult} cdi={data.cdi.result} fiiPercent={data.totalReturnPercent} cdiPercent={data.cdi.returnPercent} /> : <p className="performance-unavailable">{data?.status === 'empty' ? 'Sem compras de FIIs registradas para comparar com o CDI.' : hasResult ? 'O resultado dos FIIs está disponível. Falta o CDI do mesmo período para comparar.' : 'A comparação precisa do valor completo dos FIIs e do CDI no mesmo período. Atualize os dados para consultar.'}</p>}

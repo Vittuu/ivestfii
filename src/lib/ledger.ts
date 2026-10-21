@@ -15,6 +15,8 @@ export interface LedgerRow {
   computed: boolean;
 }
 
+export interface RecentLedgerRow extends LedgerRow { fundId: string; ticker: string }
+
 const kindLabels: Record<LedgerKind, string> = {
   purchase: 'Compra',
   income: 'Rendimento',
@@ -108,4 +110,22 @@ export function ledgerRows(fund: Fund): LedgerRow[] {
       held: text(monthHolding), purchaseCost: text(purchaseCost), dividend: text(dividend), computed,
     };
   }).sort((left, right) => right.entry.month.localeCompare(left.entry.month));
+}
+
+/**
+ * Select each movement independently: recent income must not hide older actual
+ * purchases. A mixed record appears once in each view, without creating records
+ * or changing the month-based ledger calculation. Undated purchases remain
+ * month-only; their position within a month does not assert an invented day.
+ */
+export function recentLedgerRows(funds: Fund[], limit = 4): { purchases: RecentLedgerRow[]; income: RecentLedgerRow[] } {
+  const rows = funds.flatMap((fund) => ledgerRows(fund).map((row) => ({ ...row, fundId: fund.id, ticker: fund.ticker })));
+  const byMonth = (left: RecentLedgerRow, right: RecentLedgerRow) => right.entry.month.slice(0, 7).localeCompare(left.entry.month.slice(0, 7));
+  const byFund = (left: RecentLedgerRow, right: RecentLedgerRow) => left.ticker.localeCompare(right.ticker) || left.entry.id.localeCompare(right.entry.id);
+  return {
+    purchases: rows.filter((row) => row.kind === 'purchase' || row.kind === 'both')
+      .sort((left, right) => byMonth(left, right) || (right.entry.purchaseDate ?? '').localeCompare(left.entry.purchaseDate ?? '') || byFund(left, right)).slice(0, limit),
+    income: rows.filter((row) => row.kind === 'income' || row.kind === 'both')
+      .sort((left, right) => byMonth(left, right) || byFund(left, right)).slice(0, limit),
+  };
 }

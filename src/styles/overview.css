@@ -281,7 +281,16 @@
     clip-path: inset(50%); white-space: nowrap;
   }
 }
-.overview-page .ov-recent-table { min-width: 420px; }
+.overview-page .ov-recent-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.overview-page .ov-recent-columns > section { min-width: 0; }
+.overview-page .ov-recent-income { border-left: 1px solid var(--line); }
+.overview-page :is(.ov-recent-note, .ov-recent-income-note) { padding: var(--sp-2) var(--sp-4); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.overview-page .ov-recent-note { border-bottom: 1px solid var(--line); }
+.overview-page .ov-recent-income-note { color: var(--text-3); }
+.overview-page .ov-recent-table { min-width: 300px; }
+.overview-page .ov-recent-table th { white-space: normal; }
+.overview-page .ov-col-purchase-date { width: 130px; }
+.overview-page .ov-purchase-date-note { display: block; margin-top: var(--sp-1); font-family: var(--font-ui); font-size: var(--fs-12); color: var(--text-3); }
 .overview-page .ov-recent-table th,
 .overview-page .ov-recent-table td { padding-inline: var(--sp-3); }
 .overview-page .ov-recent-table th:first-child,
@@ -318,6 +327,8 @@
   .complete-portfolio .cp-hero { min-height: 0; }
   .overview-page .performance-comparison { grid-template-columns: minmax(0, 1fr); }
   .overview-page .performance-breakdown { border-left: 0; border-top: 1px solid var(--line); }
+  .overview-page .ov-recent-columns { grid-template-columns: minmax(0, 1fr); }
+  .overview-page .ov-recent-income { border-left: 0; border-top: 1px solid var(--line); }
 }
 @media (max-width: 640px) {
   .complete-portfolio .cp-observations-table thead { display: none; }
@@ -343,4 +354,7 @@
   .overview-page .ov-readouts .readout.lead { grid-column: 1 / -1; }
   .overview-page .ov-lead-row { width: 100%; }
   .overview-page .ov-essential { grid-template-columns: minmax(0, 1fr); }
+  .overview-page .ov-col-purchase-date { width: 102px; }
+  .overview-page .ov-recent-table :is(th, td) { padding-inline: var(--sp-2); }
+  .overview-page .ov-purchase-quantity { white-space: normal; }
 }

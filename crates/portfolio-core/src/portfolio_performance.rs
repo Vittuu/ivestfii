@@ -1,6 +1,7 @@
-//! Read-only totals for the selected wallet's ledger and reconciled cash pockets.
+//! Read-only totals for the selected wallet's ledger, reconciled cash pockets,
+//! and the separately observed fixed-income investment.
 //! Gross deposits are acquisition funding, not the current principal balance.
-//! Simulated CDI earnings and imported broker totals are deliberately excluded.
+//! Simulated CDI earnings and aggregate broker totals are deliberately excluded.
 use super::{
     add, decimal_string, div, mul, parse_decimal, parse_nonnegative, performance::FiiPerformance,
     CashPocket, CoreError, PortfolioSnapshot, Result,
@@ -38,6 +39,36 @@ pub struct CashPerformance {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FixedIncomePerformance {
+    pub status: String,
+    pub name: Option<String>,
+    pub balance: String,
+    pub invested: Option<String>,
+    pub income: Option<String>,
+    pub result: Option<String>,
+    pub reference_date: Option<String>,
+    pub source_hash: Option<String>,
+    pub issues: Vec<String>,
+}
+
+impl Default for FixedIncomePerformance {
+    fn default() -> Self {
+        Self {
+            status: "empty".into(),
+            name: None,
+            balance: "0".into(),
+            invested: Some("0".into()),
+            income: Some("0".into()),
+            result: Some("0".into()),
+            reference_date: None,
+            source_hash: None,
+            issues: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PortfolioPerformance {
     pub status: String,
     pub invested: Option<String>,
@@ -51,7 +82,67 @@ pub struct PortfolioPerformance {
     pub total_return_percent: Option<String>,
     pub withdrawals: Option<String>,
     pub cash: CashPerformance,
+    #[serde(default)]
+    pub fixed_income: FixedIncomePerformance,
     pub issues: Vec<String>,
+}
+
+fn calculate_fixed_income_performance(
+    snapshot: &PortfolioSnapshot,
+) -> Result<FixedIncomePerformance> {
+    let Some(position) = &snapshot.broker_position else {
+        return Ok(FixedIncomePerformance::default());
+    };
+    let fixed = &position.fixed_income;
+    let Some(observation) = &fixed.latest_observation else {
+        let balance = parse_nonnegative(&fixed.balance, "Saldo do pós-fixado")?;
+        if balance.is_zero() {
+            return Ok(FixedIncomePerformance::default());
+        }
+        return Ok(FixedIncomePerformance {
+            status: "incomplete".into(),
+            name: Some(fixed.name.clone()),
+            balance: decimal_string(balance),
+            invested: None,
+            income: None,
+            result: None,
+            reference_date: Some(position.reference_date.clone()),
+            source_hash: Some(position.source_hash.clone()),
+            issues: vec!["O saldo do pós-fixado está disponível, mas faltam o valor aplicado e o rendimento acumulado. Os totais completos da carteira permanecem indisponíveis.".into()],
+        });
+    };
+    let reference_date = NaiveDate::parse_from_str(&observation.reference_date, "%Y-%m-%d")
+        .map_err(|_| CoreError::Validation("Data do saldo do pós-fixado inválida.".into()))?;
+    if reference_date.year() < 1
+        || reference_date.format("%Y-%m-%d").to_string() != observation.reference_date
+    {
+        return Err(CoreError::Validation(
+            "Data do saldo do pós-fixado inválida.".into(),
+        ));
+    }
+    let balance = parse_nonnegative(&observation.balance, "Saldo do pós-fixado")?;
+    let invested = parse_nonnegative(&observation.invested, "Valor aplicado no pós-fixado")?;
+    let income = parse_decimal(&observation.total_earnings)?;
+    if add(invested, income)? != balance {
+        return Err(CoreError::Validation(
+            "O saldo do pós-fixado não confere com o valor aplicado e o rendimento acumulado."
+                .into(),
+        ));
+    }
+    // The dated observation already contains the total of its contributions.
+    // Neither those rows, the old broker fields nor a 12-month indicator are
+    // separate positions or payments that can be added to this total.
+    Ok(FixedIncomePerformance {
+        status: "available".into(),
+        name: Some(observation.name.clone()),
+        balance: decimal_string(balance),
+        invested: Some(decimal_string(invested)),
+        income: Some(decimal_string(income)),
+        result: Some(decimal_string(income)),
+        reference_date: Some(observation.reference_date.clone()),
+        source_hash: Some(observation.source_hash.clone()),
+        issues: vec![],
+    })
 }
 
 fn subtract(left: Decimal, right: Decimal) -> Result<Decimal> {
@@ -209,6 +300,7 @@ pub fn calculate_portfolio_performance(
     fii: &FiiPerformance,
 ) -> Result<PortfolioPerformance> {
     let cash = calculate_cash_performance(&snapshot.cash_pockets)?;
+    let fixed_income = calculate_fixed_income_performance(snapshot)?;
     let empty_fii = fii.status == "empty";
     let (fii_cost_complete, fii_income_complete) = fii_basis_completeness(snapshot, fii)?;
     let fii_invested = if empty_fii {
@@ -241,29 +333,59 @@ pub fn calculate_portfolio_performance(
     let cash_known_income = parse_decimal(&cash.known_income)?;
     let cash_invested = cash.invested.as_deref().map(parse_decimal).transpose()?;
     let cash_income = cash.income.as_deref().map(parse_decimal).transpose()?;
-    let known_invested = add(fii_invested, cash_known_invested)?;
-    let known_income = add(fii_income, cash_known_income)?;
-    let known_current_value = add(fii_market.unwrap_or(Decimal::ZERO), cash_balance)?;
-    let known_result = add(fii_result.unwrap_or(Decimal::ZERO), cash_known_income)?;
+    let fixed_balance = parse_nonnegative(&fixed_income.balance, "Saldo do pós-fixado")?;
+    let fixed_invested = fixed_income
+        .invested
+        .as_deref()
+        .map(parse_decimal)
+        .transpose()?;
+    let fixed_income_value = fixed_income
+        .income
+        .as_deref()
+        .map(parse_decimal)
+        .transpose()?;
+    let fixed_result = fixed_income
+        .result
+        .as_deref()
+        .map(parse_decimal)
+        .transpose()?;
+    let known_invested = add(
+        add(fii_invested, cash_known_invested)?,
+        fixed_invested.unwrap_or(Decimal::ZERO),
+    )?;
+    let known_income = add(
+        add(fii_income, cash_known_income)?,
+        fixed_income_value.unwrap_or(Decimal::ZERO),
+    )?;
+    let known_current_value = add(
+        add(fii_market.unwrap_or(Decimal::ZERO), cash_balance)?,
+        fixed_balance,
+    )?;
+    let known_result = add(
+        add(fii_result.unwrap_or(Decimal::ZERO), cash_known_income)?,
+        fixed_result.unwrap_or(Decimal::ZERO),
+    )?;
     let invested = if fii_cost_complete {
-        cash_invested
-            .map(|value| add(fii_invested, value))
-            .transpose()?
+        match (cash_invested, fixed_invested) {
+            (Some(cash), Some(fixed)) => Some(add(add(fii_invested, cash)?, fixed)?),
+            _ => None,
+        }
     } else {
         None
     };
     let income = if fii_income_complete {
-        cash_income
-            .map(|value| add(fii_income, value))
-            .transpose()?
+        match (cash_income, fixed_income_value) {
+            (Some(cash), Some(fixed)) => Some(add(add(fii_income, cash)?, fixed)?),
+            _ => None,
+        }
     } else {
         None
     };
     let current_value = fii_market
-        .map(|value| add(value, cash_balance))
+        .map(|value| add(add(value, cash_balance)?, fixed_balance))
         .transpose()?;
-    let total_result = match (fii_result, cash_income) {
-        (Some(result), Some(profit)) => Some(add(result, profit)?),
+    let total_result = match (fii_result, cash_income, fixed_result) {
+        (Some(result), Some(profit), Some(fixed)) => Some(add(add(result, profit)?, fixed)?),
         _ => None,
     };
     let total_return_percent = match (invested, total_result) {
@@ -287,9 +409,10 @@ pub fn calculate_portfolio_performance(
     if cash.missing_basis_count > 0 {
         issues.push(format!("Faltam os depósitos, as retiradas ou a data do saldo de {} caixinha(s). Os totais completos de custo e resultado permanecem indisponíveis.", cash.missing_basis_count));
     }
+    issues.extend(fixed_income.issues.iter().cloned());
     let complete =
         invested.is_some() && income.is_some() && current_value.is_some() && total_result.is_some();
-    let status = if empty_fii && cash.count == 0 {
+    let status = if empty_fii && cash.count == 0 && fixed_income.status == "empty" {
         "empty"
     } else if complete {
         "available"
@@ -310,6 +433,7 @@ pub fn calculate_portfolio_performance(
         total_return_percent: total_return_percent.map(decimal_string),
         withdrawals,
         cash,
+        fixed_income,
         issues,
     })
 }
@@ -317,7 +441,45 @@ pub fn calculate_portfolio_performance(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{calculate_fund, MonthlyEntry, PortfolioTotals};
+    use crate::{calculate_fund, BrokerPosition, MonthlyEntry, PortfolioTotals};
+
+    fn broker_fixed_income() -> BrokerPosition {
+        serde_json::from_value(serde_json::json!({
+            "referenceDate": "2026-10-01", "institution": "Corretora sintética",
+            "importedAt": "2026-10-01T12:00:00Z", "sourcePath": "synthetic-position.json",
+            "sourceHash": "a".repeat(64),
+            "overview": {
+                "updatedTime": null, "capturedTime": null, "totalWithCash": "999999",
+                "invested": "999999", "cash": "999999", "listedFunds": "999999",
+                "fixedIncome": "999999", "pendingIncome": "999999"
+            },
+            "listedFunds": {
+                "capturedTime": null, "marketValue": "999999", "costBasis": "999999",
+                "unrealizedResult": "999999", "dailyResult": "999999", "holdings": []
+            },
+            "fixedIncome": {
+                "name": "Nome antigo sintético", "nameTruncated": true,
+                "balance": "250", "netBalance": "249", "reportedEarnings": "999999",
+                "return12Months": "999999", "redemptionConversion": "D+0",
+                "redemptionSettlement": "D+0",
+                "latestObservation": {
+                    "referenceDate": "2026-10-19", "name": "Pós-fixado sintético",
+                    "category": "Renda fixa", "riskLevel": "1", "balance": "240",
+                    "invested": "200", "totalEarnings": "40", "earnings12Months": "888888",
+                    "return12Months": "777777", "returnReferenceDate": "2026-10-15",
+                    "contributions": [{
+                        "applicationDate": "2026-01-01", "invested": "200",
+                        "currentValue": "240", "earnings": "40", "returnPercent": "20"
+                    }],
+                    "sources": [{"fileName": "synthetic.png", "sha256": "b".repeat(64)}],
+                    "importedAt": "2026-10-19T12:00:00Z",
+                    "sourcePath": "synthetic-observation.json", "sourceHash": "c".repeat(64)
+                }
+            },
+            "warnings": []
+        }))
+        .unwrap()
+    }
 
     fn pocket(
         id: &str,
@@ -608,6 +770,229 @@ mod tests {
         assert!(matches!(
             calculate_portfolio_performance(&original, &enormous),
             Err(CoreError::ArithmeticOverflow)
+        ));
+    }
+
+    #[test]
+    fn dated_fixed_income_combines_once_with_fii_and_cash_without_rewriting_any_source() {
+        let mut original = snapshot(vec![pocket("cash", "220", Some("200"), Some("10"))]);
+        original.broker_position = Some(broker_fixed_income());
+        let before = serde_json::to_vec(&original).unwrap();
+        for _ in 0..2 {
+            let report = calculate_portfolio_performance(&original, &fii()).unwrap();
+            assert_eq!(report.status, "available");
+            assert_eq!(report.invested.as_deref(), Some("500"));
+            assert_eq!(report.income.as_deref(), Some("75"));
+            // The fixed-income gain is already in its 240 balance. Adding it
+            // here a second time would incorrectly produce a value of 590.
+            assert_eq!(report.current_value.as_deref(), Some("550"));
+            assert_eq!(report.total_result.as_deref(), Some("65"));
+            assert_eq!(report.total_return_percent.as_deref(), Some("13"));
+            assert_eq!(report.withdrawals.as_deref(), Some("10"));
+            assert_eq!(report.known_invested, "500");
+            assert_eq!(report.known_income, "75");
+            assert_eq!(report.known_current_value, "550");
+            assert_eq!(report.known_result, "65");
+            assert_eq!(report.fixed_income.status, "available");
+            assert_eq!(report.fixed_income.balance, "240");
+            assert_eq!(report.fixed_income.invested.as_deref(), Some("200"));
+            assert_eq!(report.fixed_income.income.as_deref(), Some("40"));
+            assert_eq!(report.fixed_income.result.as_deref(), Some("40"));
+            assert_eq!(
+                report.fixed_income.name.as_deref(),
+                Some("Pós-fixado sintético")
+            );
+            assert_eq!(
+                report.fixed_income.reference_date.as_deref(),
+                Some("2026-10-19")
+            );
+            assert_eq!(
+                report.fixed_income.source_hash.as_deref(),
+                Some("c".repeat(64).as_str())
+            );
+            assert!(report.issues.is_empty());
+        }
+        assert_eq!(serde_json::to_vec(&original).unwrap(), before);
+    }
+
+    #[test]
+    fn reconciled_api_income_and_fixed_income_remain_separate_components() {
+        let mut original = snapshot(vec![pocket("cash", "220", Some("200"), Some("10"))]);
+        original.broker_position = Some(broker_fixed_income());
+        let mut performance = fii();
+        performance.dividends = "11".into();
+        performance.total_result = Some("1".into());
+        performance.income = Some(
+            serde_json::from_value(serde_json::json!({
+                "recordedAmount": "5", "apiAmount": "6", "asOf": "2026-10-20",
+                "startMonth": "2026-01", "endMonth": "2026-10", "status": "complete",
+                "missingFundMonthCount": 0, "dateRequiredFundMonthCount": 0,
+                "ignoredEventCount": 0, "byFund": []
+            }))
+            .unwrap(),
+        );
+        let report = calculate_portfolio_performance(&original, &performance).unwrap();
+        assert_eq!(report.status, "available");
+        assert_eq!(report.invested.as_deref(), Some("500"));
+        assert_eq!(report.income.as_deref(), Some("81"));
+        assert_eq!(report.total_result.as_deref(), Some("71"));
+        assert_eq!(report.current_value.as_deref(), Some("550"));
+        assert_eq!(report.cash.income.as_deref(), Some("30"));
+        assert_eq!(report.fixed_income.income.as_deref(), Some("40"));
+        assert_eq!(performance.dividends, "11");
+        assert_eq!(performance.total_result.as_deref(), Some("1"));
+        assert!(performance.cdi.is_none() && performance.difference.is_none());
+    }
+
+    #[test]
+    fn fixed_income_only_wallet_and_observed_loss_are_accounted_for() {
+        let mut original = snapshot(vec![]);
+        original.funds.clear();
+        original.broker_position = Some(broker_fixed_income());
+        let report = calculate_portfolio_performance(&original, &empty_fii()).unwrap();
+        assert_eq!(report.status, "available");
+        assert_eq!(report.invested.as_deref(), Some("200"));
+        assert_eq!(report.income.as_deref(), Some("40"));
+        assert_eq!(report.current_value.as_deref(), Some("240"));
+        assert_eq!(report.total_result.as_deref(), Some("40"));
+        assert_eq!(report.total_return_percent.as_deref(), Some("20"));
+        let observation = original
+            .broker_position
+            .as_mut()
+            .unwrap()
+            .fixed_income
+            .latest_observation
+            .as_mut()
+            .unwrap();
+        observation.balance = "180".into();
+        observation.total_earnings = "-20".into();
+        observation.contributions[0].current_value = "180".into();
+        observation.contributions[0].earnings = "-20".into();
+        observation.contributions[0].return_percent = "-10".into();
+        let loss = calculate_portfolio_performance(&original, &empty_fii()).unwrap();
+        assert_eq!(loss.status, "available");
+        assert_eq!(loss.income.as_deref(), Some("-20"));
+        assert_eq!(loss.current_value.as_deref(), Some("180"));
+        assert_eq!(loss.total_result.as_deref(), Some("-20"));
+        assert_eq!(loss.total_return_percent.as_deref(), Some("-10"));
+    }
+
+    #[test]
+    fn unknown_legacy_fixed_basis_preserves_balance_and_known_subtotals() {
+        let mut original = snapshot(vec![pocket("cash", "220", Some("200"), Some("10"))]);
+        let mut position = broker_fixed_income();
+        position.fixed_income.latest_observation = None;
+        original.broker_position = Some(position);
+        let report = calculate_portfolio_performance(&original, &fii()).unwrap();
+        assert_eq!(report.status, "incomplete");
+        assert_eq!(report.fixed_income.status, "incomplete");
+        assert_eq!(report.fixed_income.balance, "250");
+        assert_eq!(
+            report.fixed_income.reference_date.as_deref(),
+            Some("2026-10-01")
+        );
+        assert_eq!(report.current_value.as_deref(), Some("560"));
+        assert_eq!(report.known_current_value, "560");
+        assert_eq!(report.known_invested, "300");
+        assert_eq!(report.known_income, "35");
+        assert_eq!(report.known_result, "25");
+        assert!(
+            report.invested.is_none() && report.income.is_none() && report.total_result.is_none()
+        );
+        assert!(report.total_return_percent.is_none());
+        assert!(
+            report.fixed_income.invested.is_none()
+                && report.fixed_income.income.is_none()
+                && report.fixed_income.result.is_none()
+        );
+        assert_eq!(report.issues, report.fixed_income.issues);
+        assert_eq!(
+            report.fixed_income.source_hash.as_deref(),
+            Some("a".repeat(64).as_str())
+        );
+    }
+
+    #[test]
+    fn absent_fixed_income_and_explicit_zero_observation_are_distinct() {
+        let original = snapshot(vec![]);
+        let absent = calculate_portfolio_performance(&original, &fii()).unwrap();
+        assert_eq!(absent.fixed_income.status, "empty");
+        assert_eq!(absent.fixed_income.balance, "0");
+        assert_eq!(absent.invested.as_deref(), Some("100"));
+        assert_eq!(absent.total_result.as_deref(), Some("-5"));
+        let mut original = original;
+        original.broker_position = Some(broker_fixed_income());
+        let observation = original
+            .broker_position
+            .as_mut()
+            .unwrap()
+            .fixed_income
+            .latest_observation
+            .as_mut()
+            .unwrap();
+        observation.balance = "0".into();
+        observation.total_earnings = "-200".into();
+        observation.contributions[0].current_value = "0".into();
+        observation.contributions[0].earnings = "-200".into();
+        observation.contributions[0].return_percent = "-100".into();
+        let zero = calculate_portfolio_performance(&original, &fii()).unwrap();
+        assert_eq!(zero.fixed_income.status, "available");
+        assert_eq!(zero.fixed_income.balance, "0");
+        assert_eq!(zero.invested.as_deref(), Some("300"));
+        assert_eq!(zero.current_value.as_deref(), Some("90"));
+        assert_eq!(zero.total_result.as_deref(), Some("-205"));
+        // No observation and an explicit zero old balance is an empty position,
+        // even if the old overview and earnings indicator contain large values.
+        let fixed = &mut original.broker_position.as_mut().unwrap().fixed_income;
+        fixed.latest_observation = None;
+        fixed.balance = "0".into();
+        let legacy_zero = calculate_portfolio_performance(&original, &fii()).unwrap();
+        assert_eq!(legacy_zero.fixed_income.status, "empty");
+        assert_eq!(legacy_zero.invested.as_deref(), Some("100"));
+    }
+
+    #[test]
+    fn distinct_cash_pocket_is_not_deduplicated_from_fixed_income_by_matching_values() {
+        let mut original = snapshot(vec![pocket("cash", "240", Some("200"), Some("0"))]);
+        original.funds.clear();
+        original.broker_position = Some(broker_fixed_income());
+        let report = calculate_portfolio_performance(&original, &empty_fii()).unwrap();
+        assert_eq!(report.invested.as_deref(), Some("400"));
+        assert_eq!(report.income.as_deref(), Some("80"));
+        assert_eq!(report.current_value.as_deref(), Some("480"));
+        assert_eq!(report.total_result.as_deref(), Some("80"));
+    }
+
+    #[test]
+    fn invalid_fixed_income_accounting_or_date_is_rejected_without_mutation() {
+        let mut original = snapshot(vec![]);
+        original.broker_position = Some(broker_fixed_income());
+        original
+            .broker_position
+            .as_mut()
+            .unwrap()
+            .fixed_income
+            .latest_observation
+            .as_mut()
+            .unwrap()
+            .total_earnings = "41".into();
+        assert!(matches!(
+            calculate_portfolio_performance(&original, &fii()),
+            Err(CoreError::Validation(_))
+        ));
+        let observation = original
+            .broker_position
+            .as_mut()
+            .unwrap()
+            .fixed_income
+            .latest_observation
+            .as_mut()
+            .unwrap();
+        observation.total_earnings = "40".into();
+        observation.reference_date = "2026-02-30".into();
+        assert!(matches!(
+            calculate_portfolio_performance(&original, &fii()),
+            Err(CoreError::Validation(_))
         ));
     }
 }

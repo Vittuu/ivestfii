@@ -382,7 +382,7 @@ pub(crate) fn execute(
                 "storedSourcesTruncated":source_count>50,
                 "storedSourcesInterpretation":"retrievedAt registra a inclusão local da fonte na conversa. excerpt preserva referenceDate/publishedAt e fetchedAt originais; não trate o registro local como uma nova consulta à fonte.",
                 "assumptions":{
-                    "walletScope":"FIIs, registros e caixinhas pertencem à carteira indicada em portfolio.wallet; wealthOverview mantém componentes separados entre carteiras.",
+                    "walletScope":"FIIs, registros, caixinhas e o pós-fixado identificado pertencem à carteira indicada em portfolio.wallet; wealthOverview mantém componentes separados entre carteiras.",
                     "cashBalances":"Saldos manuais, sem atualização automática por rendimentos projetados.",
                     "cdiRates":"Percentual contratado e referência anual fixados por caixinha. economicData contém consultas separadas datadas; elas não substituem automaticamente as taxas dos cadastros.",
                     "cashSimulations":"Use projetar_renda com cashPocketId e businessDays. O cenário mantém a taxa constante, usa capitalização diária em base 252 e valores brutos sem IR, IOF ou taxas.",
