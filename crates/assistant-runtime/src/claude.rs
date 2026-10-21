@@ -462,6 +462,24 @@ mod tests {
     }
 
     #[test]
+    fn fund_contribution_simulation_preserves_ids_budgets_and_unknown_results() {
+        let (arguments, output) = crate::analysis_instructions::fund_simulation_fixture();
+        let content = json!([{"type":"text","text":output["structuredContent"].to_string()}]);
+        let mut io = FakeIo {
+            input: VecDeque::from([
+                json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"fund-contribution-1","name":"mcp__ivestfii__simular_aporte","input":arguments}]}}),
+                json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"fund-contribution-1","content":content}]}}),
+                json!({"type":"result","subtype":"success","result":"Cenário com cotas inteiras e dados pendentes."}),
+            ]),
+            ..Default::default()
+        };
+        run(&config(), &mut io).unwrap();
+        assert_eq!(TOOLS.len(), 5);
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolStarted {name,input,..} if name == "mcp__ivestfii__simular_aporte" && input == &arguments)));
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolFinished {name,output,is_error:false,..} if name == "mcp__ivestfii__simular_aporte" && output == &content)));
+    }
+
+    #[test]
     fn analysis_tool_preserves_refresh_arguments_in_audit() {
         let arguments = json!({"conversationId":"canonical","refreshPublicDataIfDue":true});
         let mut io = FakeIo {

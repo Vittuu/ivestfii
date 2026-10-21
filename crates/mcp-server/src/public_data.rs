@@ -63,6 +63,17 @@ impl PublicData {
         )
     }
 
+    /// The purchase simulator reads only the selected wallet's existing cache.
+    /// Unlike collect_assets, this does not need credentials or CVM mappings.
+    pub fn cached_quotes(&self, snapshot: &PortfolioSnapshot) -> ivestfii_market_data::QuotePanel {
+        let symbols: std::collections::BTreeSet<String> = snapshot.funds.iter().map(|fund| fund.ticker.clone())
+            .chain(snapshot.broker_position.iter().flat_map(|position| position.listed_funds.holdings.iter().map(|holding| holding.ticker.clone())))
+            .collect();
+        ivestfii_market_data::QuoteService::new(self.directory.join("quotes.json"))
+            .and_then(|service| service.read_cache(&symbols.into_iter().collect::<Vec<_>>()))
+            .unwrap_or_else(|error| ivestfii_market_data::QuotePanel { errors: vec![error], ..Default::default() })
+    }
+
     pub fn performance_context(&self, snapshot: &PortfolioSnapshot) -> Value {
         let today = Utc::now()
             .with_timezone(&FixedOffset::west_opt(3 * 3600).expect("Brasília offset"))

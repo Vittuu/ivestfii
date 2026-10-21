@@ -83,7 +83,7 @@ O JSON de controle e o raciocínio privado não são mostrados como mensagem do 
 | `projetar_renda` | Executa uma simulação local e devolve suas premissas. `monthlyCotas` representa cotas por fundo por mês; o reinvestimento usa custo médio local. |
 | `recuperar_contexto` | Recupera contexto de uma conversa por `conversationId`, com `maxChars` e truncamentos explícitos. |
 | `preparar_analise_carteira` | Reúne perfil, completude, comparação da cotação com o preço médio (`purchaseAnalysis`), composição por classe (`allocationContext`), desempenho, contexto opcional e fontes datadas. `refreshPublicDataIfDue: true` reutiliza os caches e atualiza somente quando necessário, com os mesmos limites do app. |
-| `simular_aporte` | Calcula a composição por classe antes e depois de distribuir um orçamento entre FIIs, pós-fixado e caixinhas; não modifica a carteira nem calcula rendimento. |
+| `simular_aporte` | Calcula reservas por classe e, com `fundAllocations` opcional, cotas inteiras por fundo, valor utilizado, sobra e concentração antes/depois; não modifica a carteira nem calcula rendimento. |
 
 As cinco ferramentas são somente leitura sobre carteira e contexto. O runtime registra separadamente a auditoria de cada chamada em `assistant.sqlite`: `id`, `conversationId`, `taskId`, `toolName`, `input`, `output`, `status`, `startedAt` e `completedAt`. O frontend exibe prévias limitadas de payloads; o registro persistido conserva o conteúdo completo recebido.
 
@@ -109,13 +109,47 @@ Sugestões personalizadas dependem de `profileCompleteness` ou de respostas expl
 }
 ```
 
-O cenário reserva valores por classe, sem calcular quantidades de cotas ou preço de execução. A base usa o **valor de mercado dos fundos** e os **saldos informados do pós-fixado e das caixinhas**; custo de compra, depósitos brutos já resgatados, proventos e o total importado da corretora não são somados novamente. A ferramenta lê os caches existentes, não recebe flags de atualização e não faz novas consultas às APIs. A preparação anterior é que aplica a política limitada de atualização.
+Sem `fundAllocations`, o cenário mantém as reservas por classe, sem calcular quantidades de cotas ou preço de execução. A base usa o **valor de mercado dos fundos** e os **saldos informados do pós-fixado e das caixinhas**; custo de compra, depósitos brutos já resgatados, proventos e o total importado da corretora não são somados novamente. A ferramenta lê os caches existentes, não recebe flags de atualização e não faz novas consultas às APIs. A preparação anterior é que aplica a política limitada de atualização.
 
 A resposta tem `kind: "contribution-allocation"` e `simulation`. Cada linha de `simulation.rows` informa `currentValue`, `contribution`, `afterValue`, `beforePercent`, `afterPercent` e `changePercentagePoints`, além de `dates` e `issues`. `totalBefore` e `totalAfter` permitem conferir os totais. O assistente deve apresentar esses cálculos, sem inventar percentuais nem tratar o aporte como rendimento.
 
 `valuationBasis: "mixed-dates"` identifica um cenário que combina os últimos saldos conhecidos de datas diferentes: `asOf` fica nulo, e as datas originais permanecem explícitas. `undated` indica saldo sem data suficiente. Um componente desconhecido mantém totais e pesos completos indisponíveis; não vira zero. Em uma carteira comprovadamente vazia, o peso anterior pode ser nulo e o posterior ser calculado normalmente.
 
 A simulação não calcula rendimento futuro, impostos ou taxas, não envia ordens, não executa compras e não altera saldos, lançamentos ou perfil. A auditoria da chamada e a conversa continuam no histórico canônico ao trocar de provedor.
+
+### Cotas inteiras por fundo
+
+Para perguntar quantas cotas cabem no aporte, o assistente usa a mesma `simular_aporte`, sem acrescentar uma sexta ferramenta. Primeiro prepara o contexto com `refreshPublicDataIfDue: true`, lê perfil, concentração, preço médio e dados CVM disponíveis e propõe um orçamento por fundo. A comparação com seu custo não substitui a avaliação de risco e objetivos. Informes CVM mantêm CNPJ, tipo, competência e fonte: VP por cota não comprova valor justo, e os campos publicados não permitem inventar vacância, risco de crédito ou exposição por emissor.
+
+O campo opcional `fundAllocations` é uma lista de objetos contendo **somente `fundId` e `amount`**. Os IDs vêm da carteira selecionada, devem ser únicos, e os valores monetários devem somar exatamente `allocations.fiis`. O assistente não fornece cotações, datas ou quantidades: o Rust resolve os dados locais e as cotações salvas. Exemplo sintético, com IDs a substituir pelos retornados na preparação:
+
+```json
+{
+  "walletId": "ID_DA_CARTEIRA",
+  "amount": "300.00",
+  "allocations": {
+    "fiis": "100.00",
+    "fixedIncome": "50.00",
+    "cashPockets": "150.00"
+  },
+  "fundAllocations": [
+    { "fundId": "ID_FUNDO_1", "amount": "60.00" },
+    { "fundId": "ID_FUNDO_2", "amount": "40.00" }
+  ]
+}
+```
+
+Com esse campo, a resposta acrescenta `fundSimulation`, mantendo `simulation` como o cenário de **reservas por classe**. O novo bloco usa cotas inteiras dentro de cada orçamento, com preço positivo válido de até duas casas decimais, sem arredondar preços ou redistribuir sobras. Uma reserva insuficiente para uma cota deixa o valor disponível explicitamente, sem frações e sem ultrapassar o orçamento.
+
+`fundSimulation.rows` inclui todos os fundos, inclusive os sem novo aporte, para conferir a concentração. Cada linha preserva a cotação original em `quote`, sua `quoteDate` e `quoteStatus` (`usable`, `missing`, `stale` ou `invalid`), além de orçamento, `currentShares`, `sharesToBuy`, `afterShares`, `spentAmount` e `remainder`. Campos indisponíveis ficam nulos; não significam cotação, compra ou sobra igual a zero. `fiiBasisComplete`, `status`, `issues` e `assumptions` explicam limites da base. O modelo deve apresentar os cálculos retornados, sem calcular cotas por conta própria.
+
+A elegibilidade da cotação é uma **regra local deste cenário**: o horário original de consulta (`fetchedAt`) deve ter menos de **30 minutos**, e o horário de mercado (`quotedAt`) deve ter no máximo **7 dias**. Horários futuros ou inconsistentes, moeda/símbolo diferentes e preço inválido ou com fração de centavo são recusados. Essas janelas não representam um calendário de pregão da B3 nem garantem preço de execução. Uma consulta recente não renova a idade do preço de mercado. Prepare os dados pela política compartilhada; se limite ou falha impedir a atualização, preserve a lacuna. Repetir a simulação não consulta a API nem torna o cache mais recente.
+
+`beforeFiiPercent` e `afterFiiPercent` medem a concentração no conjunto dos fundos. `beforePortfolioPercent` e `afterPortfolioPercent` usam a base da carteira inteira. Esses pesos a mercado são diferentes dos pesos por custo de `purchaseAnalysis`; bases incompletas não são normalizadas só pelos fundos conhecidos.
+
+Em `fundSimulation.portfolioAllocation`, a contribuição de FIIs é apenas o valor utilizado nas cotas. `unallocatedCash` e a quarta linha **Sobra não aplicada** mantêm o dinheiro restante separado de FIIs, pós-fixado e caixinhas. Quando a base é completa, `totalAfter` conserva todo o aporte, incluindo essa sobra. A sobra não rende no cenário, não vira caixinha automaticamente e não é distribuída entre fundos. Os blocos `simulation` e `fundSimulation` são leituras diferentes do mesmo orçamento; não devem ser somados.
+
+O histórico e a auditoria continuam na mesma conversa ao alternar provedores. Datas mistas e lacunas mantêm suas limitações, e o resultado permanece hipotético: nenhuma compra, resgate ou alteração de saldo é realizada pela ferramenta.
 
 ## Processos e limites
 

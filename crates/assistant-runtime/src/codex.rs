@@ -842,6 +842,24 @@ mod tests {
     }
 
     #[test]
+    fn fund_contribution_simulation_preserves_ids_budgets_and_unknown_results() {
+        let (arguments, output) = crate::analysis_instructions::fund_simulation_fixture();
+        let tool = json!({"type":"mcpToolCall","id":"fund-contribution-1","server":"ivestfii",
+            "tool":"simular_aporte","arguments":arguments,"status":"completed","result":output});
+        let mut io = ready(vec![completed(
+            "completed",
+            vec![
+                tool,
+                answer("Cenário com cotas inteiras e dados pendentes.", None),
+            ],
+        )]);
+        run(&config(), &mut io).unwrap();
+        assert_eq!(TOOLS.len(), 5);
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolStarted {name,input,..} if name == "simular_aporte" && input == &arguments)));
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolFinished {name,output:actual,is_error:false,..} if name == "simular_aporte" && actual == &output)));
+    }
+
+    #[test]
     fn failed_or_interrupted_turn_never_succeeds_from_partial_text() {
         for status in ["failed", "interrupted"] {
             let mut io = ready(vec![completed(

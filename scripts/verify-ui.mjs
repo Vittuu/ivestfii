@@ -294,6 +294,55 @@ const chatFixture={
   messages:[{id:'message-a',conversationId:'conversation-a',role:'user',content:'Pergunta sintética sobre a carteira de teste.',provider:'codex',model:null,createdAt:'2020-02-03T12:00:00Z'},{id:'message-b',conversationId:'conversation-a',role:'assistant',content:'Resposta sintética preservada entre provedores.',provider:'codex',model:null,createdAt:'2020-02-03T12:02:00Z'}],
   tools:[{id:'tool-a',conversationId:'conversation-a',taskId:null,toolName:'preparar_analise_carteira',input:{},output:{status:'fixture'},status:'completed',startedAt:'2020-02-03T12:01:00Z',completedAt:'2020-02-03T12:01:01Z'}],runs:{},sequence:0,
 };
+// Literal native-result fixtures: the browser must present these calculations,
+// not derive cotas, spend, residual cash or concentration from current caches.
+const fundSimulationQuote=(symbol,price)=>({symbol,status:'cached',error:null,observation:{...quoteObservation,symbol,price,quotedAt:'2026-10-20T18:00:00Z',fetchedAt:'2026-10-21T12:00:00Z'}});
+const fundSimulationData={status:'simulation',kind:'contribution-allocation',wallet:{id:'wallet-original',name:'Carteira de teste'},simulation:{budget:'100'},fundSimulation:{
+  status:'calculated',budget:'50',spentAmount:'45',remainder:'5',fiiBasisComplete:true,
+  rows:[
+    {fundId:'fund-a',symbol:'TEST11',name:'Fundo sintético A',declaredSector:'Logística',classificationKnown:true,budget:'50',quote:fundSimulationQuote('TEST11','9'),quoteStatus:'cached',quoteDate:'2026-10-20',price:'9',currentShares:'10',sharesToBuy:'5',afterShares:'15',spentAmount:'45',remainder:'5',currentValue:'90',afterValue:'135',beforeFiiPercent:'45',afterFiiPercent:'55.10',beforePortfolioPercent:'18',afterPortfolioPercent:'22.50',issues:[]},
+    {fundId:'fund-b',symbol:'MOCK11',name:'Fundo sintético B',declaredSector:'Fundos',classificationKnown:false,budget:'0',quote:fundSimulationQuote('MOCK11','11'),quoteStatus:'cached',quoteDate:'2026-10-20',price:'11',currentShares:'10',sharesToBuy:'0',afterShares:'10',spentAmount:'0',remainder:'0',currentValue:'110',afterValue:'110',beforeFiiPercent:'55',afterFiiPercent:'44.90',beforePortfolioPercent:'22',afterPortfolioPercent:'18.33',issues:[]},
+    {fundId:'fund-zero',symbol:'ZERO11',name:'Fundo ainda sem cotas',declaredSector:'',classificationKnown:false,budget:'0',quote:null,quoteStatus:'unavailable',quoteDate:null,price:null,currentShares:'0',sharesToBuy:'0',afterShares:'0',spentAmount:'0',remainder:'0',currentValue:'0',afterValue:'0',beforeFiiPercent:'0',afterFiiPercent:'0',beforePortfolioPercent:'0',afterPortfolioPercent:'0',issues:[]},
+  ],
+  portfolioAllocation:{status:'calculated',totalBefore:'500',totalAfter:'600',unallocatedCash:'5',asOf:'2026-10-20',fromDate:'2026-10-20',toDate:'2026-10-20',valuationBasis:'same-date',issues:[],rows:[
+    {kind:'fiis',name:'FIIs',currentValue:'200',contribution:'45',afterValue:'245',beforePercent:'40',afterPercent:'40.83'},
+    {kind:'fixedIncome',name:'Pós-fixado',currentValue:'200',contribution:'30',afterValue:'230',beforePercent:'40',afterPercent:'38.33'},
+    {kind:'cashPockets',name:'Caixinhas',currentValue:'100',contribution:'20',afterValue:'120',beforePercent:'20',afterPercent:'20'},
+    {kind:'unallocatedCash',name:'Saldo livre',currentValue:'0',contribution:'5',afterValue:'5',beforePercent:'0',afterPercent:'0.83'},
+  ]},issues:[],assumptions:['Valores sintéticos, sem alteração da carteira.'],
+}};
+function fundSimulationTool(mode){
+  const data=structuredClone(fundSimulationData);
+  if(mode==='fund-simulation-direct')data.wallet.name='Carteira <img src=x onerror=globalThis.simulationInjected=true>';
+  if(mode==='fund-simulation-missing'){
+    Object.assign(data.fundSimulation,{status:'incomplete',spentAmount:null,remainder:null,fiiBasisComplete:false,issues:['Falta cotação para o fundo com orçamento informado.']});
+    Object.assign(data.fundSimulation.rows[0],{quote:null,quoteStatus:'unavailable',quoteDate:null,price:null,sharesToBuy:null,afterShares:null,spentAmount:null,remainder:null,currentValue:null,afterValue:null,issues:['Cotação indisponível.']});
+    for(const row of data.fundSimulation.rows)for(const key of ['beforeFiiPercent','afterFiiPercent','beforePortfolioPercent','afterPortfolioPercent'])row[key]=null;
+    Object.assign(data.fundSimulation.portfolioAllocation,{status:'incomplete',totalBefore:null,totalAfter:null,unallocatedCash:null,asOf:null,valuationBasis:'undated'});
+    for(const row of data.fundSimulation.portfolioAllocation.rows){row.beforePercent=null;row.afterPercent=null;if(['fiis','unallocatedCash'].includes(row.kind)){row.currentValue=null;row.contribution=null;row.afterValue=null;}}
+  }
+  if(mode==='fund-simulation-new-missing'){
+    const report=data.fundSimulation;Object.assign(report,{status:'incomplete',spentAmount:null,remainder:null,issues:['Falta cotação para o fundo novo, sem apagar os valores anteriores.']});
+    Object.assign(report.rows[0],{budget:'0',sharesToBuy:'0',afterShares:'10',spentAmount:'0',remainder:'0',afterValue:'90'});
+    Object.assign(report.rows[2],{budget:'50',sharesToBuy:null,afterShares:null,spentAmount:null,remainder:null,afterValue:null});
+    for(const row of report.rows){row.afterFiiPercent=null;row.afterPortfolioPercent=null;}
+    Object.assign(report.portfolioAllocation,{status:'incomplete',totalAfter:null,unallocatedCash:null,asOf:null,valuationBasis:'undated'});
+    for(const row of report.portfolioAllocation.rows){row.afterPercent=null;if(['fiis','unallocatedCash'].includes(row.kind)){row.contribution=null;row.afterValue=null;}}
+  }
+  if(mode==='fund-simulation-empty'){
+    const report=data.fundSimulation;Object.assign(report,{budget:'0',spentAmount:'0',remainder:'0',rows:[]});
+    Object.assign(report.portfolioAllocation,{totalBefore:'300',totalAfter:'400',unallocatedCash:'0'});
+    report.portfolioAllocation.rows=[
+      {kind:'fiis',name:'FIIs',currentValue:'0',contribution:'0',afterValue:'0',beforePercent:'0',afterPercent:'0'},
+      {kind:'fixedIncome',name:'Pós-fixado',currentValue:'200',contribution:'100',afterValue:'300',beforePercent:'66.67',afterPercent:'75'},
+      {kind:'cashPockets',name:'Caixinhas',currentValue:'100',contribution:'0',afterValue:'100',beforePercent:'33.33',afterPercent:'25'},
+      {kind:'unallocatedCash',name:'Saldo livre',currentValue:'0',contribution:'0',afterValue:'0',beforePercent:'0',afterPercent:'0'},
+    ];
+  }
+  const output=mode==='fund-simulation-claude'?[{type:'text',text:JSON.stringify(data)}]:mode==='fund-simulation-direct'?data:{isError:false,structuredContent:data,content:[{type:'text',text:JSON.stringify(data)}]};
+  const input=mode==='fund-simulation-empty'?{amount:'100',allocations:{fiis:'0',fixedIncome:'100',cashPockets:'0'},fundAllocations:[]}:{amount:'100',allocations:{fiis:'50',fixedIncome:'30',cashPockets:'20'},fundAllocations:[{fundId:mode==='fund-simulation-new-missing'?'fund-zero':'fund-a',amount:'50'}]};
+  return {id:'fund-simulation-tool',conversationId:'conversation-a',taskId:null,toolName:mode==='fund-simulation-claude'?'mcp__ivestfii__simular_aporte':'simular_aporte',input,output,status:'completed',startedAt:'2026-10-21T12:01:00Z',completedAt:'2026-10-21T12:01:01Z'};
+}
 const pages = ['Visão geral', 'FIIs e posições', 'Caixinhas CDI', 'Mercado', 'Projeções', 'Assistente', 'Configurações'];
 
 // Older IPC fixtures compose cash with the selected FII response so edits can
@@ -497,6 +546,7 @@ globalThis.__uiTest = { snapshot: ${JSON.stringify(initial)}, otherSnapshot: ${J
 const wallets=${JSON.stringify(wallets)};
 Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformance)},otherPerformance:{...${JSON.stringify(performance)},portfolioBenchmark:${JSON.stringify(benchmarkOther)},${mode.startsWith('wallet-evolution')?`portfolioEvolution:${JSON.stringify(evolutionOther)},`:''}invested:'200',dividends:'0',marketValue:'220',priceResult:'20',totalResult:'20',totalReturnPercent:'10',cdi:{endingValue:'210',result:'10',returnPercent:'5'},difference:'10'},deferPerformance:false,performanceWaiters:[],deferPerformanceRead:${mode === 'performance-loading'},performanceReadWaiters:[],failPerformance:false});
 Object.assign(globalThis.__uiTest,{chat:${JSON.stringify(chatFixture)},deferChatStart:false,chatStartWaiters:[],eventSubscriptions:[],eventCalls:[]});
+${mode.startsWith('fund-simulation')?`globalThis.__uiTest.chat.tools.push(${JSON.stringify(fundSimulationTool(mode))});`:''}
 Object.assign(globalThis.__uiTest,{automaticMode:${JSON.stringify(mode)},deferAutoWallets:${JSON.stringify(automaticMode?['wallet-original']:[])},autoWaiters:[],publicCache:{shared:{economics:${JSON.stringify(economics)},news:${JSON.stringify(news)}},wallets:{}},autoCheckedAt:'2026-10-20T12:00:00Z'});
 ${mode.startsWith('market-price')?`globalThis.__uiTest.publicCache.wallets={'wallet-original':{quotes:${JSON.stringify(marketPricePanel)}},'wallet-other':{quotes:${JSON.stringify({...marketPricePanel,items:marketPricePanel.items.slice(0,1)})}}};`:''}
 Object.assign(globalThis.__uiTest,{incomeReport:${JSON.stringify(mode==='income-api-date-required'?incomeApiUnknownReport:mode==='income-api'?incomeApiReport:{months:[]})}});
@@ -753,7 +803,7 @@ try {
     if(sidebarPreference!==undefined)await context.addInitScript(value=>localStorage.setItem('ivestfii.sidebarCollapsed',value),sidebarPreference);
     const page=await context.newPage();page.setDefaultTimeout(12000);
     const externalRequests=[];
-    if(mode==='web'||mode.startsWith('income')||mode.startsWith('market-price')||mode.startsWith('profile-contributions'))await page.route('**/*',route=>{
+    if(mode==='web'||mode.startsWith('income')||mode.startsWith('market-price')||mode.startsWith('profile-contributions')||mode.startsWith('fund-simulation'))await page.route('**/*',route=>{
       const url=new URL(route.request().url());
       if(/^https?:$/.test(url.protocol)&&url.origin!==base){externalRequests.push(url.href);return route.fulfill({status:503,contentType:'text/plain',body:'External requests are blocked in the synthetic web preview.'});}
       return route.fallback();
@@ -1324,6 +1374,7 @@ try {
     assert.match(seed,/diversificação.*curto e longo prazo.*riscos.*orçamento disponível.*perfil.*pergunte antes de sugerir valores e quantidades/);
     assert.match(seed,/ferramentas disponíveis para simular a divisão do aporte entre FIIs, pós-fixado e caixinhas/);
     assert.match(seed,/tabela.*valores antes.*aporte.*valores depois.*percentuais de composição antes e depois/);
+    assert.match(seed,/cada FII.*cotas inteiras.*cotação disponível.*valor utilizado.*sobra.*dentro dos FIIs.*carteira inteira.*saldo livre/);
     assert.doesNotMatch(seed,/wallet-original|walletId|purchaseAnalysis|MCP|preparar_analise|simular_aporte|\{|\}/);
     assert.equal(await isFocused(draft()),true);assert.equal((await calls(page,'start_chat_turn')).length,0);
     assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.chat.messages),before.messages);
@@ -1377,6 +1428,73 @@ try {
       await noOverflow(smallPage,'contribution-planning-'+viewport.width+'-no-global-overflow');await shot(smallPage,'contribution-planning-'+viewport.width,{fullPage:false});await noUnexpectedCommands(smallPage);await small.context.close();
     }
     check('contribution-planning-secondary-button-draft-and-transcript-stay-accessible-on-mobile-and-zoom');
+    await verifyFundContributionResults();
+  }
+
+  async function verifyFundContributionResults(){
+    const cardOf=page=>page.locator('.fund-contribution-simulation');
+    const showCardTop=async page=>{await cardOf(page).evaluate(element=>{const stage=element.closest('.chat-stage');stage.scrollTop+=element.getBoundingClientRect().top-stage.getBoundingClientRect().top;return new Promise(resolve=>requestAnimationFrame(resolve));});};
+    const fundRow=(page,symbol)=>cardOf(page).locator('.fund-simulation-funds tbody tr').filter({has:page.locator('.ticker',{hasText:new RegExp('^'+symbol+'$')})});
+    const walletsAndLedger=page=>page.evaluate(()=>({snapshot:structuredClone(globalThis.__uiTest.snapshot),other:structuredClone(globalThis.__uiTest.otherSnapshot),messages:structuredClone(globalThis.__uiTest.chat.messages)}));
+    for(const mode of ['fund-simulation-structured','fund-simulation-claude','fund-simulation-direct']){
+      const fixture=await openPage(mode,{width:1440,height:1000}),page=fixture.page;
+      const original=await walletsAndLedger(page);await navigate(page,'Assistente');
+      const audit=page.locator('.tool-audit');await audit.evaluate(element=>{element.open=false;});
+      const card=cardOf(page);await card.waitFor();assert.equal(await card.count(),1);assert.equal(await audit.getAttribute('open'),null,'The result is visible without opening technical activity');
+      assert.equal(await card.getAttribute('data-wallet-id'),'wallet-original');await card.getByRole('heading',{name:'Simulação do aporte',exact:true}).waitFor();
+      if(mode==='fund-simulation-direct'){assert.equal(await card.locator('img,script').count(),0);assert.equal(await page.evaluate(()=>globalThis.simulationInjected),undefined);await textMatches(card.locator('.fund-simulation-head'),/Carteira <img src=x onerror=/);}
+      await textMatches(fundRow(page,'TEST11'),/R\$ 9,00.*20\/10\/2026.*Cotação salva.*5 cotas · R\$ 45,00.*Cotas: 10 → 15.*Reservado: R\$ 50,00 · sobra: R\$ 5,00.*Nos FIIs: 45,00% → 55,10%.*Na carteira: 18,00% → 22,50%/);
+      await textMatches(fundRow(page,'MOCK11'),/0 cotas · R\$ 0,00.*Cotas: 10 → 10.*Nos FIIs: 55,00% → 44,90%/);
+      await textMatches(fundRow(page,'ZERO11'),/Sem cotação.*0 cotas · R\$ 0,00.*Cotas: 0 → 0/);
+      assert.equal(await card.locator('.fund-simulation-funds tbody tr').count(),3,'Keep funds with no new allocation so concentration remains visible');
+      const classes=card.locator('.fund-simulation-classes');await textMatches(classes,/Caixinhas.*R\$ 100,00 → R\$ 120,00.*Aporte: R\$ 20,00.*Saldo livre.*R\$ 0,00 → R\$ 5,00.*Aporte: R\$ 5,00.*Total R\$ 500,00 → R\$ 600,00/);
+      await textMatches(card.locator('.fund-simulation-foot').first(),/Composição em 20\/10\/2026.*sem garantia de preço de execução.*Saldo livre.*não é aplicado em caixinhas/);
+      assert.match(await tip(fundRow(page,'TEST11'),'R$ 9,00'),/Fonte: brapi.*2026-10-20T18:00:00Z.*Coleta: 2026-10-21T12:00:00Z.*não é preço de execução/);
+      assert.equal((await calls(page,'start_chat_turn')).length,0);await noIndividualAutomaticRefresh(page);assert.deepEqual(await walletsAndLedger(page),original);assert.deepEqual(fixture.externalRequests,[]);
+      check(mode+'-renders-native-whole-share-spend-residual-and-both-weight-bases-without-opening-audit-or-recalculating');
+      if(mode==='fund-simulation-structured'){
+        await page.getByRole('textbox',{name:'Sua pergunta',exact:true}).fill('Rascunho que deve permanecer.');
+        await page.getByRole('combobox',{name:'Provedor de IA',exact:true}).selectOption('claude');await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-other');
+        assert.equal(await card.getAttribute('data-wallet-id'),'wallet-original');await textMatches(fundRow(page,'TEST11'),/R\$ 9,00.*5 cotas · R\$ 45,00/);assert.equal(await page.getByRole('textbox',{name:'Sua pergunta',exact:true}).inputValue(),'Rascunho que deve permanecer.');
+        await page.getByRole('button',{name:'Nova conversa',exact:true}).click();await card.waitFor({state:'detached'});await page.getByRole('button',{name:/^Conversa sintética preservada/}).click();await card.waitFor();assert.equal(await card.count(),1);
+        const polls=(await calls(page,'get_tool_events')).length;
+        await page.evaluate(()=>{const test=globalThis.__uiTest,good=test.chat.tools.find(tool=>tool.id==='fund-simulation-tool');test.chat.tools.push(structuredClone(good));for(const [id,patch] of [
+          ['bad-error',{output:{isError:true,structuredContent:good.output.structuredContent}}],['bad-failed',{status:'failed'}],['bad-running',{status:'running'}],['bad-tool',{toolName:'outra_ferramenta'}],['bad-truncated',{output:[{type:'text',text:'{"status":"simulation","kind":"contribution-allocation"'}]}],['bad-decimal',{output:{...good.output,structuredContent:{...good.output.structuredContent,fundSimulation:{...good.output.structuredContent.fundSimulation,spentAmount:'NaN'}}}}],
+        ])test.chat.tools.push({...structuredClone(good),id,...patch});});
+        await page.waitForFunction(count=>globalThis.__uiTest.calls.filter(item=>item.command==='get_tool_events').length>count,polls);assert.equal(await card.count(),1,'Duplicate events and invalid, failed, running, foreign or truncated results must not create cards');
+        await noOverflow(page,'fund-simulation-desktop-no-overflow');await showCardTop(page);await shot(page,'desktop-fund-contribution-result',{fullPage:false});
+        await navigate(page,'Mercado');await page.getByRole('button',{name:'Abrir assistente',exact:true}).click();const drawer=page.getByRole('dialog',{name:'Assistente lateral',exact:true});await drawer.waitFor();await card.waitFor();await showCardTop(page);await noOverflow(page,'fund-simulation-drawer-no-overflow');await shot(page,'drawer-fund-contribution-result',{fullPage:false});
+        check('fund-simulation-history-provider-wallet-and-page-drawer-switch-preserve-the-recorded-scenario-and-deduplicate-tool-events');
+      }
+      await noUnexpectedCommands(page);await fixture.context.close();
+    }
+    const missing=await openPage('fund-simulation-missing',{width:1440,height:1000}),missingPage=missing.page;await navigate(missingPage,'Assistente');const missingCard=cardOf(missingPage);await missingCard.waitFor();
+    await textMatches(fundRow(missingPage,'TEST11'),/Sem cotação.*Compra pendente.*Cotas: 10 → —.*sobra: —.*Nos FIIs: — → —/);
+    await textMatches(missingCard.locator('.fund-simulation-summary'),/Compras de FIIs —.*Saldo livre —/);await missingCard.getByText('Há dados pendentes na simulação.',{exact:true}).waitFor();
+    await textMatches(fundRow(missingPage,'ZERO11'),/0 cotas · R\$ 0,00/);assert.equal(await missingCard.getByText('NaN',{exact:true}).count(),0);
+    await noOverflow(missingPage,'fund-simulation-missing-no-overflow');await shot(missingPage,'fund-contribution-result-pending',{fullPage:false});await noUnexpectedCommands(missingPage);await missing.context.close();
+    check('fund-simulation-missing-quote-keeps-unknown-spend-shares-weights-and-residual-distinct-from-real-zero');
+    for(const mode of ['fund-simulation-new-missing','fund-simulation-empty']){
+      const fixture=await openPage(mode,{width:1440,height:1000}),page=fixture.page;await navigate(page,'Assistente');const card=cardOf(page);await card.waitFor();
+      if(mode==='fund-simulation-new-missing'){
+        await textMatches(fundRow(page,'TEST11'),/Nos FIIs: 45,00% → —.*Na carteira: 18,00% → —/);
+        await textMatches(fundRow(page,'ZERO11'),/Compra pendente.*Cotas: 0 → —.*Nos FIIs: 0,00% → —/);
+        await textMatches(card.locator('.fund-simulation-classes'),/FIIs R\$ 200,00 → —.*40,00% → —.*Total R\$ 500,00 → —/);
+      }else{
+        await card.getByText('Nenhum FII nesta simulação.',{exact:true}).waitFor();await textMatches(card.locator('.fund-simulation-summary'),/Compras de FIIs R\$ 0,00.*Saldo livre R\$ 0,00/);
+        await textMatches(card.locator('.fund-simulation-classes'),/Pós-fixado.*R\$ 200,00 → R\$ 300,00.*Aporte: R\$ 100,00.*66,67% → 75,00%.*Total R\$ 300,00 → R\$ 400,00/);
+      }
+      assert.equal((await calls(page,'start_chat_turn')).length,0);await noIndividualAutomaticRefresh(page);await noUnexpectedCommands(page);await fixture.context.close();
+    }
+    check('fund-simulation-known-before-weights-survive-unknown-new-fund-price-and-empty-fund-base-retains-whole-wallet-scenario');
+    for(const viewport of [{width:375,height:812},{width:720,height:500}]){
+      const label=viewport.width===375?'mobile375':'zoom200';const small=await openPage('fund-simulation-'+label+(viewport.width===720?'-zoom-200':''),viewport,{expandedSidebar:false}),page=small.page;
+      await page.getByRole('button',{name:'Abrir assistente',exact:true}).click();const card=cardOf(page);await card.waitFor();await card.scrollIntoViewIfNeeded();
+      await noOverflow(page,'fund-simulation-'+label+'-no-global-overflow');const horizontal=card.getByRole('region',{name:'Compras simuladas por fundo, role horizontalmente para ver todas as colunas',exact:true});await horizontal.focus();await horizontal.evaluate(element=>{element.scrollLeft=element.scrollWidth;});
+      assert.ok(await horizontal.evaluate(element=>element.scrollWidth<=element.clientWidth||element.scrollLeft>0),'If needed, the result scrolls locally to reveal composition without scrolling the document');
+      await horizontal.evaluate(element=>{element.scrollLeft=0;});await showCardTop(page);await shot(page,label+'-fund-contribution-result',{fullPage:false});assert.equal((await calls(page,'start_chat_turn')).length,0);await noIndividualAutomaticRefresh(page);assert.deepEqual(small.externalRequests,[]);await noUnexpectedCommands(page);await small.context.close();
+    }
+    check('fund-simulation-visible-result-supports-mobile-drawer-and-zoom-with-labeled-local-horizontal-scroll');
   }
 
   async function verifyAutomaticPublicData(){

@@ -348,6 +348,29 @@ mod tests {
     }
 
     #[test]
+    fn fund_contribution_simulation_preserves_ids_budgets_and_unknown_results() {
+        let (arguments, output) = crate::analysis_instructions::fund_simulation_fixture();
+        let mut io = FakeIo {
+            input: VecDeque::from([
+                envelope(
+                    json!({"action":"tool","tool":"simular_aporte","arguments":arguments.to_string(),"text":""}),
+                ),
+                answer(),
+            ]),
+            tool_result: Some(Ok(output.clone())),
+            ..Default::default()
+        };
+        run(&config(), &mut io).unwrap();
+        assert_eq!(TOOLS.len(), 5);
+        assert_eq!(io.tools, vec![("simular_aporte".into(), arguments.clone())]);
+        let forwarded: Value =
+            serde_json::from_str(io.sent[1]["message"]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(forwarded["arguments"], arguments);
+        assert_eq!(forwarded["result"], output);
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolFinished {name,output:actual,is_error:false,..} if name == "simular_aporte" && actual == &output)));
+    }
+
+    #[test]
     fn executes_mcp_hook_and_keeps_json_out_of_chat() {
         let mut io = FakeIo {
             input: VecDeque::from([

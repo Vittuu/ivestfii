@@ -1,0 +1,20 @@
+.assistant-page .fund-contribution-simulation { min-width: 0; max-width: 100%; margin: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface); font-size: var(--fs-12); }
+.fund-contribution-simulation .fund-simulation-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); padding: var(--sp-3); border-bottom: 1px solid var(--line); }
+.fund-contribution-simulation h3 { margin: 0; font-size: var(--fs-13); font-weight: 600; }
+.fund-contribution-simulation .fund-simulation-head > span { color: var(--text-2); overflow-wrap: anywhere; }
+.fund-contribution-simulation .fund-simulation-summary { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0; padding: var(--sp-3); }
+.fund-contribution-simulation .fund-simulation-summary > div { min-width: 0; flex: 1 1 110px; }
+.fund-contribution-simulation dt { color: var(--text-3); }
+.fund-contribution-simulation dd { margin: var(--sp-1) 0 0; font-family: var(--font-num); overflow-wrap: anywhere; }
+.fund-contribution-simulation caption { text-align: left; padding: var(--sp-2) var(--sp-3); color: var(--text-2); background: var(--surface-2); font-size: var(--fs-12); }
+.fund-contribution-simulation .table-wrap { border-top: 1px solid var(--line); }
+.fund-contribution-simulation table { min-width: 580px; font-size: var(--fs-12); }
+.fund-contribution-simulation :is(th, td) { padding: var(--sp-2) var(--sp-3); vertical-align: top; }
+.fund-contribution-simulation tbody th[scope='row'] { padding: var(--sp-2) var(--sp-3); font-weight: 500; color: var(--text-1); white-space: normal; }
+.fund-contribution-simulation .fund-simulation-number { font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fund-contribution-simulation .fund-simulation-note { display: block; margin-top: var(--sp-1); color: var(--text-3); font-weight: 400; line-height: 1.5; }
+.fund-contribution-simulation .fund-simulation-source { display: block; }
+.fund-contribution-simulation .fund-simulation-pending { padding: var(--sp-2) var(--sp-3); color: var(--warn); border-top: 1px solid var(--line); }
+.fund-contribution-simulation .fund-simulation-foot { padding: var(--sp-2) var(--sp-3); color: var(--text-3); line-height: 1.5; overflow-wrap: anywhere; }
+.fund-contribution-simulation .fund-simulation-foot + .fund-simulation-foot { padding-top: 0; }
+.fund-contribution-simulation tfoot th { color: var(--text-1); border-top: 1px solid var(--line); border-bottom: 0; font-weight: 500; }

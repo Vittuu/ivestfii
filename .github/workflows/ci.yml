@@ -73,6 +73,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Migração sintética falhou.' }
           python -B scripts/verify-mcp.py --desktop --binary target/release/IvestFII.exe
           if ($LASTEXITCODE -ne 0) { throw 'Teste MCP falhou.' }
+          python -B scripts/verify-fund-contribution.py --binary target/release/IvestFII.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Simulação de cotas inteiras pelo MCP falhou.' }
       - name: Guardar aplicativo e relatório de teste
         uses: actions/upload-artifact@v4
         with:

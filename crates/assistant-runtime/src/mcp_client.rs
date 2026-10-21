@@ -348,6 +348,25 @@ mod tests {
     }
 
     #[test]
+    fn fund_contribution_simulation_preserves_ids_budgets_and_unknown_results() {
+        let (arguments, output) = crate::analysis_instructions::fund_simulation_fixture();
+        let mut client = Client::connect(ready(vec![response(3, output.clone())])).unwrap();
+        assert_eq!(
+            client.call_tool("simular_aporte", &arguments).unwrap(),
+            output
+        );
+        assert_eq!(client.definitions().unwrap().as_array().unwrap().len(), 5);
+        assert_eq!(
+            client.transport.sent[3]["params"],
+            json!({"name":"simular_aporte","arguments":arguments})
+        );
+        assert_eq!(
+            *client.transport.timeouts.last().unwrap(),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
     fn rejects_foreign_or_mutating_inventory() {
         for inventory in [
             json!({"tools":[]}),

@@ -66,7 +66,7 @@ pub(crate) fn definitions() -> Vec<Value> {
         (
             NAMES[4],
             "Simular divisão de um aporte",
-            "Calcula, na carteira selecionada, valores e percentuais antes e depois de um aporte dividido entre FIIs, pós-fixado e caixinhas. Informe amount positivo e allocations com os três valores monetários, não percentuais, somando exatamente amount. Usa saldos atuais datados de mercado, não custo ou depósitos acumulados. É cenário instantâneo por classe: não compra cotas, não simula rendimento, impostos ou taxas e não altera saldos. Leia status, valuationBasis, datas e issues: saldos desconhecidos impedem totais e pesos; datas distintas identificam cenário sobre últimos valores conhecidos, sem extrapolação. Consulte preparar_analise_carteira antes de recomendar uma divisão personalizada; esta ferramenta não atualiza APIs e não gera recomendação.",
+            "Calcula valores e percentuais antes e depois do aporte na carteira selecionada. amount positivo e allocations (FIIs, pós-fixado, caixinhas) são reais em texto, somando exatamente amount. Opcional fundAllocations detalha o orçamento de FIIs por fundId cadastrado nesta carteira: os valores positivos devem somar exatamente allocations.fiis; não envie preços nem quantidades. O Rust obtém cotações do cache e calcula cotas inteiras, gasto, sobra e pesos por fundo. fundSimulation.portfolioAllocation usa somente o gasto efetivo nos FIIs e mostra a sobra não aplicada separada, sem criar caixinha; simulation continua o cenário de reservas por classe. Ausência de cotação apta ou de base completa mantém lacunas. Consulte preparar_analise_carteira com atualização limitada antes de propor a divisão conforme perfil e diversificação. Não atualiza APIs, recomenda ativos, envia ordens ou altera saldos. Preserve fontes, horários, atrasos, datas mistas e issues; não é preço de execução nem projeção de rendimento.",
             schema(json!({
                 "walletId":wallet_field.clone(),
                 "amount":{"type":"string","minLength":1,"maxLength":32,"description":"Valor total positivo em reais, com ponto decimal e no máximo duas casas; exemplo 300.00."},
@@ -74,7 +74,11 @@ pub(crate) fn definitions() -> Vec<Value> {
                     "fiis":{"type":"string","minLength":1,"maxLength":32,"description":"Valor em reais reservado aos FIIs; zero permitido."},
                     "fixedIncome":{"type":"string","minLength":1,"maxLength":32,"description":"Valor em reais reservado ao pós-fixado; zero permitido."},
                     "cashPockets":{"type":"string","minLength":1,"maxLength":32,"description":"Valor em reais reservado às caixinhas; zero permitido."}
-                }}
+                }},
+                "fundAllocations":{"type":"array","maxItems":100,"description":"Opcional: orçamentos monetários positivos por FII cadastrado na carteira selecionada. Soma exata = allocations.fiis; para zero use []. Ausente conserva o cenário por classes. IDs únicos; o backend resolve ticker, preço e cotas.","items":{"type":"object","additionalProperties":false,"required":["fundId","amount"],"properties":{
+                    "fundId":{"type":"string","minLength":1,"maxLength":100},
+                    "amount":{"type":"string","minLength":1,"maxLength":32}
+                }}}
             }), &["amount","allocations"]),
         ),
     ]
@@ -207,12 +211,19 @@ pub(crate) fn execute(
             scoped_snapshot(catalog, wallet_id)
         }
         "simular_aporte" => {
-            validate_keys(arguments, &["walletId", "amount", "allocations"])?;
+            validate_keys(arguments, &["walletId", "amount", "allocations", "fundAllocations"])?;
             let wallet_id = wallet_id(arguments, default_wallet_id)?;
             let wallet = catalog.get(Some(wallet_id)).map_err(|error| error.to_string())?;
             let repository = catalog.repository(Some(wallet_id)).map_err(|error| error.to_string())?;
             let mut input = arguments.clone();
             input.remove("walletId");
+            let fund_allocations = input.remove("fundAllocations").map(|value| {
+                serde_json::from_value::<Vec<ivestfii_core::fund_contribution::FundAllocation>>(value)
+                    .map_err(|error| format!("Orçamentos por fundo inválidos: {error}"))
+            }).transpose()?;
+            if fund_allocations.as_ref().is_some_and(|allocations| allocations.len() > 100) {
+                return Err("A simulação permite no máximo 100 orçamentos por fundo.".into());
+            }
             let input: ivestfii_core::contribution_simulation::ContributionSimulationInput =
                 serde_json::from_value(Value::Object(input)).map_err(|error| format!("Divisão do aporte inválida: {error}"))?;
             let snapshot = repository.snapshot().map_err(|error| error.to_string())?;
@@ -220,14 +231,26 @@ pub(crate) fn execute(
             let bases = crate::contribution_context::simulation_bases(&snapshot, &performance);
             let simulation = ivestfii_core::contribution_simulation::simulate_contribution(&input, &bases)
                 .map_err(|error| error.to_string())?;
+            let fund_simulation = fund_allocations.map(|allocations| {
+                let quotes = public_data.cached_quotes(&snapshot);
+                let fund_bases = crate::fund_contribution_context::fund_bases(&snapshot, &quotes, chrono::Utc::now());
+                ivestfii_core::fund_contribution::simulate_fund_contribution(&input, &bases, &allocations, &fund_bases)
+                    .map_err(|error| error.to_string())
+            }).transpose()?;
             let profile = serde_json::to_value(repository.investment_profile().map_err(|error| error.to_string())?)
                 .map_err(|error| error.to_string())?;
-            Ok(json!({
+            let mut result = json!({
                 "status":"simulation","kind":"contribution-allocation","wallet":wallet,
                 "simulation":simulation,"profileCompleteness":profile_completeness(&profile),
                 "recommendationGenerated":false,"refreshRequested":false,
                 "interpretation":"Cenário de valores reservados por classe sobre os últimos saldos conhecidos. Não representa compras executadas, quantidades de cotas, rendimento projetado ou garantia de alocação adequada ao perfil. As datas e a qualidade da base estão na simulação. O aporte é dinheiro adicional; valores já no saldo não são somados outra vez. Os registros financeiros permanecem intactos."
-            }))
+            });
+            if let Some(fund_simulation) = fund_simulation {
+                result["fundSimulation"] = json!(fund_simulation);
+                result["quotePolicy"] = json!({"cacheMaxAgeSeconds":1800,"marketMaxAgeDays":7,"sourceCadenceMinutes":30,"noNetworkRequests":true,"interpretation":"Janelas locais de elegibilidade do cenário, sem calendário de pregão presumido. Consulta recente não transforma horário de mercado antigo em preço recente. Cotações públicas podem ter atraso; prepare os dados com a política compartilhada antes de simular."});
+                result["interpretation"] = json!("Simulação sem ordens ou alteração financeira. simulation mantém as reservas por classe; fundSimulation calcula cotas inteiras, gastos e sobras dos FIIs. Para a composição após as cotas use fundSimulation.portfolioAllocation: a sobra fica como dinheiro não aplicado, não vira caixinha nem posição de FII. Pesos por fundo distinguem a base dentro dos FIIs da carteira inteira. Preserve datas e lacunas; preço de referência não é preço de execução.");
+            }
+            Ok(result)
         }
         "projetar_renda" => {
             validate_keys(

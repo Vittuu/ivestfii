@@ -101,6 +101,201 @@ fn state(path: &Path) -> Value {
     json!({"export":repo.export_legacy_json().unwrap(),"snapshot":repo.snapshot().unwrap(),"pending":repo.pending_change_count().unwrap()})
 }
 
+fn fresh_quotes(path: &Path, include_other: bool) {
+    let now = chrono::Utc::now();
+    let mut observations = json!({"TEST11":{
+        "symbol":"TEST11","price":"110","currency":"BRL","quotedAt":(now-chrono::Duration::seconds(20)).to_rfc3339(),"fetchedAt":(now-chrono::Duration::seconds(10)).to_rfc3339(),"source":"brapi","sourceUrl":"https://brapi.dev/api/v2/stocks/quote?symbols=TEST11","delayMinutes":30
+    }});
+    if include_other {
+        observations["OTHER11"] = json!({"symbol":"OTHER11","price":"21","currency":"BRL","quotedAt":(now-chrono::Duration::seconds(20)).to_rfc3339(),"fetchedAt":(now-chrono::Duration::seconds(10)).to_rfc3339(),"source":"brapi","sourceUrl":"https://brapi.dev/api/v2/stocks/quote?symbols=OTHER11","delayMinutes":30});
+    }
+    fs::write(path.join("public-data/quotes.json"),serde_json::to_vec(&json!({"version":1,"observations":observations,"lastAttemptAt":null,"retryAfter":null})).unwrap()).unwrap();
+}
+
+fn detailed_budget(path: &Path) -> Value {
+    let fund = WalletCatalog::open(path)
+        .unwrap()
+        .repository(None)
+        .unwrap()
+        .snapshot()
+        .unwrap()
+        .funds
+        .into_iter()
+        .find(|fund| fund.ticker == "TEST11")
+        .unwrap();
+    json!({"amount":"300","allocations":{"fiis":"250","fixedIncome":"25","cashPockets":"25"},"fundAllocations":[{"fundId":fund.id,"amount":"250"}]})
+}
+
+#[test]
+fn whole_shares_leave_change_separate_and_use_actual_spend_for_portfolio_weights() {
+    let directory = empty();
+    populated(directory.path());
+    fresh_quotes(directory.path(), false);
+    let before = state(directory.path());
+    let cache = fs::read(directory.path().join("public-data/quotes.json")).unwrap();
+    let mut server = ready(directory.path(), None);
+    let result = call(&mut server, detailed_budget(directory.path()));
+    let response = content(&result);
+    let funds = &response["fundSimulation"];
+    let purchase = &funds["rows"][0];
+    let allocation = &funds["portfolioAllocation"];
+    assert_eq!(funds["status"], "calculated", "{funds}");
+    assert_eq!(funds["budget"], "250");
+    assert_eq!(purchase["currentShares"], "10");
+    assert_eq!(purchase["sharesToBuy"], "2");
+    assert_eq!(purchase["afterShares"], "12");
+    assert_eq!(purchase["price"], "110");
+    assert_eq!(purchase["spentAmount"], "220");
+    assert_eq!(purchase["remainder"], "30");
+    assert_eq!(purchase["beforeFiiPercent"], "100");
+    assert_eq!(purchase["afterFiiPercent"], "100");
+    assert_eq!(purchase["beforePortfolioPercent"], "55");
+    assert_eq!(purchase["afterPortfolioPercent"], "57.39");
+    assert_eq!(funds["spentAmount"], "220");
+    assert_eq!(funds["remainder"], "30");
+    assert_eq!(allocation["totalBefore"], "2000");
+    assert_eq!(allocation["totalAfter"], "2300");
+    assert_eq!(allocation["unallocatedCash"], "30");
+    assert_eq!(row(allocation, "fiis")["afterValue"], "1320");
+    assert_eq!(row(allocation, "fixedIncome")["afterValue"], "525");
+    assert_eq!(row(allocation, "cashPockets")["afterValue"], "425");
+    assert_eq!(row(allocation, "unallocatedCash")["afterValue"], "30");
+    assert_eq!(row(&response["simulation"], "fiis")["afterValue"], "1350"); // Old mode remains a reservation, not whole shares.
+    assert_eq!(response["quotePolicy"]["noNetworkRequests"], true);
+    assert_eq!(
+        content(&call(&mut server, detailed_budget(directory.path())))["fundSimulation"],
+        *funds
+    );
+    assert_eq!(state(directory.path()), before);
+    assert_eq!(
+        fs::read(directory.path().join("public-data/quotes.json")).unwrap(),
+        cache
+    );
+    assert!(!directory
+        .path()
+        .join("public-data/quotes.refresh-policy.json")
+        .exists());
+}
+
+#[test]
+fn every_held_fund_is_included_even_without_an_allocation_and_foreign_ids_are_rejected() {
+    let directory = empty();
+    populated(directory.path());
+    let catalog = WalletCatalog::open(directory.path()).unwrap();
+    let repo = catalog.repository(None).unwrap();
+    repo.upsert_fund(FundInput {
+        id: None,
+        ticker: "OTHER11".into(),
+        name: "Outro fundo".into(),
+        sector: "Papel".into(),
+    })
+    .unwrap();
+    let other = repo
+        .snapshot()
+        .unwrap()
+        .funds
+        .into_iter()
+        .find(|fund| fund.ticker == "OTHER11")
+        .unwrap();
+    repo.save_monthly_record(RecordInput {
+        id: None,
+        fund_id: other.id,
+        month: "2020-03".into(),
+        purchase_date: Some("2020-03-10".into()),
+        cotas_added: "5".into(),
+        price_per_cota: "20".into(),
+        dividend_per_cota: "0".into(),
+        dividend_total: Some("0".into()),
+        notes: String::new(),
+    })
+    .unwrap();
+    fresh_quotes(directory.path(), true);
+    let mut server = ready(directory.path(), None);
+    let result = call(&mut server, detailed_budget(directory.path()));
+    let funds = &content(&result)["fundSimulation"];
+    assert_eq!(funds["rows"].as_array().unwrap().len(), 2);
+    assert_eq!(funds["fiiBasisComplete"], true, "{funds}");
+    let unchanged = funds["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["symbol"] == "OTHER11")
+        .unwrap();
+    assert_eq!(unchanged["budget"], "0");
+    assert_eq!(unchanged["sharesToBuy"], "0");
+    assert_eq!(unchanged["afterShares"], "5");
+    assert_eq!(unchanged["currentValue"], "105");
+    assert_eq!(unchanged["beforeFiiPercent"], "8.71");
+    assert_eq!(unchanged["afterFiiPercent"], "7.37");
+    let wallet = catalog
+        .create(WalletInput {
+            id: None,
+            name: "Outra".into(),
+            institution: "Teste".into(),
+        })
+        .unwrap();
+    let foreign = catalog.repository(Some(&wallet.id)).unwrap();
+    foreign
+        .upsert_fund(FundInput {
+            id: None,
+            ticker: "TEST11".into(),
+            name: "Isolado".into(),
+            sector: String::new(),
+        })
+        .unwrap();
+    let foreign_id = foreign.snapshot().unwrap().funds.remove(0).id;
+    let mut invalid = detailed_budget(directory.path());
+    invalid["fundAllocations"][0]["fundId"] = json!(foreign_id);
+    assert_eq!(call(&mut server, invalid)["isError"], true);
+}
+
+#[test]
+fn stale_quote_never_becomes_zero_shares_or_a_known_after_allocation() {
+    let directory = empty();
+    populated(directory.path());
+    let mut server = ready(directory.path(), None);
+    let result = call(&mut server, detailed_budget(directory.path()));
+    let funds = &content(&result)["fundSimulation"];
+    assert_eq!(funds["status"], "incomplete");
+    assert_eq!(funds["rows"][0]["quoteStatus"], "stale");
+    for field in [
+        "price",
+        "sharesToBuy",
+        "spentAmount",
+        "remainder",
+        "afterFiiPercent",
+        "afterPortfolioPercent",
+    ] {
+        assert!(funds["rows"][0][field].is_null(), "{field}: {funds}");
+    }
+    assert!(funds["spentAmount"].is_null() && funds["remainder"].is_null());
+    assert!(funds["portfolioAllocation"]["totalAfter"].is_null());
+}
+
+#[test]
+fn per_fund_input_cannot_override_quotes_quantities_or_scope_and_must_conserve_budget() {
+    let directory = empty();
+    populated(directory.path());
+    fresh_quotes(directory.path(), false);
+    let mut server = ready(directory.path(), None);
+    let before = state(directory.path());
+    let valid = detailed_budget(directory.path());
+    for allocations in [
+        Value::Null,
+        json!([]),
+        json!([{"fundId":"unknown","amount":"250"}]),
+        json!([{"fundId":valid["fundAllocations"][0]["fundId"],"amount":"249"}]),
+        json!([{"fundId":valid["fundAllocations"][0]["fundId"],"amount":"250","price":"1"}]),
+        json!([{"fundId":valid["fundAllocations"][0]["fundId"],"amount":"250","sharesToBuy":"999"}]),
+        json!([{"fundId":valid["fundAllocations"][0]["fundId"],"amount":"125"},{"fundId":valid["fundAllocations"][0]["fundId"],"amount":"125"}]),
+    ] {
+        let mut invalid = valid.clone();
+        invalid["fundAllocations"] = allocations;
+        assert_eq!(call(&mut server, invalid)["isError"], true);
+    }
+    assert_eq!(state(directory.path()), before);
+}
+
 #[test]
 fn before_and_after_use_market_balances_and_preserve_wallet_and_public_cache() {
     let directory = empty();

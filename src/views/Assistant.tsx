@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { ArrowUpRight, ChevronDown, LoaderCircle, Plus, X } from 'lucide-react';
 import { call, desktop, errorMessage } from '../lib/bridge';
 import type { ChatMessage, ChatRun, Conversation, Provider, ToolEvent } from '../lib/bridge';
 import { Def, Loading, PageActions } from '../components';
 import AssistantAnalysisBar from '../components/AssistantAnalysisBar';
+import FundContributionSimulation from '../components/FundContributionSimulation';
+import { readFundContributionSimulation } from '../lib/fundContributionSimulation';
 import { contributionAnalysisPrompt, investmentAnalysisPrompt } from '../lib/investmentProfile';
 
 const storagePrefix = 'ivestfii.assistant.';
@@ -383,7 +385,12 @@ export default function Assistant({ walletId, walletNames, view = 'page', onOpen
   useEffect(() => { busyChangeRef.current?.(active || sending); }, [active, sending]);
   const persistedResponse = run && messages.some((message) => message.role === 'assistant' && message.provider === run.provider && message.content === run.text && Date.parse(message.createdAt) >= Date.parse(run.createdAt));
   const visibleRun = run && !persistedResponse && (active || !!run.text);
-  const timeline = messages.map((message) => ({ id: `message-${message.id}`, date: message.createdAt, content: <Message message={message} /> }))
+  const simulations = useMemo(() => tools.flatMap((tool) => {
+    if (tool.conversationId !== selected) return [];
+    const result = readFundContributionSimulation(tool);
+    return result ? [{ id: `simulation-${tool.id}`, date: tool.completedAt || tool.startedAt, content: <FundContributionSimulation result={result} toolId={tool.id} /> }] : [];
+  }), [tools, selected]);
+  const timeline = [...messages.map((message) => ({ id: `message-${message.id}`, date: message.createdAt, content: <Message message={message} /> })), ...simulations]
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   const current = conversations.find((item) => item.id === selected);
   const cliState = checkingProviders ? 'checking' : providerReady ? 'ready' : 'missing';
