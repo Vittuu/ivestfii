@@ -2,11 +2,12 @@ use ivestfii_assistant::AssistantStore;
 use ivestfii_core::{CashSimulationInput, ProjectionInput, WalletCatalog};
 use serde_json::{json, Map, Value};
 
-pub(crate) const NAMES: [&str; 4] = [
+pub(crate) const NAMES: [&str; 5] = [
     "carteira_snapshot",
     "projetar_renda",
     "recuperar_contexto",
     "preparar_analise_carteira",
+    "simular_aporte",
 ];
 const MAX_CONTEXT_CHARS: u64 = 100_000;
 
@@ -61,6 +62,20 @@ pub(crate) fn definitions() -> Vec<Value> {
             "Preparar análise da carteira",
             "Reúne perfil cadastrado, completude, purchaseAnalysis (cotação versus preço médio e concentração por custo), allocationContext (classes da carteira com datas), FIIs, caixinhas, desempenho completo, histórico CDI, proventos B3, renda mensal calculada, contexto e fontes datadas. Para análise atual use refreshPublicDataIfDue:true: mesmos caches e política do aplicativo, atualização pública limitada só se necessária. Flags anteriores permitem consulta explícita BCB/notícias/cotações/CVM/proventos B3. Todas opcionais false: somente cache local. Confira profileCompleteness; pergunte por risco, objetivos, prazos, liquidez e reserva ausentes antes de sugestões personalizadas; nunca infira perfil pelos ativos. Cite fontes, horários e competências; não some cotações, histórico ou caixinhas à posição importada. Prepara dados sem gerar recomendação nem executar ordens.",
             schema(analysis_fields, &[]),
+        ),
+        (
+            NAMES[4],
+            "Simular divisão de um aporte",
+            "Calcula, na carteira selecionada, valores e percentuais antes e depois de um aporte dividido entre FIIs, pós-fixado e caixinhas. Informe amount positivo e allocations com os três valores monetários, não percentuais, somando exatamente amount. Usa saldos atuais datados de mercado, não custo ou depósitos acumulados. É cenário instantâneo por classe: não compra cotas, não simula rendimento, impostos ou taxas e não altera saldos. Leia status, valuationBasis, datas e issues: saldos desconhecidos impedem totais e pesos; datas distintas identificam cenário sobre últimos valores conhecidos, sem extrapolação. Consulte preparar_analise_carteira antes de recomendar uma divisão personalizada; esta ferramenta não atualiza APIs e não gera recomendação.",
+            schema(json!({
+                "walletId":wallet_field.clone(),
+                "amount":{"type":"string","minLength":1,"maxLength":32,"description":"Valor total positivo em reais, com ponto decimal e no máximo duas casas; exemplo 300.00."},
+                "allocations":{"type":"object","additionalProperties":false,"required":["fiis","fixedIncome","cashPockets"],"properties":{
+                    "fiis":{"type":"string","minLength":1,"maxLength":32,"description":"Valor em reais reservado aos FIIs; zero permitido."},
+                    "fixedIncome":{"type":"string","minLength":1,"maxLength":32,"description":"Valor em reais reservado ao pós-fixado; zero permitido."},
+                    "cashPockets":{"type":"string","minLength":1,"maxLength":32,"description":"Valor em reais reservado às caixinhas; zero permitido."}
+                }}
+            }), &["amount","allocations"]),
         ),
     ]
     .into_iter()
@@ -190,6 +205,29 @@ pub(crate) fn execute(
             validate_keys(arguments, &["walletId"])?;
             let wallet_id = wallet_id(arguments, default_wallet_id)?;
             scoped_snapshot(catalog, wallet_id)
+        }
+        "simular_aporte" => {
+            validate_keys(arguments, &["walletId", "amount", "allocations"])?;
+            let wallet_id = wallet_id(arguments, default_wallet_id)?;
+            let wallet = catalog.get(Some(wallet_id)).map_err(|error| error.to_string())?;
+            let repository = catalog.repository(Some(wallet_id)).map_err(|error| error.to_string())?;
+            let mut input = arguments.clone();
+            input.remove("walletId");
+            let input: ivestfii_core::contribution_simulation::ContributionSimulationInput =
+                serde_json::from_value(Value::Object(input)).map_err(|error| format!("Divisão do aporte inválida: {error}"))?;
+            let snapshot = repository.snapshot().map_err(|error| error.to_string())?;
+            let performance = public_data.performance_context(&snapshot);
+            let bases = crate::contribution_context::simulation_bases(&snapshot, &performance);
+            let simulation = ivestfii_core::contribution_simulation::simulate_contribution(&input, &bases)
+                .map_err(|error| error.to_string())?;
+            let profile = serde_json::to_value(repository.investment_profile().map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+            Ok(json!({
+                "status":"simulation","kind":"contribution-allocation","wallet":wallet,
+                "simulation":simulation,"profileCompleteness":profile_completeness(&profile),
+                "recommendationGenerated":false,"refreshRequested":false,
+                "interpretation":"Cenário de valores reservados por classe sobre os últimos saldos conhecidos. Não representa compras executadas, quantidades de cotas, rendimento projetado ou garantia de alocação adequada ao perfil. As datas e a qualidade da base estão na simulação. O aporte é dinheiro adicional; valores já no saldo não são somados outra vez. Os registros financeiros permanecem intactos."
+            }))
         }
         "projetar_renda" => {
             validate_keys(

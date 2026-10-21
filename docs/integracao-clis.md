@@ -61,7 +61,7 @@ Pergunta e checkpoint inicial são gravados na mesma transação. A conclusão g
 
 ## Ferramentas MCP disponíveis
 
-O chat oferece o mesmo catálogo de quatro ferramentas aos três provedores. O executável desktop também hospeda o transporte stdio em `--mcp --data-dir <diretório>`, antes de iniciar qualquer janela ou registro de autostart. Isso permite empacotar o chat sem exigir que o usuário inicie um servidor à parte.
+O chat oferece o mesmo catálogo de cinco ferramentas aos três provedores. O executável desktop também hospeda o transporte stdio em `--mcp --data-dir <diretório>`, antes de iniciar qualquer janela ou registro de autostart. Isso permite empacotar o chat sem exigir que o usuário inicie um servidor à parte.
 
 | Provedor | Quem executa a conexão MCP | Atualizações no chat |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ O Antigravity 1.1.14 exige esse fluxo de compatibilidade: a configuração MCP a
 
 Na versão 1.1.14, o contrato passado por `--json-schema` usa `arguments` como **string contendo JSON**, por compatibilidade com o backend do provedor. Por exemplo: `{"action":"tool","tool":"carteira_snapshot","arguments":"{}","text":""}`. O runtime interpreta essa string e exige um objeto JSON válido antes de chamar o MCP; também aceita um objeto recebido diretamente por compatibilidade. O argumento enviado a `tools/call` é sempre um objeto validado, sem encaminhar texto arbitrário como comando.
 
-O Antigravity usa o modo de planejamento padrão, sem agente personalizado nem desativação de permissões. Sua ferramenta interna `finish`, usada para finalizar a saída estruturada, é esperada e não representa uma consulta da carteira nem um efeito externo. Ela não aparece como ferramenta MCP auditada. O runtime mantém separado esse mecanismo de protocolo das quatro ferramentas do IvestFII.
+O Antigravity usa o modo de planejamento padrão, sem agente personalizado nem desativação de permissões. Sua ferramenta interna `finish`, usada para finalizar a saída estruturada, é esperada e não representa uma consulta da carteira nem um efeito externo. Ela não aparece como ferramenta MCP auditada. O runtime mantém separado esse mecanismo de protocolo das cinco ferramentas do IvestFII.
 
 O JSON de controle e o raciocínio privado não são mostrados como mensagem do assistente. Somente um envelope final `action: "answer"` validado publica o texto da resposta. Esse caminho não depende de alterar as configurações MCP globais do Antigravity, nem afirma que a CLI conectou diretamente ao servidor. A auditoria e a interface de ferramentas são as mesmas usadas para os outros provedores.
 
@@ -82,11 +82,40 @@ O JSON de controle e o raciocínio privado não são mostrados como mensagem do 
 | `carteira_snapshot` | Consulta fundos, lançamentos e totais calculados pelo núcleo Rust. |
 | `projetar_renda` | Executa uma simulação local e devolve suas premissas. `monthlyCotas` representa cotas por fundo por mês; o reinvestimento usa custo médio local. |
 | `recuperar_contexto` | Recupera contexto de uma conversa por `conversationId`, com `maxChars` e truncamentos explícitos. |
-| `preparar_analise_carteira` | Reúne carteira, contexto opcional e fontes já registradas para o modelo analisar. |
+| `preparar_analise_carteira` | Reúne perfil, completude, comparação da cotação com o preço médio (`purchaseAnalysis`), composição por classe (`allocationContext`), desempenho, contexto opcional e fontes datadas. `refreshPublicDataIfDue: true` reutiliza os caches e atualiza somente quando necessário, com os mesmos limites do app. |
+| `simular_aporte` | Calcula a composição por classe antes e depois de distribuir um orçamento entre FIIs, pós-fixado e caixinhas; não modifica a carteira nem calcula rendimento. |
 
-As quatro ferramentas são somente leitura sobre carteira e contexto. O runtime registra separadamente a auditoria de cada chamada em `assistant.sqlite`: `id`, `conversationId`, `taskId`, `toolName`, `input`, `output`, `status`, `startedAt` e `completedAt`. O frontend exibe prévias limitadas de payloads; o registro persistido conserva o conteúdo completo recebido.
+As cinco ferramentas são somente leitura sobre carteira e contexto. O runtime registra separadamente a auditoria de cada chamada em `assistant.sqlite`: `id`, `conversationId`, `taskId`, `toolName`, `input`, `output`, `status`, `startedAt` e `completedAt`. O frontend exibe prévias limitadas de payloads; o registro persistido conserva o conteúdo completo recebido.
 
-Os adaptadores permitem somente o MCP da carteira e recusam interações fora desse contrato. Eles não dependem de Computer Use. `preparar_analise_carteira` pode consultar CDI/Selic/IPCA do Banco Central com `refreshEconomicData: true`, manchetes de Economia da Agência Brasil com `refreshNews: true`, cotações básicas brapi com `refreshQuotes: true` e informes mensais CVM de FII e FIAGRO com `refreshCvmData: true`. Sem essas opções, lê apenas o cache local. As respostas identificam fonte, tipo do fundo, datas e falhas. Manchetes gerais não constituem busca específica de um ativo. As consultas não alteram posições e não enviam ordens. A ferramenta prepara dados; a resposta em linguagem natural vem do provedor escolhido. Consulte [APIs públicas](apis-publicas.md) e [cotações e CVM](mercado-brapi-cvm.md).
+Os adaptadores permitem somente o MCP da carteira e recusam interações fora desse contrato. Eles não dependem de Computer Use. Para uma análise atual, a política comum aos três provedores pede `preparar_analise_carteira` com `conversationId` e `refreshPublicDataIfDue: true`, preservando as datas e os limites gratuitos compartilhados. A ferramenta também pode consultar CDI/Selic/IPCA do Banco Central com `refreshEconomicData: true`, manchetes de Economia da Agência Brasil com `refreshNews: true`, cotações básicas brapi com `refreshQuotes: true` e informes mensais CVM de FII e FIAGRO com `refreshCvmData: true`. Sem essas opções, lê apenas o cache local. As respostas identificam fonte, tipo do fundo, datas e falhas. Manchetes gerais não constituem busca específica de um ativo. As consultas não alteram posições e não enviam ordens. A ferramenta prepara dados; a resposta em linguagem natural vem do provedor escolhido. Consulte [APIs públicas](apis-publicas.md) e [cotações e CVM](mercado-brapi-cvm.md).
+
+## Próximos aportes e cenário por classe
+
+O assistente usa a cotação versus o preço médio pessoal junto ao perfil declarado, ao orçamento e à concentração da carteira selecionada. As cores da aba Mercado comparam a cotação ao custo histórico; verde não comprova valor justo nem determina o próximo aporte. A concentração dos fundos em `purchaseAnalysis.allocation` usa o custo das compras, e os setores são os rótulos cadastrados: vários tickers ou um setor genérico não comprovam diversificação econômica.
+
+Sugestões personalizadas dependem de `profileCompleteness` ou de respostas explícitas do usuário que supram as lacunas como premissas da conversa. O assistente considera objetivos de curto e longo prazo, risco, reserva e liquidez, sem inventar metas de alocação. Pergunta o orçamento quando necessário. Se o usuário já fornecer uma divisão, pode calcular esse cenário mesmo com perfil incompleto; o cálculo não confirma que a divisão é adequada ao usuário.
+
+`simular_aporte` aceita `walletId` opcional, `amount` positivo e os três valores de `allocations`: `fiis`, `fixedIncome` e `cashPockets`. Os valores são **strings monetárias**, com ponto decimal e até duas casas; as parcelas são não negativas e devem somar exatamente `amount`. Exemplo sintético de argumentos:
+
+```json
+{
+  "walletId": "ID_DA_CARTEIRA",
+  "amount": "300.00",
+  "allocations": {
+    "fiis": "100.00",
+    "fixedIncome": "50.00",
+    "cashPockets": "150.00"
+  }
+}
+```
+
+O cenário reserva valores por classe, sem calcular quantidades de cotas ou preço de execução. A base usa o **valor de mercado dos fundos** e os **saldos informados do pós-fixado e das caixinhas**; custo de compra, depósitos brutos já resgatados, proventos e o total importado da corretora não são somados novamente. A ferramenta lê os caches existentes, não recebe flags de atualização e não faz novas consultas às APIs. A preparação anterior é que aplica a política limitada de atualização.
+
+A resposta tem `kind: "contribution-allocation"` e `simulation`. Cada linha de `simulation.rows` informa `currentValue`, `contribution`, `afterValue`, `beforePercent`, `afterPercent` e `changePercentagePoints`, além de `dates` e `issues`. `totalBefore` e `totalAfter` permitem conferir os totais. O assistente deve apresentar esses cálculos, sem inventar percentuais nem tratar o aporte como rendimento.
+
+`valuationBasis: "mixed-dates"` identifica um cenário que combina os últimos saldos conhecidos de datas diferentes: `asOf` fica nulo, e as datas originais permanecem explícitas. `undated` indica saldo sem data suficiente. Um componente desconhecido mantém totais e pesos completos indisponíveis; não vira zero. Em uma carteira comprovadamente vazia, o peso anterior pode ser nulo e o posterior ser calculado normalmente.
+
+A simulação não calcula rendimento futuro, impostos ou taxas, não envia ordens, não executa compras e não altera saldos, lançamentos ou perfil. A auditoria da chamada e a conversa continuam no histórico canônico ao trocar de provedor.
 
 ## Processos e limites
 

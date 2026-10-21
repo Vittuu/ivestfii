@@ -63,7 +63,7 @@ Aceite: testes sintéticos de migração e cálculos, importação real em diret
 
 Persistir mensagens, resultados de ferramentas, fontes e tarefas. Expor consulta de carteira, projeções, recuperação de contexto e preparação de análise por MCP stdio. O servidor deve validar argumentos, negociar capacidades, retornar erros estruturados, limitar mensagens e encerrar corretamente.
 
-Uma tarefa pode encadear várias consultas automaticamente. A camada Rust registra etapas e resultados para permitir recuperação; não exige cliques nem comandos manuais entre etapas. As quatro ferramentas não alteram os dados financeiros. `preparar_analise_carteira` lê o cache público e aceita `refreshEconomicData` e `refreshNews`, opcionais e desligados por padrão, para consultar BCB e EBC. Fontes e datas acompanham os resultados; falhas parciais preservam as referências anteriores com aviso. O cache e as referências da conversa podem ser gravados, sem modificar a carteira. Cotações externas de ativos permanecem pendentes.
+Uma tarefa pode encadear várias consultas automaticamente. A camada Rust registra etapas e resultados para permitir recuperação; não exige cliques nem comandos manuais entre etapas. As cinco ferramentas atuais não alteram os dados financeiros; `simular_aporte` acrescenta o cenário por classe com orçamento informado, valores e pesos antes/depois, preservando datas e lacunas, sem calcular retorno nem executar ordens. `preparar_analise_carteira` lê o cache público e aceita `refreshEconomicData` e `refreshNews`, opcionais e desligados por padrão, para consultar BCB e EBC. Fontes e datas acompanham os resultados; falhas parciais preservam as referências anteriores com aviso. O cache e as referências da conversa podem ser gravados, sem modificar a carteira. Cotações externas de ativos permanecem pendentes.
 
 Aceite: cliente de teste MCP executa handshake, lista e chama ferramentas, verifica erros e roda sem Computer Use. Um reinício preserva a conversa. Uma troca de provedor conserva objetivos e resultados disponíveis no histórico.
 
@@ -96,6 +96,8 @@ No build de desenvolvimento a inicialização automática começa desligada para
 Aceite: instalar, iniciar sessão Windows, alternar configurações, fechar/restaurar várias vezes, abrir um segundo atalho, sair sem processos órfãos e preservar pendências no próximo início. Produzir instalador NSIS e registrar versão/schema para futuras atualizações.
 
 ## Estado da primeira implementação
+
+Esta seção preserva o registro da primeira implementação. O catálogo atual tem cinco ferramentas: `simular_aporte` foi acrescentada às quatro iniciais para calcular a divisão de um orçamento por classe. Seu [contrato atual](integracao-clis.md#próximos-aportes-e-cenário-por-classe) descreve as bases datadas e as limitações; as validações históricas abaixo não representam testes reais adicionais de provedores.
 
 | Etapa | Estado nesta entrega |
 | --- | --- |

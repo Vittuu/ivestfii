@@ -95,7 +95,7 @@ fn handshake_is_required_and_preserves_string_or_zero_ids() {
     );
     assert_eq!(listed["id"], "tools-1");
     let tools = listed["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 4);
+    assert_eq!(tools.len(), 5);
     for tool in tools {
         assert_eq!(tool["annotations"]["readOnlyHint"], true);
         assert_eq!(tool["inputSchema"]["additionalProperties"], false);

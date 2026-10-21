@@ -1322,12 +1322,15 @@ try {
     assert.match(seed,/Planeje meus próximos aportes.*carteira selecionada.*meu perfil.*dados atualizados/);
     assert.match(seed,/cotações.*meu preço médio.*sem tratar um preço menor como motivo suficiente para comprar/);
     assert.match(seed,/diversificação.*curto e longo prazo.*riscos.*orçamento disponível.*perfil.*pergunte antes de sugerir valores e quantidades/);
-    assert.doesNotMatch(seed,/wallet-original|walletId|purchaseAnalysis|MCP|preparar_analise|\{|\}/);
+    assert.match(seed,/ferramentas disponíveis para simular a divisão do aporte entre FIIs, pós-fixado e caixinhas/);
+    assert.match(seed,/tabela.*valores antes.*aporte.*valores depois.*percentuais de composição antes e depois/);
+    assert.doesNotMatch(seed,/wallet-original|walletId|purchaseAnalysis|MCP|preparar_analise|simular_aporte|\{|\}/);
     assert.equal(await isFocused(draft()),true);assert.equal((await calls(page,'start_chat_turn')).length,0);
     assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.chat.messages),before.messages);
     assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.chat.conversations),before.conversations);
     assert.equal(await page.evaluate(()=>globalThis.__uiTest.calls.filter(item=>item.command.startsWith('refresh_')).length),before.refreshes);
     check('contribution-planning-fills-reviewable-human-draft-and-asks-missing-budget-profile-without-AI-or-source-calls');
+    check('contribution-planning-requests-tool-based-split-simulation-and-before-contribution-after-values-and-composition');
     const budget='Tenho R$ 200 disponíveis para o próximo aporte.';
     await draft().fill(budget);await action().evaluate(button=>{button.click();button.click();});
     assert.equal(await draft().inputValue(),budget+'\n\n'+seed,'Keep the user draft and append the planning request only once');

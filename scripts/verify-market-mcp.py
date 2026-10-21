@@ -67,7 +67,7 @@ responses = [json.loads(line) for line in reply.stdout.splitlines()]
 assert len(responses) == len(frames) - 1, 'stdout MCP contém resposta inválida ou logs.'
 responses = {response['id']: response for response in responses}
 tools = responses['tools']['result']['tools']
-assert len(tools) == 4
+assert len(tools) == 5
 analysis = next(tool for tool in tools if tool['name'] == 'preparar_analise_carteira')
 for flag in ('refreshQuotes', 'refreshCvmData'):
     assert analysis['inputSchema']['properties'][flag]['type'] == 'boolean'
@@ -143,7 +143,7 @@ for section, field in [('marketData', 'observation'), ('cvmData', 'report')]:
     actual = {item['symbol']: item[field] for item in final[section]['items']}
     assert expected == actual, 'Leitura do cache alterou observações ou datas.'
 assert fingerprints() == before, 'Os bancos financeiros ou catálogo foram alterados.'
-summary = {'status': 'ok', 'tools': 4, 'realDesktopMcp': True, 'liveRefresh': options.refresh, 'knownPortfolioCoverage': known_portfolio, 'credentialConfigured': observed['marketData']['credentialConfigured'], 'quotes': [{'symbol': item['symbol'], 'status': item['status'], 'quotedAt': item['observation']['quotedAt'], 'fetchedAt': item['observation']['fetchedAt']} for item in quotes], 'cvm': [{'symbol': item['symbol'], 'status': item['status'], **{key: item['report'][key] if item['report'] else None for key in ('cnpj', 'fundType', 'referenceDate', 'filedAt', 'fetchedAt', 'sourceUrl')}} for item in reports], 'cacheRoundTrip': True, 'financialDataUnchanged': True}
+summary = {'status': 'ok', 'tools': 5, 'realDesktopMcp': True, 'liveRefresh': options.refresh, 'knownPortfolioCoverage': known_portfolio, 'credentialConfigured': observed['marketData']['credentialConfigured'], 'quotes': [{'symbol': item['symbol'], 'status': item['status'], 'quotedAt': item['observation']['quotedAt'], 'fetchedAt': item['observation']['fetchedAt']} for item in quotes], 'cvm': [{'symbol': item['symbol'], 'status': item['status'], **{key: item['report'][key] if item['report'] else None for key in ('cnpj', 'fundType', 'referenceDate', 'filedAt', 'fetchedAt', 'sourceUrl')}} for item in reports], 'cacheRoundTrip': True, 'financialDataUnchanged': True}
 root = Path(__file__).resolve().parent.parent
 (root / '.local').mkdir(exist_ok=True)
 (root / '.local/last-market-mcp-verification.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')

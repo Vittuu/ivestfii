@@ -1,6 +1,6 @@
 # Cotações brapi e informes CVM
 
-Integração disponível no aplicativo Windows e nas quatro ferramentas MCP já usadas pelos conectores das CLIs. A versão 0.1.1 acrescenta informes FIAGRO da base própria da CVM, incluindo VGIA11. Não altera a posição importada, quantidades, compras, dividendos recebidos, saldos das caixinhas ou totais patrimoniais.
+Integração disponível no aplicativo Windows e no catálogo de cinco ferramentas MCP usado pelos conectores das CLIs. A versão 0.1.1 acrescenta informes FIAGRO da base própria da CVM, incluindo VGIA11. Não altera a posição importada, quantidades, compras, dividendos recebidos, saldos das caixinhas ou totais patrimoniais.
 
 ## Cotações
 
@@ -63,7 +63,7 @@ Os arquivos anuais/cadastro são reutilizados por seis horas entre carteiras. S�
 
 ## Consulta pelo chat
 
-O catálogo continua com quatro ferramentas, compatível com Codex, Claude e Antigravity. Em `preparar_analise_carteira`:
+O catálogo tem cinco ferramentas, compatíveis com Codex, Claude e Antigravity. `simular_aporte` calcula a composição antes e depois de um orçamento por classe usando os saldos e caches existentes, sem consultar as APIs nem executar ordens; veja o [contrato do simulador](integracao-clis.md#próximos-aportes-e-cenário-por-classe). Em `preparar_analise_carteira`:
 
 ```json
 {

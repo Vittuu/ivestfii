@@ -76,7 +76,7 @@ if len(responses) != len(frames) - 1:
     raise AssertionError('Quantidade de respostas inválida ou stdout contém logs.')
 responses = {response['id']: response for response in responses}
 assert responses['init']['result']['protocolVersion'] == '2025-11-25'
-assert len(responses['tools']['result']['tools']) == 4
+assert len(responses['tools']['result']['tools']) == 5
 portfolio = responses['portfolio']['result']['structuredContent']
 assert len(portfolio['funds']) == report['fundCount']
 assert portfolio['recordCount'] == report['recordCount']
@@ -123,7 +123,7 @@ if options.refresh_public_data:
     public_summary = {'publicSources': 'BCB + Agência Brasil',
                       'economicIndicators': len(indicators), 'headlines': len(public['news']['items']),
                       'cacheRoundTrip': True, 'sourceDatesPresent': True}
-print(json.dumps({'status': 'ok', 'tools': 4, 'protocol': '2025-11-25',
+print(json.dumps({'status': 'ok', 'tools': 5, 'protocol': '2025-11-25',
                   'host': 'desktop' if options.desktop else 'standalone',
                   'realSubprocess': True, 'financialRowsUnchanged': True,
                   'originalUnchanged': True, 'externalDataNotFabricated': True, **public_summary}))

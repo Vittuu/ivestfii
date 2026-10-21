@@ -29,6 +29,12 @@ Em **Caixinhas CDI**, cadastre o saldo manual e a remuneração, como `120% do C
 
 Em **Mercado**, consulte CDI, meta Selic e IPCA no Banco Central, notícias econômicas da Agência Brasil, cotações básicas da brapi e informes mensais oficiais da CVM de FII e FIAGRO por carteira. As referências têm fonte, data e cache local. Ao abrir o app, uma atualização em segundo plano reutiliza dados recentes e respeita os controles dos planos gratuitos. A Visão geral reúne as referências e usa as cotações no resultado dos FIIs; os botões e o chat MCP compartilham os mesmos caches e controles. O botão **Buscar CDI no Banco Central** preenche a referência de uma caixinha, conservando saldo e percentual contratado; ela só é cadastrada ao salvar. A chave brapi fica no Gerenciador de Credenciais do Windows. Fontes e limites estão em [APIs públicas](docs/apis-publicas.md), [cotações e CVM](docs/mercado-brapi-cvm.md) e no [catálogo](docs/api-catalogo.md).
 
+### Próximos aportes pelo assistente
+
+O chat cruza a comparação com seu preço médio, seu perfil declarado e a concentração da carteira selecionada para avaliar os próximos aportes. Preço abaixo da sua média não é indicação automática de compra. Sem perfil suficiente, o assistente pede as informações que faltam antes de sugerir uma divisão personalizada.
+
+Com um orçamento informado, a ferramenta MCP `simular_aporte` calcula os valores e pesos por classe antes e depois do aporte. Por exemplo: “Simule R$ 300, sendo R$ 100 em FIIs, R$ 50 no pós-fixado e R$ 150 em caixinhas”. A base usa valor de mercado dos fundos e saldos informados, preservando suas datas; lacunas não são preenchidas com estimativas ou zero. Uma divisão fornecida pelo usuário pode ser simulada sem um perfil completo, como cenário que não confirma sua adequação. A ferramenta não calcula retorno futuro, impostos ou taxas e não altera a carteira nem executa ordens. Entradas monetárias, pesos e datas estão no [contrato das cinco ferramentas MCP](docs/integracao-clis.md#próximos-aportes-e-cenário-por-classe).
+
 ### Carteira completa
 
 A visão geral mostra o patrimônio com caixa, o total em investimentos e a composição em FIIs, pós-fixado, saldo disponível e proventos da posição. Em **FIIs e posições → Posição**, o detalhamento inclui os FIIs com preços e resultados observados, o saldo bruto e líquido do pós-fixado, sua rentabilidade de 12 meses e os prazos de resgate. A instituição, a data de referência e os horários das telas acompanham os valores: as posições são importadas de documentos e não representam cotações em tempo real.
@@ -94,7 +100,7 @@ No navegador a interface informa que o acesso aos dados ainda não está conecta
 - Múltiplas carteiras com cadastros independentes e resumo por instituição; caixinhas com percentual do CDI, saldo e simulação bruta.
 - Indicadores oficiais BCB, manchetes RSS da Agência Brasil e busca de referência CDI nas caixinhas, com datas, proveniência e cache compartilhado com o MCP.
 - Chat pelas CLIs locais de Codex, Claude e Antigravity, com seleção de modelo, cancelamento e histórico persistente ao trocar de provedor. Fluxos, versões e limites em [docs/integracao-clis.md](docs/integracao-clis.md).
-- MCP stdio local com ferramentas de leitura sobre o núcleo Rust; sem Computer Use. Configuração e execução em [crates/mcp-server/README.md](crates/mcp-server/README.md).
+- MCP stdio local com cinco ferramentas de leitura sobre o núcleo Rust, incluindo comparação com preço médio e cenário de aporte por classe; sem Computer Use. Configuração e execução em [crates/mcp-server/README.md](crates/mcp-server/README.md).
 - Bandeja, instância única, início com Windows e configurações persistidas. Autostart começa desligado em desenvolvimento; em release, ligado. A opção iniciar na bandeja vale para o início automático. Abrir manualmente mostra a janela.
 
 Vercel/Postgres, autenticação online, sincronização efetiva e cotações externas de ações e FIIs são etapas seguintes. O chat usa a carteira local, suas projeções e as referências públicas datadas; manchetes de economia não substituem pesquisa específica de um ativo.
@@ -114,7 +120,7 @@ cargo run -p ivestfii-runtime --example verify_cli -- codex,claude,antigravity
 - `npm run build` e executável Windows com a interface embutida: compilados.
 - Carteira real: conferência em banco isolado, backup byte-exato, exportação equivalente e segunda importação sem duplicações. O script lê a versão atual do JSON e verifica que continua intacta.
 - Posição completa: importação, reabertura e restauração nativas a partir do backup exportado, com valores e proveniência preservados.
-- MCP: handshake e quatro ferramentas conferidos em subprocesso real sobre banco isolado; nenhuma gravação financeira ou consulta de IA.
+- MCP: a validação original conferiu handshake e as quatro ferramentas então disponíveis em subprocesso real sobre banco isolado; nenhuma gravação financeira ou consulta de IA. O catálogo atual inclui também `simular_aporte`, descrito no contrato acima.
 - CLIs: teste real Codex → Claude → Antigravity na mesma conversa; os três executaram `carteira_snapshot` e preservaram o código de contexto. Só a carteira sintética vazia foi exposta aos provedores.
 - Carteiras e caixinhas: isolamento de dados, concorrência, migração, precisão decimal, backups e cálculo CDI testados. Teste real do Claude consultou e simulou uma caixinha em uma carteira sintética separada, pelo MCP.
 - APIs públicas: respostas e caches BCB/EBC validados, falhas parciais, datas e origem CDI preservadas. Consultas reais e leitura do cache são verificáveis pelo MCP com a opção acima.

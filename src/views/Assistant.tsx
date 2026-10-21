@@ -14,6 +14,7 @@ const toolNames: Record<string, string> = {
   projetar_renda: 'Projetar renda',
   recuperar_contexto: 'Recuperar histórico',
   preparar_analise_carteira: 'Preparar análise da carteira',
+  simular_aporte: 'Simular divisão do aporte',
 };
 const statusNames: Record<ChatRun['status'], string> = { running: 'Respondendo', completed: 'Concluído', failed: 'Não foi possível concluir', cancelled: 'Resposta interrompida' };
 const toolStatusNames: Record<ToolEvent['status'], string> = { running: 'Executando', completed: 'Concluído', failed: 'Falhou', cancelled: 'Cancelado' };

@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 mod broker;
 mod cash;
+pub mod contribution_simulation;
 mod evolution_history;
 pub mod historical_valuation;
 pub mod income;

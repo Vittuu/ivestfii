@@ -261,9 +261,7 @@ mod tests {
             Ok(())
         }
         fn tool_definitions(&mut self) -> Result<Value, String> {
-            Ok(
-                json!([{"name":"carteira_snapshot","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]),
-            )
+            Ok(json!(TOOLS.map(|name| json!({"name":name,"inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true}}))))
         }
         fn call_tool(&mut self, name: &str, arguments: &Value) -> Result<Value, String> {
             self.tools.push((name.into(), arguments.clone()));
@@ -321,6 +319,34 @@ mod tests {
             vec![("preparar_analise_carteira".into(), arguments)]
         );
     }
+    #[test]
+    fn contribution_simulation_uses_real_mcp_hook_and_returns_unchanged_result() {
+        let arguments = json!({"walletId":"wallet-2","amount":"300.00","allocations":{"fiis":"100.00","fixedIncome":"50.00","cashPockets":"150.00"}});
+        let output = json!({"isError":false,"content":[],"structuredContent":{"status":"simulation","kind":"contribution-allocation","simulation":{"budget":"300.00"},"marker":"unchanged-result"}});
+        let mut io = FakeIo {
+            input: VecDeque::from([
+                envelope(
+                    json!({"action":"tool","tool":"simular_aporte","arguments":arguments.to_string(),"text":""}),
+                ),
+                answer(),
+            ]),
+            tool_result: Some(Ok(output.clone())),
+            ..Default::default()
+        };
+        run(&config(), &mut io).unwrap();
+        assert_eq!(io.tools, vec![("simular_aporte".into(), arguments.clone())]);
+        assert!(io.sent[0]["message"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("\"name\":\"simular_aporte\""));
+        let forwarded: Value =
+            serde_json::from_str(io.sent[1]["message"]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(forwarded["arguments"], arguments);
+        assert_eq!(forwarded["result"], output);
+        assert_eq!(forwarded["isError"], false);
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolFinished {name,output:actual,is_error:false,..} if name == "simular_aporte" && actual == &output)));
+    }
+
     #[test]
     fn executes_mcp_hook_and_keeps_json_out_of_chat() {
         let mut io = FakeIo {

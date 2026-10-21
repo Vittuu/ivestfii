@@ -9,11 +9,12 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 
 const SERVER: &str = "ivestfii";
-const TOOLS: [&str; 4] = [
+const TOOLS: [&str; 5] = [
     "carteira_snapshot",
     "projetar_renda",
     "recuperar_contexto",
     "preparar_analise_carteira",
+    "simular_aporte",
 ];
 
 /// Generate a TOML basic string without shell interpolation. JSON strings use
@@ -375,7 +376,7 @@ fn verify_tools(result: &Value) -> Result<(), String> {
         .collect();
     if available.len() != TOOLS.len() || TOOLS.iter().any(|name| !available.contains(name)) {
         return Err(
-            "O MCP ivestfii não confirmou as quatro ferramentas de leitura esperadas.".into(),
+            "O MCP ivestfii não confirmou as cinco ferramentas de leitura esperadas.".into(),
         );
     }
     Ok(())
@@ -465,7 +466,7 @@ pub fn run(config: &AdapterConfig, io: &mut dyn AdapterIo) -> Result<AdapterResu
         "sandbox":"read-only",
         "ephemeral":true,
         "serviceName":"ivestfii",
-        "baseInstructions":format!("Você é o assistente da carteira IvestFII. Responda em português. Use exclusivamente as quatro ferramentas MCP do servidor ivestfii para consultar dados e executar simulações. O histórico canônico é fornecido pelo aplicativo no contexto da mensagem. Não execute comandos, não leia arquivos diretamente, não acesse ferramentas de outros serviços e não modifique dados. Quando uma fonte estiver indisponível, informe a limitação sem inventar valores. Se precisar de esclarecimento, escreva uma pergunta na resposta final. {}", crate::analysis_instructions::POLICY)
+        "baseInstructions":format!("Você é o assistente da carteira IvestFII. Responda em português. Use exclusivamente as cinco ferramentas MCP do servidor ivestfii para consultar dados e executar simulações. O histórico canônico é fornecido pelo aplicativo no contexto da mensagem. Não execute comandos, não leia arquivos diretamente, não acesse ferramentas de outros serviços e não modifique dados. Quando uma fonte estiver indisponível, informe a limitação sem inventar valores. Se precisar de esclarecimento, escreva uma pergunta na resposta final. {}", crate::analysis_instructions::POLICY)
     });
     io.send(&json!({"id":3,"method":"thread/start","params":params}))?;
     let started = await_response(io, &mut state, 3)?;
@@ -809,6 +810,35 @@ mod tests {
         run(&config(), &mut io).unwrap();
         assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolStarted {name,input,..} if name == "preparar_analise_carteira" && input == &arguments)));
         assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolFinished {output,..} if output["structuredContent"]["profileCompleteness"]["canPersonalize"] == false)));
+    }
+
+    #[test]
+    fn contribution_simulation_is_registered_and_preserves_budget_result_in_audit() {
+        let arguments = json!({"walletId":"wallet-2","amount":"300.00","allocations":{"fiis":"100.00","fixedIncome":"50.00","cashPockets":"150.00"}});
+        let output = json!({"content":[],"structuredContent":{"status":"simulation","kind":"contribution-allocation","simulation":{"budget":"300.00"},"marker":"unchanged-result"}});
+        let tool = json!({"type":"mcpToolCall","id":"contribution-1","server":"ivestfii",
+            "tool":"simular_aporte","arguments":arguments,"status":"completed","result":output});
+        let mut io = ready(vec![completed(
+            "completed",
+            vec![
+                tool,
+                answer("Cenário por classe calculado, sem alterar saldos.", None),
+            ],
+        )]);
+        run(&config(), &mut io).unwrap();
+        assert!(launch(&config())
+            .unwrap()
+            .args
+            .iter()
+            .any(|arg| arg.contains("simular_aporte")));
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolStarted {name,input,..} if name == "simular_aporte" && input == &arguments)));
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolFinished {name,output:actual,is_error:false,..} if name == "simular_aporte" && actual == &output)));
+        let mut old_inventory = inventory();
+        old_inventory["data"][0]["tools"]
+            .as_object_mut()
+            .unwrap()
+            .remove("simular_aporte");
+        assert!(verify_tools(&old_inventory).is_err());
     }
 
     #[test]

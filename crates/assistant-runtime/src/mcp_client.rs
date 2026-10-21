@@ -6,11 +6,12 @@ use serde_json::{json, Value};
 use std::{collections::HashSet, time::Duration};
 
 const PROTOCOL: &str = "2025-11-25";
-const TOOLS: [&str; 4] = [
+const TOOLS: [&str; 5] = [
     "carteira_snapshot",
     "projetar_renda",
     "recuperar_contexto",
     "preparar_analise_carteira",
+    "simular_aporte",
 ];
 
 pub(super) trait Transport {
@@ -100,7 +101,10 @@ impl<T: Transport> Client<T> {
                     != Some(true)
             })
         {
-            return Err("O MCP local precisa expor exatamente as quatro ferramentas de leitura autorizadas.".into());
+            return Err(
+                "O MCP local precisa expor exatamente as cinco ferramentas de leitura autorizadas."
+                    .into(),
+            );
         }
         Ok(())
     }
@@ -287,7 +291,7 @@ mod tests {
             "carteira_snapshot"
         );
         assert_eq!(client.transport.sent[4]["id"], 4);
-        assert_eq!(client.definitions().unwrap().as_array().unwrap().len(), 4);
+        assert_eq!(client.definitions().unwrap().as_array().unwrap().len(), 5);
         assert_eq!(
             client.transport.timeouts,
             vec![
@@ -316,6 +320,33 @@ mod tests {
             Duration::from_secs(120)
         );
     }
+    #[test]
+    fn contribution_simulation_forwards_money_strings_without_refreshing() {
+        let output = json!({"content":[],"structuredContent":{"status":"simulation","kind":"contribution-allocation","simulation":{"budget":"300.00"}},"isError":false});
+        let mut client = Client::connect(ready(vec![response(3, output.clone())])).unwrap();
+        let arguments = json!({"walletId":"wallet-2","amount":"300.00","allocations":{"fiis":"100.00","fixedIncome":"50.00","cashPockets":"150.00"}});
+        assert_eq!(
+            client.call_tool("simular_aporte", &arguments).unwrap(),
+            output
+        );
+        assert_eq!(
+            client.transport.sent[3]["params"],
+            json!({"name":"simular_aporte","arguments":arguments})
+        );
+        assert_eq!(
+            *client.transport.timeouts.last().unwrap(),
+            Duration::from_secs(60)
+        );
+        let mut old_transport = ready(vec![]);
+        let mut old_inventory = inventory();
+        old_inventory["tools"].as_array_mut().unwrap().pop();
+        old_transport.incoming[1] = response(2, old_inventory);
+        assert!(Client::connect(old_transport).is_err());
+        let before = client.transport.sent.len();
+        assert!(client.call_tool("executar_aporte", &arguments).is_err());
+        assert_eq!(client.transport.sent.len(), before);
+    }
+
     #[test]
     fn rejects_foreign_or_mutating_inventory() {
         for inventory in [

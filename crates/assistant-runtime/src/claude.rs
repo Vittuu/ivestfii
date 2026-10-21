@@ -7,11 +7,12 @@ use std::{
     fs,
 };
 
-pub(crate) const TOOLS: [&str; 4] = [
+pub(crate) const TOOLS: [&str; 5] = [
     "carteira_snapshot",
     "projetar_renda",
     "recuperar_contexto",
     "preparar_analise_carteira",
+    "simular_aporte",
 ];
 const MAX_TEXT: usize = 1_048_576;
 
@@ -439,6 +440,25 @@ mod tests {
             };
             assert!(run(&config(), &mut io).is_err());
         }
+    }
+
+    #[test]
+    fn contribution_simulation_preserves_class_budget_and_result_in_audit() {
+        let arguments = json!({"walletId":"wallet-2","amount":"300.00","allocations":{"fiis":"100.00","fixedIncome":"50.00","cashPockets":"150.00"}});
+        let content = json!([{"type":"text","text":"{\"status\":\"simulation\",\"kind\":\"contribution-allocation\",\"simulation\":{\"budget\":\"300.00\"}}"}]);
+        let mut io = FakeIo {
+            input: VecDeque::from([
+                json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"contribution-1","name":"mcp__ivestfii__simular_aporte","input":arguments}]}}),
+                json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"contribution-1","content":content}]}}),
+                json!({"type":"result","subtype":"success","result":"Cenário por classe calculado, sem alterar saldos."}),
+            ]),
+            ..Default::default()
+        };
+        run(&config(), &mut io).unwrap();
+        assert_eq!(TOOLS.len(), 5);
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolStarted {name,input,..} if name == "mcp__ivestfii__simular_aporte" && input == &arguments)));
+        assert!(io.events.iter().any(|event| matches!(event, ProviderEvent::ToolFinished {name,output,is_error:false,..} if name == "mcp__ivestfii__simular_aporte" && output == &content)));
+        assert!(checked_tool("mcp__ivestfii__executar_aporte").is_err());
     }
 
     #[test]

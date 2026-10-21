@@ -276,14 +276,14 @@ fn assert_no_secrets(value: &Value) {
 }
 
 #[test]
-fn four_tool_contract_exposes_opt_in_boolean_asset_refresh_flags() {
+fn five_tool_contract_exposes_opt_in_boolean_asset_refresh_flags() {
     let fixture = fixture();
     let mut server = ready(fixture.directory.path(), None);
     let result = server
         .handle_frame(br#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
         .unwrap();
     let tools = result["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 4);
+    assert_eq!(tools.len(), 5);
     let analysis = tools
         .iter()
         .find(|t| t["name"] == "preparar_analise_carteira")
