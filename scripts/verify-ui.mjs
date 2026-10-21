@@ -18,7 +18,7 @@ const playwrightModule = process.env.IVESTFII_PLAYWRIGHT_PATH
     return import(pathToFileURL(bundledPlaywright).href);
   });
 const { chromium } = playwrightModule.default || playwrightModule;
-const uiVersion = 'proventos-B3-conciliados-no-resultado-da-carteira-e-CDI';
+const uiVersion = 'pos-fixado-com-aportes-e-observacoes-datadas';
 const checks = [];
 const browserErrors = [];
 const screenshots = [];
@@ -30,7 +30,8 @@ const focusedProfile=process.env.IVESTFII_UI_FOCUS==='profile';
 const focusedIncome=process.env.IVESTFII_UI_FOCUS==='income';
 const focusedIncomeApi=process.env.IVESTFII_UI_FOCUS==='income-api';
 const focusedIncomePerformance=process.env.IVESTFII_UI_FOCUS==='income-performance';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':'report.json';
+const focusedFixedIncome=process.env.IVESTFII_UI_FOCUS==='fixed-income';
+const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -58,6 +59,20 @@ const snapshot = {
   ],
   totals: { invested: '1040', cotas: '12', dividendsReceived: '11', estimatedMonthlyIncome: '11' },
   recordCount: 2, brokerPosition: position,
+};
+
+// Supplemental broker screenshots carry their own dates and never rewrite the
+// older overview or create cash/dividend records. All amounts are synthetic.
+const fixedIncomeObservation={
+  referenceDate:'2026-10-20',name:'Pós-fixado sintético com aportes',category:'Renda Fixa',riskLevel:'Risco Baixo 1',
+  balance:'360',invested:'300',totalEarnings:'60',earnings12Months:'30',return12Months:'8.5',returnReferenceDate:'2026-10-15',
+  contributions:[
+    {applicationDate:'2023-02-01',invested:'100',currentValue:'130',earnings:'30',returnPercent:'30'},
+    {applicationDate:'2024-06-01',invested:'110',currentValue:'132',earnings:'22',returnPercent:'20'},
+    {applicationDate:'2025-01-10',invested:'90',currentValue:'98',earnings:'8',returnPercent:'8.89'},
+  ],
+  sources:[{fileName:'synthetic-fixed-balance.png',sha256:'b'.repeat(64)},{fileName:'synthetic-fixed-contributions.jpg',sha256:'c'.repeat(64)}],
+  importedAt:'2026-10-20T22:30:00Z',sourcePath:'X:\\fixture\\synthetic-fixed-income.json',sourceHash:'d'.repeat(64),
 };
 
 // Deliberately independent of the default financial fixtures. Repeated months,
@@ -224,6 +239,7 @@ function bootstrap(mode) {
   if (mode === 'web') return `globalThis.isTauri = false; await import('/src/main.tsx?ui-original=web');`;
   const initial = structuredClone(snapshot);
   initial.cashPockets = [cash]; initial.cashBalance = '1234.56';
+  if(mode==='fixed-income')initial.brokerPosition.fixedIncome.latestObservation=structuredClone(fixedIncomeObservation);
   if (mode === 'position-notes') initial.brokerPosition.warnings = [...importWarnings];
   if (mode === 'ledger') {
     initial.funds = [{...initial.funds[0],entries:structuredClone(ledgerEntries),totalCotas:'16',totalInvested:'155',averagePrice:'9.6875',dividendsReceived:'16.25',estimatedMonthlyIncome:'0'}];
@@ -484,7 +500,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -1812,6 +1828,90 @@ try {
     }
   }
 
+  async function verifyFixedIncomeObservation(){
+    const fixture=await openPage('fixed-income',{width:1440,height:1000}),page=fixture.page;
+    const original=await page.evaluate(()=>structuredClone(globalThis.__uiTest.snapshot));
+    const broker=region(page,'Posição na corretora');
+    await figureEquals(broker.locator('.figure-hero'),'R$ 201,00');
+    await textMatches(broker.locator('.cp-source'),/03\/02\/2020/);
+    const update=broker.locator('.cp-fixed-update-note');
+    await textMatches(update,/20\/10\/2026/);
+    await update.getByRole('button',{name:'Ver pós-fixado',exact:true}).click();
+    await title(page,'FIIs e posições');
+    assert.equal(await tab(page,'Posição').getAttribute('aria-selected'),'true');
+    check('fixed-income-new-observation-is-reachable-without-changing-the-older-overview');
+
+    const current=page.locator('.cp-fixed-observation');
+    await textMatches(current,/Pós-fixado sintético com aportes/);
+    await textMatches(current,/20\/10\/2026/);
+    const totals=current.locator('.cp-fixed-current-readouts');
+    await figureEquals(readout(totals,'Saldo'),'R$ 360,00');
+    await figureEquals(readout(totals,'Valor aplicado'),'R$ 300,00');
+    await figureEquals(readout(totals,'Rendimento no saldo'),'+R$ 60,00');
+    const period=current.locator('.cp-fixed-period');
+    await textMatches(period,/15\/10\/2026/);
+    await textMatches(period,/Rendimento em 12 meses.*R\$\s*30,00/);
+    await textMatches(period,/Rentabilidade em 12 meses.*8,50%/);
+    assert.doesNotMatch(await period.innerText(),/20\/10\/2026/,'The 12-month report date must remain distinct from the newer balance date');
+    assert.match(await tip(current,'Rendimento no saldo'),/saldo.*aplicado|aplicado.*saldo/i);
+    check('fixed-income-balance-gain-and-twelve-month-gain-have-distinct-values-and-reference-dates');
+
+    const contributions=current.getByRole('table',{name:'Aportes do pós-fixado',exact:true});
+    await contributions.waitFor({state:'visible'});
+    const contributionRows=contributions.locator('tbody tr');
+    assert.equal(await contributionRows.count(),3,'All three dated contributions remain visible without expanding details');
+    for(const [date,applied,value,earned,percent] of [
+      ['01/02/2023','R$ 100,00','R$ 130,00','+R$ 30,00','30,00%'],
+      ['01/06/2024','R$ 110,00','R$ 132,00','+R$ 22,00','20,00%'],
+      ['10/01/2025','R$ 90,00','R$ 98,00','+R$ 8,00','8,89%'],
+    ]){
+      const row=contributions.getByRole('row',{name:new RegExp(escapeRegExp(date))});
+      for(const amount of [applied,value,earned,percent])assert.ok(compact(await row.innerText()).includes(compact(amount)),`Contribution ${date} contains ${amount}`);
+    }
+    const older=page.locator('.cp-fixed-previous');
+    await textMatches(older.locator(':scope > summary'),/Registro anterior de 03\/02\/2020/);
+    if(!await older.evaluate(element=>element.open))await older.locator(':scope > summary').click();
+    await textMatches(older,/R\$\s*50,00/);
+    await textMatches(older,/R\$\s*4,00/);
+    assert.doesNotMatch(await older.innerText(),/R\$\s*360,00/);
+    check('fixed-income-three-contributions-are-visible-and-previous-broker-values-remain-separate');
+    await noOverflow(page,'fixed-income-desktop-no-overflow');
+    await sectionShot(page,'desktop-fixed-income-observation',current);
+
+    await page.setViewportSize({width:375,height:812});
+    await noOverflow(page,'fixed-income-mobile375-no-overflow');
+    await contributions.waitFor({state:'visible'});
+    await figureEquals(readout(totals,'Rendimento no saldo'),'+R$ 60,00');
+    await textMatches(period,/15\/10\/2026/);
+    const mobileTable=await contributions.evaluate(table=>{
+      const wrap=table.closest('.table-wrap');
+      wrap.scrollLeft=wrap.scrollWidth;
+      const last=table.querySelector('tbody tr:last-child td:last-child').getBoundingClientRect(),box=wrap.getBoundingClientRect();
+      const result={viewport:innerWidth,wrapLeft:box.left,wrapRight:box.right,scrollWidth:wrap.scrollWidth,clientWidth:wrap.clientWidth,lastRight:last.right};
+      wrap.scrollLeft=0;return result;
+    });
+    assert.ok(mobileTable.wrapLeft>=0&&mobileTable.wrapRight<=mobileTable.viewport+1&&mobileTable.lastRight<=mobileTable.wrapRight+1,`The contribution table may scroll internally, but its return column must be reachable ${JSON.stringify(mobileTable)}`);
+    await sectionShot(page,'mobile-fixed-income-observation375',current);
+    check('fixed-income-mobile-shows-current-balances-period-and-contributions-without-outer-overflow');
+
+    await navigate(page,'Visão geral');
+    await figureEquals(region(page,'Posição na corretora').locator('.figure-hero'),'R$ 201,00');
+    const result=region(page,'Resultado da carteira');
+    await figureEquals(readout(result,'Rendimentos acumulados'),'+R$ 45,56');
+    await figureEquals(readout(result,'Resultado da carteira'),'−R$ 854,54');
+    assert.deepEqual(await page.evaluate(()=>globalThis.__uiTest.snapshot),original,'A supplemental observation must not rewrite historical position, cash, or financial entries');
+    const writes=await page.evaluate(()=>globalThis.__uiTest.calls.filter(({command})=>/^(?:save_|upsert_|delete_|remove_|import_|export_|start_chat_turn$|create_conversation$)/.test(command)));
+    assert.deepEqual(writes,[]);await noUnexpectedCommands(page);
+    check('fixed-income-observation-does-not-create-receipts-or-recalculate-historical-portfolio-results');
+    await fixture.context.close();
+  }
+
+  if(focusedFixedIncome){
+    await verifyFixedIncomeObservation();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'fixed-income',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
+
   if(focusedIncomePerformance){
     await verifyAutomaticIncomePerformance();assert.deepEqual(browserErrors,[]);
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
@@ -1867,6 +1967,7 @@ try {
   await verifyMonthlyIncome();
   await verifyAutomaticMonthlyIncome();
   await verifyAutomaticIncomePerformance();
+  await verifyFixedIncomeObservation();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {

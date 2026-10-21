@@ -64,6 +64,48 @@ pub struct BrokerFixedIncome {
     pub return12_months: String,
     pub redemption_conversion: String,
     pub redemption_settlement: String,
+    /// A separately dated observation must never rewrite the complete position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_observation: Option<BrokerFixedIncomeObservation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerFixedIncomeObservation {
+    pub reference_date: String,
+    pub name: String,
+    pub category: String,
+    pub risk_level: String,
+    pub balance: String,
+    pub invested: String,
+    /// Difference between the observed balance and principal; not a payment.
+    pub total_earnings: String,
+    pub earnings12_months: String,
+    pub return12_months: String,
+    pub return_reference_date: String,
+    pub contributions: Vec<BrokerFixedIncomeContribution>,
+    pub sources: Vec<BrokerObservationSource>,
+    pub imported_at: String,
+    pub source_path: String,
+    pub source_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerFixedIncomeContribution {
+    pub application_date: String,
+    pub invested: String,
+    pub current_value: String,
+    pub earnings: String,
+    /// Percentage points displayed by the institution, rounded to two decimals.
+    pub return_percent: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerObservationSource {
+    pub file_name: String,
+    pub sha256: String,
 }
 
 impl Repository {
@@ -77,12 +119,22 @@ impl Repository {
         let backup_path = backup_source(&self.database_path, &hash, &bytes)?;
         let value: Value =
             serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))?;
-        let position = if value.get("broker_position").is_some() {
-            parse_normalized(value.get("broker_position").cloned().unwrap())?
+        let supplement =
+            value.get("type").and_then(Value::as_str) == Some("broker_fixed_income_observation");
+        // Validate the whole incoming object before starting the transaction.
+        let observation = supplement
+            .then(|| parse_observation_input(&value, &source_path, &hash))
+            .transpose()?;
+        let position = if supplement {
+            None
+        } else if value.get("broker_position").is_some() {
+            Some(parse_normalized(
+                value.get("broker_position").cloned().unwrap(),
+            )?)
         } else if value.get("referenceDate").is_some() {
-            parse_normalized(value)?
+            Some(parse_normalized(value)?)
         } else {
-            parse_portuguese(&value, &source_path, &hash)?
+            Some(parse_portuguese(&value, &source_path, &hash)?)
         };
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -96,6 +148,43 @@ impl Repository {
                 return Ok(current);
             }
         }
+        let position = match observation {
+            Some((institution, expected_hash, observation)) => {
+                let mut current = load_position(&tx)?.ok_or_else(|| {
+                    invalid("Importe a posição da corretora antes de complementar o pós-fixado.")
+                })?;
+                if !current
+                    .institution
+                    .trim()
+                    .eq_ignore_ascii_case(institution.trim())
+                    || !current.source_hash.eq_ignore_ascii_case(&expected_hash)
+                {
+                    return Err(invalid("O complemento não corresponde à instituição e à posição importada nesta carteira."));
+                }
+                if observation.reference_date < current.reference_date {
+                    return Err(invalid(
+                        "O complemento do pós-fixado é anterior à posição importada.",
+                    ));
+                }
+                if let Some(previous) = &current.fixed_income.latest_observation {
+                    let incoming_at = DateTime::parse_from_rfc3339(&observation.imported_at)
+                        .map_err(|_| invalid("Data de importação do complemento inválida."))?;
+                    let previous_at =
+                        DateTime::parse_from_rfc3339(&previous.imported_at).map_err(|_| {
+                            invalid("Data de importação do complemento anterior inválida.")
+                        })?;
+                    if observation.reference_date < previous.reference_date
+                        || (observation.reference_date == previous.reference_date
+                            && incoming_at <= previous_at)
+                    {
+                        return Err(invalid("Já existe uma observação mais recente do pós-fixado; os valores foram preservados."));
+                    }
+                }
+                current.fixed_income.latest_observation = Some(observation);
+                current
+            }
+            None => position.expect("a complete position was validated"),
+        };
         store_position(&tx, &position)?;
         tx.execute(
             "INSERT OR IGNORE INTO broker_position_imports(sha256,source_path,backup_path,imported_at) VALUES (?1,?2,?3,?4)",
@@ -201,6 +290,165 @@ fn array<'a>(root: &'a Value, path: &str) -> Result<&'a Vec<Value>> {
         .ok_or_else(|| invalid(&format!("Lista inválida na posição: {path}.")))
 }
 
+fn parse_observation_input(
+    root: &Value,
+    source: &Path,
+    hash: &str,
+) -> Result<(String, String, BrokerFixedIncomeObservation)> {
+    let institution = text(root, "/institution")?;
+    let expected_hash = text(root, "/expectedPositionSourceHash")?;
+    if !valid_hash(&expected_hash) {
+        return Err(invalid(
+            "Hash da posição de destino inválido no complemento.",
+        ));
+    }
+    let mut value = required(root, "/observation")?.clone();
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| invalid("Observação do pós-fixado inválida."))?;
+    // Import metadata is always derived from the exact imported file, never
+    // accepted from a transcription or from one of its referenced images.
+    object.insert("importedAt".into(), Value::String(Utc::now().to_rfc3339()));
+    object.insert(
+        "sourcePath".into(),
+        Value::String(source.to_string_lossy().into_owned()),
+    );
+    object.insert("sourceHash".into(), Value::String(hash.into()));
+    let mut observation: BrokerFixedIncomeObservation = serde_json::from_value(value)?;
+    validate_observation(&mut observation)?;
+    Ok((institution, expected_hash, observation))
+}
+
+fn valid_hash(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn observation_money(value: &mut String, nonnegative: bool) -> Result<Decimal> {
+    let parsed = normalize_number(value, nonnegative)?;
+    if parsed.normalize().scale() > 2 {
+        return Err(invalid(
+            "Valores da observação do pós-fixado devem ter até duas casas decimais.",
+        ));
+    }
+    Ok(parsed)
+}
+
+fn validate_observation(observation: &mut BrokerFixedIncomeObservation) -> Result<()> {
+    let today = Utc::now()
+        .with_timezone(&chrono::FixedOffset::west_opt(3 * 3600).expect("Brasilia UTC-3"))
+        .date_naive()
+        .to_string();
+    validate_date(&observation.reference_date)?;
+    validate_date(&observation.return_reference_date)?;
+    if observation.reference_date > today
+        || observation.return_reference_date > observation.reference_date
+    {
+        return Err(invalid(
+            "As datas do pós-fixado devem corresponder ao saldo observado, sem datas futuras.",
+        ));
+    }
+    let imported = DateTime::parse_from_rfc3339(&observation.imported_at)
+        .map_err(|_| invalid("Data de importação da observação do pós-fixado inválida."))?;
+    if imported > Utc::now() + chrono::Duration::minutes(5)
+        || observation.name.trim().is_empty()
+        || observation.category.trim().is_empty()
+        || observation.risk_level.trim().is_empty()
+        || observation.source_path.trim().is_empty()
+        || !valid_hash(&observation.source_hash)
+    {
+        return Err(invalid(
+            "Descrição ou origem da observação do pós-fixado inválida.",
+        ));
+    }
+    if observation.contributions.is_empty() || observation.contributions.len() > 5000 {
+        return Err(invalid(
+            "Informe os aportes que compõem a observação do pós-fixado.",
+        ));
+    }
+    if observation.sources.is_empty() || observation.sources.len() > 64 {
+        return Err(invalid("Informe as fontes da observação do pós-fixado."));
+    }
+    let mut source_names = HashSet::new();
+    for source in &mut observation.sources {
+        if source.file_name.trim().is_empty()
+            || source.file_name.len() > 255
+            || source.file_name == "."
+            || source.file_name == ".."
+            || source
+                .file_name
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '/' | '\\' | ':'))
+            || !valid_hash(&source.sha256)
+            || !source_names.insert(source.file_name.to_lowercase())
+        {
+            return Err(invalid("As fontes devem informar nomes de arquivo únicos, sem caminhos, e hashes SHA-256 válidos."));
+        }
+        source.sha256.make_ascii_lowercase();
+    }
+    observation.source_hash.make_ascii_lowercase();
+    let balance = observation_money(&mut observation.balance, true)?;
+    let invested = observation_money(&mut observation.invested, true)?;
+    let earnings = observation_money(&mut observation.total_earnings, false)?;
+    observation_money(&mut observation.earnings12_months, false)?;
+    normalize_number(&mut observation.return12_months, false)?;
+    check_equal(
+        balance,
+        add(invested, earnings)?,
+        "Saldo e resultado do pós-fixado",
+    )?;
+    let (mut sum_invested, mut sum_current, mut sum_earnings) =
+        (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+    for contribution in &mut observation.contributions {
+        validate_date(&contribution.application_date)?;
+        if contribution.application_date > observation.reference_date {
+            return Err(invalid(
+                "A data de um aporte não pode ser posterior ao saldo observado.",
+            ));
+        }
+        let invested = observation_money(&mut contribution.invested, true)?;
+        if invested.is_zero() {
+            return Err(invalid(
+                "Cada aporte do pós-fixado deve ter valor aplicado positivo.",
+            ));
+        }
+        let current = observation_money(&mut contribution.current_value, true)?;
+        let earnings = observation_money(&mut contribution.earnings, false)?;
+        let percentage = normalize_number(&mut contribution.return_percent, false)?;
+        check_equal(
+            current,
+            add(invested, earnings)?,
+            "Valor atual e resultado do aporte",
+        )?;
+        let expected = mul(div(earnings, invested)?, Decimal::ONE_HUNDRED)?;
+        // The source displays percentages with two decimals. Permit one unit
+        // of that final displayed digit, never a discrepancy in money totals.
+        let difference = expected
+            .checked_sub(percentage)
+            .ok_or(CoreError::ArithmeticOverflow)?
+            .abs();
+        if percentage.normalize().scale() > 2 || difference > Decimal::new(1, 2) {
+            return Err(invalid(
+                "A rentabilidade informada não confere com o resultado do aporte.",
+            ));
+        }
+        sum_invested = add(sum_invested, invested)?;
+        sum_current = add(sum_current, current)?;
+        sum_earnings = add(sum_earnings, earnings)?;
+    }
+    check_equal(
+        invested,
+        sum_invested,
+        "Soma dos valores aplicados do pós-fixado",
+    )?;
+    check_equal(
+        balance,
+        sum_current,
+        "Soma dos valores atuais do pós-fixado",
+    )?;
+    check_equal(earnings, sum_earnings, "Soma dos rendimentos dos aportes")?;
+    Ok(())
+}
+
 fn parse_portuguese(root: &Value, source: &Path, hash: &str) -> Result<BrokerPosition> {
     if root.get("versao_formato").and_then(Value::as_u64) != Some(1)
         || text(root, "/moeda")? != "BRL"
@@ -284,6 +532,7 @@ fn parse_portuguese(root: &Value, source: &Path, hash: &str) -> Result<BrokerPos
         return12_months: numeric(fixed, "/rentabilidade_12_meses_percentual")?,
         redemption_conversion: text(fixed, "/cotizacao_de_resgate")?,
         redemption_settlement: text(fixed, "/liquidacao_de_resgate")?,
+        latest_observation: None,
     };
     check_equal(
         parse_decimal(&numeric(
@@ -481,6 +730,9 @@ fn parse_normalized(value: Value) -> Result<BrokerPosition> {
     }
     normalize_number(&mut fixed.reported_earnings, false)?;
     normalize_number(&mut fixed.return12_months, false)?;
+    if let Some(observation) = &mut fixed.latest_observation {
+        validate_observation(observation)?;
+    }
     if listed != market
         && !position
             .warnings

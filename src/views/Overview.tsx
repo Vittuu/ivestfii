@@ -55,7 +55,7 @@ export default function Overview({ walletId, snapshot, onNavigate, onImport, onI
       <button type="button" className="button primary" onClick={() => onNavigate('portfolio', 'history')}><Plus size={16} />Novo lançamento</button>
     </PageActions>
 
-    <CompletePortfolio position={snapshot.brokerPosition} onImportPosition={onImportPosition} showImportAction={false} />
+    <CompletePortfolio position={snapshot.brokerPosition} onImportPosition={onImportPosition} showImportAction={false} onShowFixedIncome={() => onNavigate('portfolio', 'position')} />
     {desktop && <FiiPerformancePanel key={walletId} walletId={walletId} snapshot={snapshot} onProjection={() => onNavigate('projections')} onCash={() => onNavigate('cash')} onData={receivePerformance} />}
     {desktop && <MarketSummary snapshot={snapshot} onMarket={() => onNavigate('market')} />}
 

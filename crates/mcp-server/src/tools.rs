@@ -32,7 +32,7 @@ pub(crate) fn definitions() -> Vec<Value> {
         (
             NAMES[0],
             "Consultar carteira local",
-            "Consulta FIIs e caixinhas da carteira selecionada, seu cadastro, o catálogo e os totais separados de custo de FIIs/saldo de caixinhas entre carteiras. walletId permite selecionar outra carteira explicitamente. brokerPosition é uma observação importada datada, não cotação em tempo real. Não some custos, dividendos ou caixinhas novamente à posição da corretora. Respeite dataScope.",
+            "Consulta FIIs e caixinhas da carteira selecionada, seu cadastro, o catálogo e os totais separados de custo de FIIs/saldo de caixinhas entre carteiras. walletId permite selecionar outra carteira explicitamente. brokerPosition é uma observação importada datada, não cotação em tempo real. fixedIncome.latestObservation, quando disponível, é um complemento com data própria; totalEarnings é ganho contido no saldo, não novo pagamento. Não some custos, dividendos ou caixinhas novamente à posição da corretora. Respeite dataScope.",
             schema(json!({"walletId":wallet_field.clone()}), &[]),
         ),
         (
@@ -168,7 +168,7 @@ fn scoped_snapshot(catalog: &WalletCatalog, wallet_id: &str) -> Result<Value, St
             "addPendingIncomeToReceivedDividends":false,
             "combineDifferentCapturedTimes":false
         },
-        "interpretation":"Quando disponível, overview.totalWithCash já é o total da tela com caixa. Não some novamente custos, dividendos históricos, caixinhas, saldos ou classes. wealthOverview mantém custo histórico de FIIs e saldo de caixinhas em componentes separados, sem somar posições importadas. listedFunds.marketValue e overview.listedFunds são observações distintas; não substitua uma pela outra. fixedIncome.reportedEarnings é um indicador da tela, não um novo pagamento nem aporte."
+        "interpretation":"Quando disponível, overview.totalWithCash já é o total da tela com caixa. Não some novamente custos, dividendos históricos, caixinhas, saldos ou classes. wealthOverview mantém custo histórico de FIIs e saldo de caixinhas em componentes separados, sem somar posições importadas. listedFunds.marketValue e overview.listedFunds são observações distintas; não substitua uma pela outra. fixedIncome.reportedEarnings é um indicador da tela, não um novo pagamento nem aporte. fixedIncome.latestObservation é um complemento datado: cite sua referenceDate sem substituir ou recalcular o total antigo de overview. Seu totalEarnings é o ganho já contido no balance, não um pagamento ou aporte adicional; contributions detalha esses mesmos valores e não deve ser somado novamente ao saldo. earnings12Months e return12Months descrevem outro período, com returnReferenceDate própria; não os confunda com o ganho acumulado nem com a data do saldo."
     });
     Ok(snapshot)
 }

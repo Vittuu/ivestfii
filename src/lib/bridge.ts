@@ -319,6 +319,30 @@ export interface BrokerHolding {
   costBasis: string;
 }
 
+export interface BrokerFixedIncomeObservation {
+  referenceDate: string;
+  name: string;
+  category: string;
+  riskLevel: string;
+  balance: string;
+  invested: string;
+  totalEarnings: string;
+  earnings12Months: string;
+  return12Months: string;
+  returnReferenceDate: string;
+  contributions: {
+    applicationDate: string;
+    invested: string;
+    currentValue: string;
+    earnings: string;
+    returnPercent: string;
+  }[];
+  sources: { fileName: string; sha256: string }[];
+  importedAt: string;
+  sourcePath: string;
+  sourceHash: string;
+}
+
 export interface BrokerPosition {
   referenceDate: string;
   institution: string;
@@ -352,6 +376,7 @@ export interface BrokerPosition {
     return12Months: string;
     redemptionConversion: string;
     redemptionSettlement: string;
+    latestObservation?: BrokerFixedIncomeObservation | null;
   };
   warnings: string[];
 }

@@ -67,7 +67,7 @@ export default function Settings({ walletId, walletName, info, onImport, onExpor
         <div className="block span-12">
           <SectionHeading title="Importar e exportar" level={3} />
           <ul className="settings-actions">
-            <ActionRow title="Posição da corretora" description="Atualiza FIIs, pós-fixado e saldo em conta com o JSON da corretora. O histórico não muda.">{(describedBy) => <button className="button" onClick={onImportPosition} disabled={!desktop} aria-describedby={describedBy}><ArrowDownToLine size={16} />Importar posição</button>}</ActionRow>
+            <ActionRow title="Posição da corretora" description="Importa a posição ou um complemento do pós-fixado com seus aportes. O histórico não muda.">{(describedBy) => <button className="button" onClick={onImportPosition} disabled={!desktop} aria-describedby={describedBy}><ArrowDownToLine size={16} />Importar posição</button>}</ActionRow>
             <ActionRow title="Histórico de lançamentos" description="Aceita o arquivo antigo ou um backup do IvestFII, com a posição incluída. Repetições não duplicam registros.">{(describedBy) => <button className="button" onClick={onImport} disabled={!desktop} aria-describedby={describedBy}><ArrowDownToLine size={16} />Importar histórico ou backup</button>}</ActionRow>
             <ActionRow title="Backup da carteira" description="FIIs, caixinhas e posição da carteira selecionada. Exporte uma carteira por vez.">{(describedBy) => <button className="button" onClick={onExport} disabled={!desktop} aria-describedby={describedBy}><ArrowUpFromLine size={16} />Exportar carteira selecionada</button>}</ActionRow>
           </ul>

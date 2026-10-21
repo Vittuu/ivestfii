@@ -28,7 +28,8 @@ mod profile;
 mod wallets;
 mod wealth;
 pub use broker::{
-    BrokerFixedIncome, BrokerHolding, BrokerListedFunds, BrokerOverview, BrokerPosition,
+    BrokerFixedIncome, BrokerFixedIncomeContribution, BrokerFixedIncomeObservation, BrokerHolding,
+    BrokerListedFunds, BrokerObservationSource, BrokerOverview, BrokerPosition,
 };
 pub use cash::{CashPocket, CashPocketInput, CashSimulation, CashSimulationInput};
 pub use profile::{InvestmentProfile, InvestmentProfileInput};
