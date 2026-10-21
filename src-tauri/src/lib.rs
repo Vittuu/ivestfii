@@ -403,17 +403,27 @@ async fn refresh_fii_performance(
     let dividends = DividendService::new(state.data_directory.join("public-data/dividends.json"))?;
     let history_service =
         CdiHistoryService::new(state.data_directory.join("public-data/cdi-history.json"))?;
+    let today = performance_today();
     let mut errors = Vec::new();
     let (key, _) = market_settings(&state)?.brapi_key()?;
     // Reuse the B3 cache and its own daily cadence; opening or refreshing the
     // result must not bypass the shared public-source request policy.
-    let (quote_result, dividend_result) = tokio::join!(
+    let (quote_result, dividend_result, historical_result) = tokio::join!(
         ivestfii_market_data::bounded_quotes(&quotes, &symbols, key.as_deref()),
         tokio::time::timeout(
             std::time::Duration::from_secs(45),
             dividends.refresh_if_due(&symbols),
         ),
+        ivestfii_market_data::historical_performance::refresh_if_due(
+            &snapshot,
+            &state.data_directory,
+            today,
+        ),
     );
+    match historical_result {
+        Ok(coverage) => errors.extend(coverage.issues),
+        Err(error) => errors.push(error),
+    }
     let panel = match quote_result {
         Ok(panel) => panel,
         Err(error) => {
@@ -442,7 +452,6 @@ async fn refresh_fii_performance(
         errors.push(error);
         None
     });
-    let today = performance_today();
     let preliminary = performance::build_report_with_income(
         &snapshot,
         &panel,
@@ -465,6 +474,14 @@ async fn refresh_fii_performance(
         today,
         errors,
     )?;
+    let report = performance::attach_historical_cache(
+        &snapshot,
+        &state.data_directory,
+        report,
+        history.as_ref(),
+        &dividend_panel,
+        today,
+    );
     let repository = selected_repository(&state, wallet_id.as_deref())?;
     Ok(remember_portfolio_observation(&repository, report))
 }

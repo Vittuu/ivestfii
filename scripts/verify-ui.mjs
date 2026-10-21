@@ -250,6 +250,14 @@ const evolutionMonthly={status:'partial',startDate:'2025-08-01',asOf:'2026-10-20
 ],issues:['A linha da carteira usa somente os saldos reais registrados; meses ausentes ficam com lacunas.'],assumptions:['FIIs, pós-fixado e caixinhas entram uma vez, na mesma data de referência.']};
 const evolutionInitial={...evolutionMonthly,points:evolutionMonthly.points.map(point=>({...point,portfolioResult:point.month==='2026-10'?'130':null,difference:point.month==='2026-10'?'-20':null,status:point.month==='2026-10'?'available':'incomplete',issues:point.month==='2026-10'?[]:['Sem saldo registrado da carteira neste mês.']}))};
 const evolutionLatest={...evolutionMonthly,points:evolutionMonthly.points.map(point=>({...point,portfolioResult:null,cdiResult:point.month==='2026-10'?null:point.cdiResult,difference:null,status:'incomplete',issues:['Sem saldo registrado da carteira neste mês.']})),latestKnown:{fromDate:'2026-10-19',toDate:'2026-10-20',invested:'2540',portfolioResult:'130',components:[{kind:'fiis',id:null,name:'FIIs',asOf:'2026-10-20',result:'35.44'},{kind:'fixedIncome',id:null,name:'Pós-fixado sintético',asOf:'2026-10-19',result:'60'},{kind:'cash',id:'pocket-a',name:'Caixinha sintética',asOf:'2026-10-20',result:'34.56'}]}};
+const evolutionReconstructed={...evolutionMonthly,status:'available',issues:[],points:evolutionMonthly.points.map(point=>({
+  ...point,
+  ...(point.month==='2025-12'?{portfolioResult:'35',cdiResult:'20',difference:'15'}:point.month==='2026-05'?{cdiResult:'60',difference:'5'}:point.month==='2026-07'?{portfolioResult:'100',cdiResult:'90',difference:'10'}:{}),status:'available',issues:[],
+  provenance:{kind:'reconstructed',incomeComplete:true,components:[
+    {kind:'fiis',id:'fund-api',name:'FIIs sintéticos',asOf:point.asOf,invested:'1000',marketValue:'1050',result:'70',source:'Dados B3 · COTAHIST',sourceUrl:'https://dadosb3.com/fiis/TEST11/desempenho?de='+point.month+'-01&ate='+point.asOf,fetchedAt:'2026-10-21T12:00:00Z'},
+    {kind:'fixedIncome',name:'Pós-fixado sintético',asOf:point.asOf,invested:'300',marketValue:'360',result:'60',source:'CVM · Informe diário',sourceUrl:'https://dados.cvm.gov.br/dados/FI/DOC/INF_DIARIO/DADOS/inf_diario_fi_202609.zip',fetchedAt:'2026-10-21T12:00:00Z'},
+  ],assumptions:['Preços e cotas oficiais nas datas indicadas; aportes preservados.']},
+}))};
 const evolutionOther={status:'available',startDate:'2026-09-01',asOf:'2026-10-20',points:[evolutionPoint('2026-09','2026-09-30','20','10','10'),evolutionPoint('2026-10','2026-10-20','40','15','25',[],true)],issues:[],assumptions:[]};
 const incomePerformanceDividendPanel={items:['TEST11','MOCK11'].map(symbol=>({symbol,status:'cached',observation:{symbol,fetchedAt:'2026-10-20T12:00:00Z',source:'B3',sourceUrl:'https://sistemaswebb3-listados.b3.com.br/fundsListedPage/events-main/'+symbol.slice(0,4),events:[incomeApiEvent(symbol,'2026-03',symbol==='TEST11'?'1.5':'2',symbol==='TEST11'?'10':'2',symbol==='TEST11'?'15':'4'),incomeApiEvent(symbol,'2020-02','1','10','10'),incomeApiEvent(symbol,'2026-11','1','10','10')]},error:null})),fetchedAt:'2026-10-20T12:00:00Z',errors:[]};
 const chatFixture={
@@ -416,6 +424,10 @@ function bootstrap(mode) {
       walletPerformance.portfolioBenchmark.components=walletPerformance.portfolioBenchmark.components.map(component=>({...component,asOf:component.kind==='fixedIncome'?'2026-10-19':'2026-10-20',cdi:null,issues:['Falta o CDI para a data deste saldo.']}));
     }
     if(mode==='wallet-evolution-latest-only')walletPerformance.portfolioEvolution={...structuredClone(evolutionLatest),points:[],issues:[]};
+    if(mode==='wallet-evolution-reconstructed'){
+      walletPerformance.portfolioEvolution=structuredClone(evolutionReconstructed);
+      walletPerformance.historicalData={status:'available',priceObservations:30,pricePending:0,navObservations:15,navPendingMonths:0,issues:[]};
+    }
   }
   return `
 import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
@@ -481,7 +493,7 @@ mockIPC(async (command, args={}) => {
     case 'get_wealth_overview': {const rows=wallets.map((wallet,index)=>{const value=index?test.otherSnapshot:test.snapshot;return {wallet,fiiInvested:value.totals.invested,cashBalance:cashPerformance(value.cashPockets).balance};});return {wallets:rows,totals:{fiiInvested:String(rows.reduce((sum,row)=>sum+Number(row.fiiInvested),0)),cashBalance:String(rows.reduce((sum,row)=>sum+Number(row.cashBalance),0))}};}
     case 'get_portfolio': return structuredClone(current);
     case 'get_fii_performance': {const result=withPortfolio(current,args.walletId==='wallet-other'?test.otherPerformance:test.performance);if(test.deferPerformanceRead)await new Promise(resolve=>test.performanceReadWaiters.push(resolve));return result;}
-    case 'refresh_fii_performance': {const result=withPortfolio(current,args.walletId==='wallet-other'?test.otherPerformance:test.performance);if(test.deferPerformance)await new Promise(resolve=>test.performanceWaiters.push(resolve));if(test.failPerformance)throw new Error('Fontes de resultado temporariamente indisponíveis no teste.');return result;}
+    case 'refresh_fii_performance': {const result=withPortfolio(current,args.walletId==='wallet-other'?test.otherPerformance:test.performance);if(test.deferPerformance)await new Promise(resolve=>test.performanceWaiters.push(resolve));if(test.failPerformance)throw new Error('Fontes de resultado temporariamente indisponíveis no teste.');return test.refreshResultOverride?structuredClone(test.refreshResultOverride):result;}
     case 'get_app_info': return {
       dataDirectory: 'X:\\\\fixture', databasePath: 'X:\\\\fixture\\\\portfolio.sqlite',
       legacyPath: 'X:\\\\fixture\\\\synthetic-ledger.json',
@@ -2334,6 +2346,40 @@ try {
     assert.equal(await latestOnlyChart.locator('[data-month]').count(),0);assert.equal(await latestOnlyChart.locator('.evolution-dot').count(),0);assert.equal(await latestOnlyChart.locator('.evolution-selected').count(),0);assert.equal(compact(await latestOnlyChart.locator('.evolution-latest-value').textContent()),'+R$130,00');await noOverflow(latestOnly.page,'wallet-evolution-current-only-no-overflow');
     check('wallet-evolution-current-only-without-monthly-points-still-shows-a-distinct-real-known-result');await noUnexpectedCommands(latestOnly.page);await latestOnly.context.close();
 
+    const reconstructed=await openPage('wallet-evolution-reconstructed',{width:1440,height:1000}),apiPage=reconstructed.page,apiScope=region(apiPage,'Resultado da carteira'),apiChart=apiScope.locator('.portfolio-evolution'),apiGraph=apiChart.locator('svg'),apiSelected=apiChart.locator('.evolution-selected');
+    const apiOriginal=await apiPage.evaluate(()=>structuredClone(globalThis.__uiTest.snapshot));
+    await apiGraph.waitFor();assert.equal(await apiGraph.locator('.evolution-dot.portfolio').count(),12);assert.equal((await apiGraph.locator('.evolution-line.portfolio').getAttribute('d')).match(/M/g).length,1);assert.equal((await apiGraph.locator('.evolution-line.portfolio').getAttribute('d')).match(/L/g).length,11);
+    await textMatches(apiChart.locator('.evolution-hint'),/12 de 12 meses com valores da carteira \(dados das APIs e registros\)/);
+    await apiGraph.focus();await apiPage.keyboard.press('End');await textMatches(apiSelected,/outubro\/2026.*Reconstruído pelas APIs.*FIIs sintéticos.*20\/10\/2026.*Dados B3.*Pós-fixado sintético.*CVM/);
+    await apiGraph.locator('[data-month="2026-09"] .evolution-hit').hover();await textMatches(apiChart.getByRole('tooltip'),/Reconstruído pelas APIs.*Carteira abaixo do CDI/);
+    await apiPage.mouse.move(0,0);await apiPage.locator('body').click({position:{x:0,y:0}});
+    const sourceLink=apiSelected.getByRole('link',{name:/^Dados B3/});assert.match(await sourceLink.getAttribute('href'),/^https:\/\/dadosb3\.com\/fiis\/TEST11\/desempenho/);await sourceLink.click();assert.equal((await calls(apiPage,'open_public_source')).at(-1).args.url,await sourceLink.getAttribute('href'));
+    assert.match(await tip(apiSelected,'Como foi calculado'),/preço histórico × cotas acumuladas.*cotas históricas da CVM.*Movimentos de cotas ou impostos não cadastrados/);
+    await apiChart.locator('.evolution-table > summary').click();assert.equal(await apiChart.locator('.evolution-table tbody .evolution-origin-badge').count(),12);
+    await sectionShot(apiPage,'desktop-wallet-evolution-reconstructed',apiScope);
+    check('wallet-evolution-reconstructed-real-native-points-draw-continuous-monthly-line-and-show-origin-source-dates-and-safe-native-links');
+    await apiChart.locator('.evolution-table > summary').click();
+    await apiPage.setViewportSize({width:375,height:812});await noOverflow(apiPage,'wallet-evolution-reconstructed-mobile375-no-overflow');await sectionShot(apiPage,'mobile-wallet-evolution-reconstructed375',apiScope);await apiPage.setViewportSize({width:720,height:500});await noOverflow(apiPage,'wallet-evolution-reconstructed-zoom200-no-overflow');await apiPage.setViewportSize({width:1440,height:1000});
+    await apiPage.evaluate(()=>{const point=globalThis.__uiTest.performance.portfolioEvolution.points.at(-2);point.provenance.incomeComplete=false;point.difference='-5';point.provenance.components[0].sourceUrl='javascript:alert(1)';});
+    await apiScope.getByRole('button',{name:'Atualizar resultado',exact:true}).click();await apiScope.getByText('Consulta concluída. Confira as datas dos dados.',{exact:true}).waitFor();await apiGraph.focus();await apiPage.keyboard.press('End');await apiPage.keyboard.press('ArrowLeft');
+    await textMatches(apiSelected,/Rendimentos incompletos; comparação pendente/);await textMatches(apiSelected.locator('dl > div').last().locator('dd'),/^Não comparável$/);assert.doesNotMatch(await apiGraph.locator('[data-month="2026-09"] .evolution-dot.portfolio').getAttribute('class'),/is-below/);assert.equal(await apiSelected.locator('a[href^="javascript:"]').count(),0);assert.equal(await apiSelected.getByRole('link',{name:/^Dados B3/}).count(),0);
+    check('wallet-evolution-incomplete-income-keeps-known-gain-without-false-CDI-comparison-and-refuses-an-untrusted-source-URL');
+    await apiPage.clock.install();
+    await apiPage.evaluate(()=>{globalThis.__uiTest.deferPerformance=true;});await apiScope.getByRole('button',{name:'Atualizar resultado',exact:true}).click();await apiPage.waitForFunction(()=>globalThis.__uiTest.performanceWaiters.length===1);
+    await apiPage.evaluate(()=>{const test=globalThis.__uiTest;Object.assign(test.performance.portfolioEvolution.points.at(-1),{portfolioResult:'777',difference:'627'});test.performance.historicalData.pricePending=8;});
+    const beforePoll=(await calls(apiPage,'get_fii_performance')).length;await apiPage.clock.runFor(10_001);await apiPage.waitForFunction(count=>globalThis.__uiTest.calls.filter(item=>item.command==='get_fii_performance').length>count,beforePoll);await apiGraph.focus();await apiPage.keyboard.press('End');await textMatches(apiSelected,/\+R\$ 777,00/);await textMatches(apiScope.locator('.performance-history-progress'),/Consultando histórico.*8 consultas pendentes/);
+    const networkCount=(await calls(apiPage,'refresh_fii_performance')).length;
+    await apiPage.evaluate(()=>{globalThis.__uiTest.deferPerformanceRead=true;globalThis.__uiTest.performance.portfolioEvolution.points.at(-1).portfolioResult='555';});await apiPage.clock.runFor(10_001);await apiPage.waitForFunction(()=>globalThis.__uiTest.performanceReadWaiters.length===1);
+    await apiPage.evaluate(()=>{const test=globalThis.__uiTest;test.refreshResultOverride=structuredClone(test.performance);test.refreshResultOverride.portfolioEvolution.points.at(-1).portfolioResult='888';test.performanceWaiters.splice(0).forEach(resolve=>resolve());});await apiScope.getByText('Consulta concluída. Confira as datas dos dados.',{exact:true}).waitFor();await textMatches(apiSelected,/\+R\$ 888,00/);await apiPage.evaluate(()=>{globalThis.__uiTest.deferPerformanceRead=false;globalThis.__uiTest.performanceReadWaiters.splice(0).forEach(resolve=>resolve());});await apiPage.clock.runFor(100);await textMatches(apiSelected,/\+R\$ 888,00/);assert.equal((await calls(apiPage,'refresh_fii_performance')).length,networkCount,'Backfill progress polling must only read cache, never trigger a second external refresh');
+    assert.deepEqual(await apiPage.evaluate(()=>globalThis.__uiTest.snapshot),apiOriginal);
+    const originalAutomatic=(await calls(apiPage,'refresh_public_data_if_due')).filter(item=>item.args.walletId==='wallet-original').length;
+    await apiPage.evaluate(()=>{const observation=globalThis.__uiTest.snapshot.brokerPosition.fixedIncome.latestObservation;observation.referenceDate='2026-10-21';observation.contributions[0].applicationDate='2023-02-02';});
+    await apiPage.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-other');await textMatches(apiChart.locator('.evolution-selected'),/\+R\$ 40,00/);await apiPage.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-original');await apiPage.waitForFunction(count=>globalThis.__uiTest.calls.filter(item=>item.command==='refresh_public_data_if_due'&&item.args.walletId==='wallet-original').length>count,originalAutomatic);
+    const autoCalls=await calls(apiPage,'refresh_public_data_if_due');assert.equal(autoCalls.filter(item=>item.args.walletId==='wallet-original').length,originalAutomatic+1);assert.deepEqual(Object.keys(autoCalls.at(-1).args),['walletId'],'The local input signature must not send balances, contributions or holdings to a source');
+    await noUnexpectedCommands(apiPage);assert.deepEqual(reconstructed.externalRequests,[]);await reconstructed.context.close();
+    check('wallet-evolution-background-cache-poll-shows-backfill-without-a-click-and-rejects-an-inflight-stale-poll-after-final-refresh');
+    check('wallet-evolution-fixed-income-date-and-contribution-change-triggers-one-new-local-refresh-scope-without-sending-financial-inputs');
+
     const empty=await openPage('wallet-evolution-empty',{width:1440,height:1000});const emptyChart=region(empty.page,'Resultado da carteira').locator('.portfolio-evolution');await emptyChart.locator('.evolution-empty').waitFor();assert.equal(await emptyChart.locator('svg').count(),0);assert.equal(await emptyChart.locator('.evolution-selected').count(),0);check('wallet-evolution-empty-response-does-not-create-a-zero-chart');await noUnexpectedCommands(empty.page);await empty.context.close();
     const zoom=await openPage('wallet-evolution-zoom-200',{width:720,height:500},{expandedSidebar:false});await zoom.page.locator('.portfolio-evolution svg').waitFor();await noOverflow(zoom.page,'wallet-evolution-zoom200-no-overflow');await sectionShot(zoom.page,'zoom200-wallet-evolution',region(zoom.page,'Resultado da carteira'));check('wallet-evolution-zoom200-remains-readable-without-global-horizontal-scroll');await noUnexpectedCommands(zoom.page);await zoom.context.close();
   }
@@ -3013,7 +3059,7 @@ try {
   const breakdown=performanceSection.locator('.performance-component-table');
   for(const [label,values] of [['FIIs',['−R$ 889,10','+R$ 80,00']],['Reserva sintética',['+R$ 34,56','+R$ 10,00']],['Carteira inteira',['−R$ 854,54','+R$ 90,00']]])
     assert.deepEqual((await breakdown.getByRole('row',{name:new RegExp('^'+escapeRegExp(label))}).locator('td').allInnerTexts()).map(normalize),values);
-  assert.match(await tip(performanceSection,'Como ler a evolução mensal'),/mesmos aportes e resgates.*registro real.*mesma data/);
+  assert.match(await tip(performanceSection,'Como ler a evolução mensal'),/mesmos aportes e resgates.*registros reais.*reconstruídos com preços históricos.*cotas da CVM.*proventos conhecidos.*contados uma vez/);
   const graph=performanceSection.locator('.portfolio-evolution svg');
   assert.equal(await graph.count(),0,'Old IPC responses retain totals but cannot fabricate monthly records');
   await performanceSection.locator('.evolution-empty').waitFor();

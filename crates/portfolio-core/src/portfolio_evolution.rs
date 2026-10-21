@@ -38,6 +38,9 @@ pub struct PortfolioEvolutionPoint {
     pub issues: Vec<String>,
     pub estimated: bool,
     pub is_partial_month: bool,
+    /// Public historical prices and declared movements, never a saved account balance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::historical_valuation::HistoricalMonthlyProvenance>,
 }
 
 /// Latest real values, retaining each investment's own source date. This is
@@ -650,6 +653,116 @@ fn movements(snapshot: &PortfolioSnapshot, cutoff: NaiveDate) -> Result<Movement
     Ok(output)
 }
 
+/// Reuse precisely the same matched-flow CDI model for reconstructed month ends.
+pub(crate) fn reconstructed_month_cdi(
+    snapshot: &PortfolioSnapshot,
+    rates: &[DailyCdiRate],
+    cutoff: NaiveDate,
+    today: NaiveDate,
+) -> Result<(Option<String>, Vec<String>)> {
+    let basis = movements(snapshot, cutoff)?;
+    let mut issues = basis.issues.clone();
+    if basis.estimated {
+        issues.push("CDI: compras antigas sem dia informado usam o fim do mês; essa convenção não altera as cotas no fechamento mensal.".into());
+    }
+    let calculate = || -> Result<String> {
+        // A completed calendar month can close after the last published CDI
+        // observation (for example Easter Friday followed by a weekend). Keep
+        // every flow at its original date; only published observations earn
+        // interest. Live/partial balances retain their strict coverage rule.
+        let expected = match cutoff.weekday() {
+            chrono::Weekday::Sat => cutoff.pred_opt(),
+            chrono::Weekday::Sun => cutoff.pred_opt().and_then(|day| day.pred_opt()),
+            _ => Some(cutoff),
+        }
+        .ok_or_else(|| invalid("Data final fora do intervalo suportado."))?;
+        let mut published = BTreeSet::new();
+        for observation in rates {
+            let day = date(&observation.date)?;
+            parse_nonnegative(&observation.value, "Taxa CDI diária")?;
+            if day > today || !published.insert(day) {
+                return Err(invalid("O histórico CDI contém data futura ou duplicada."));
+            }
+        }
+        let last = published.range(..=cutoff).next_back().copied();
+        let following = published
+            .range((
+                std::ops::Bound::Excluded(cutoff),
+                std::ops::Bound::Unbounded,
+            ))
+            .next()
+            .copied();
+        let closed_month = cutoff < today && month_end(cutoff)? == cutoff;
+        let Some(last) = last.filter(|last| {
+            closed_month
+                && *last < expected
+                && last.year() == cutoff.year()
+                && last.month() == cutoff.month()
+                && (cutoff - *last).num_days() <= 7
+                // A recently closed month's terminal rate may simply not be
+                // published yet. Require the series to resume after the month
+                // before accepting this bounded historical publication gap.
+                && following.is_some_and(|next| (next - *last).num_days() <= 7)
+        }) else {
+            return component_cdi_result(&basis, rates, cutoff, today);
+        };
+        let mut total = Decimal::ZERO;
+        for component in basis.components.values() {
+            let mut settled = BTreeMap::new();
+            let mut invested = Decimal::ZERO;
+            let mut withdrawn = Decimal::ZERO;
+            for (day, flow) in component.flows.range(..=last) {
+                settled.insert(*day, *flow);
+                invested = add(invested, flow.deposits)?;
+                withdrawn = add(withdrawn, flow.withdrawals)?;
+            }
+            let ending = calculate_flow_cdi(&settled, rates, last, today, invested, withdrawn)?;
+            let mut balance = parse_decimal(&ending.ending_value)?;
+            for (_, flow) in component.flows.range((
+                std::ops::Bound::Excluded(last),
+                std::ops::Bound::Included(cutoff),
+            )) {
+                let available = add(balance, flow.deposits)?;
+                if flow.withdrawals > available {
+                    return Err(invalid("Uma retirada supera o saldo do cenário CDI naquela data; não foi presumido empréstimo."));
+                }
+                balance = available
+                    .checked_sub(flow.withdrawals)
+                    .ok_or(CoreError::ArithmeticOverflow)?;
+            }
+            let result = add(balance, component.withdrawn)?
+                .checked_sub(component.invested)
+                .ok_or(CoreError::ArithmeticOverflow)?;
+            total = add(total, result)?;
+        }
+        Ok(decimal_string(total))
+    };
+    let result = if basis.issues.is_empty() {
+        match calculate() {
+            Ok(result) => Some(result),
+            Err(error) => {
+                issues.push(error.to_string());
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if result.is_some() && cutoff < today && month_end(cutoff)? == cutoff {
+        if let Some(last) = rates
+            .iter()
+            .filter_map(|rate| date(&rate.date).ok())
+            .filter(|day| *day <= cutoff)
+            .max()
+        {
+            if last < cutoff {
+                issues.push(format!("CDI: última taxa publicada em {last}; o fechamento mantém as datas originais dos movimentos, sem criar juros nos dias sem taxa publicada."));
+            }
+        }
+    }
+    Ok((result, issues))
+}
+
 fn earliest_flow(snapshot: &PortfolioSnapshot, today: NaiveDate) -> Result<Option<NaiveDate>> {
     Ok(movements(snapshot, today)?.flows.keys().next().copied())
 }
@@ -833,6 +946,7 @@ pub fn calculate_portfolio_evolution(
             issues,
             estimated: false,
             is_partial_month: cutoff < end,
+            provenance: None,
         });
     }
     Ok(PortfolioEvolution {

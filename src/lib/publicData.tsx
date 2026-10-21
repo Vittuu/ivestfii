@@ -88,6 +88,9 @@ export function usePublicDataController(walletId: string, snapshot: Snapshot, re
     walletId,
     snapshot.funds.map((fund) => [fund.ticker, fund.entries]).sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
     snapshot.brokerPosition?.listedFunds.holdings.map((holding) => holding.ticker).sort() ?? [],
+    // This signature stays local: only walletId reaches the native refresh.
+    snapshot.brokerPosition ? [snapshot.brokerPosition.referenceDate, snapshot.brokerPosition.fixedIncome] : null,
+    snapshot.cashPockets?.map((pocket) => [pocket.id, pocket.balanceDate, pocket.balance, pocket.totalDeposits, pocket.totalWithdrawals, pocket.cashFlows]).sort((left, right) => String(left[0]).localeCompare(String(right[0]))) ?? [],
     configurationRevision,
     wakeRevision,
   ]);

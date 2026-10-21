@@ -221,6 +221,15 @@
 .overview-page .evolution-selected dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
 .overview-page .evolution-selected dt { font-size: var(--fs-12); color: var(--text-3); }
 .overview-page .evolution-selected dd { margin: var(--sp-1) 0 0; font-family: var(--font-num); overflow-wrap: anywhere; }
+.overview-page .evolution-provenance { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--line); min-width: 0; }
+.overview-page .evolution-provenance > p { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.overview-page .evolution-origin-badge { display: inline-block; width: fit-content; max-width: 100%; color: var(--text-2); font-family: var(--font-ui); font-size: 11px; line-height: 1.5; }
+.overview-page .evolution-provenance ul { display: flex; flex-direction: column; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; color: var(--text-3); }
+.overview-page .evolution-provenance li { min-width: 0; overflow-wrap: anywhere; }
+.overview-page .evolution-provenance li time { white-space: nowrap; }
+.overview-page .evolution-provenance a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; }
+.overview-page .evolution-provenance a:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; }
+.overview-page .performance-history-progress { padding: var(--sp-2) var(--sp-3); border-left: 2px solid var(--warn); color: var(--text-2); font-size: var(--fs-12); line-height: 1.6; }
 .overview-page :is(.evolution-hint, .evolution-warning, .evolution-empty) { padding-block: var(--sp-2); font-size: var(--fs-12); line-height: 1.6; color: var(--text-3); }
 .overview-page .evolution-hint > span { display: block; margin-top: var(--sp-1); }
 .overview-page :is(.evolution-warning, .evolution-pending) { color: var(--warn); }

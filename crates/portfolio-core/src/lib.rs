@@ -22,6 +22,7 @@ use uuid::Uuid;
 mod broker;
 mod cash;
 mod evolution_history;
+pub mod historical_valuation;
 pub mod income;
 pub mod performance;
 pub mod portfolio_benchmark;

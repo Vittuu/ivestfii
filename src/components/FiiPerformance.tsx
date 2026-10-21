@@ -40,27 +40,49 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
   const generation = useRef(0);
   const loadedWallet = useRef(walletId);
   const pending = useRef(false);
+  const requestEpoch = useRef(0);
   useEffect(() => {
     const current = ++generation.current;
+    const request = ++requestEpoch.current;
     pending.current = false;
     if (loadedWallet.current !== walletId) { setData(null); loadedWallet.current = walletId; }
     setError(''); setNotice(''); setRefreshing(false);
     if (!desktop || !walletId) { setLoading(false); return; }
     setLoading(true);
     void readPublicCache<PerformanceData | null>('get_fii_performance', { walletId })
-      .then((cached) => { if (current === generation.current) { setData(cached); onData?.(cached); } })
+      .then((cached) => { if (current === generation.current && request === requestEpoch.current) { setData(cached); onData?.(cached); } })
       .catch((err) => { if (current === generation.current) setError(errorMessage(err)); })
       .finally(() => { if (current === generation.current) setLoading(false); });
     return () => { generation.current += 1; };
   }, [walletId, snapshot, publicData.revision, onData]);
+  useEffect(() => {
+    if (!desktop || !walletId || !(publicData.refreshing || refreshing)) return;
+    let active = true;
+    let inFlight = false;
+    const poll = async () => {
+      if (!active || inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      const current = generation.current;
+      const request = ++requestEpoch.current;
+      try {
+        const cached = await readPublicCache<PerformanceData | null>('get_fii_performance', { walletId });
+        if (active && current === generation.current && request === requestEpoch.current) { setData(cached); onData?.(cached); }
+      } catch { /* Keep the last complete response while the public backfill continues. */ }
+      finally { inFlight = false; }
+    };
+    const timer = window.setInterval(() => void poll(), 10_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [walletId, snapshot, publicData.refreshing, refreshing, publicData.revision, onData]);
   const refresh = async () => {
     if (pending.current || publicData.loading || publicData.refreshing || !desktop || !walletId) return;
     pending.current = true;
     const current = ++generation.current;
+    requestEpoch.current += 1;
     setRefreshing(true); setError(''); setNotice('');
     try {
       const result = await call<PerformanceData>('refresh_fii_performance', { walletId });
       if (current !== generation.current) return;
+      requestEpoch.current += 1;
       setData(result); onData?.(result); setNotice('Consulta concluída. Confira as datas dos dados.');
       void publicData.reloadCaches();
     } catch (err) {
@@ -81,6 +103,7 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
   const issues = portfolio?.issues ?? [];
   const cashBenchmarkPending = Boolean(benchmark?.components.some((component) => component.kind === 'cash' && component.issues.length > 0 && snapshot.cashPockets?.find((pocket) => pocket.id === component.id)?.cashFlows == null));
   const cashPending = Boolean(cash && cash.missingBasisCount > 0);
+  const historicalPending = (data?.historicalData?.pricePending ?? 0) + (data?.historicalData?.navPendingMonths ?? 0);
   return <section className="group fii-performance" aria-labelledby={headingId} aria-busy={loading || refreshing || undefined}>
     <div className="group-head"><h2 id={headingId}>Resultado da carteira</h2><div className="group-actions"><TextLink onClick={onProjection}>Ver projeção</TextLink><button className="button small" type="button" onClick={() => void refresh()} disabled={!desktop || !walletId || loading || refreshing || publicData.loading || publicData.refreshing}>{refreshing ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}{refreshing ? 'Atualizando…' : 'Atualizar resultado'}</button></div></div>
     <div className="block">
@@ -114,8 +137,9 @@ export default function FiiPerformancePanel({ walletId, snapshot, onProjection, 
         <div className="performance-chart-block">
           <SectionHeading title="Evolução da carteira × 100% do CDI" level={3} />
           <p className="performance-estimate performance-chart-scope">FIIs, pós-fixado e caixinhas. As linhas comparam o ganho acumulado, sem contar os aportes como lucro.</p>
+          {(publicData.refreshing || refreshing) && <p className="performance-history-progress" role="status">Consultando histórico… Os valores disponíveis já aparecem.{historicalPending > 0 && <span> {historicalPending} consultas pendentes.</span>}</p>}
           <PortfolioEvolutionChart data={data?.portfolioEvolution} loading={loading} />
-          <p className="performance-estimate"><Def text={<><p>O CDI usa os mesmos aportes e resgates, até a data do registro real de cada mês. Os registros só entram quando todos os investimentos têm valores na mesma data.</p><p>O ponto “Últimos valores” mostra o resultado já conhecido da carteira, com a data de cada investimento. Quando as datas são diferentes, ele fica separado da linha mensal e não informa se a carteira ficou acima ou abaixo do CDI.</p><p>Meses sem saldo da carteira ficam com uma lacuna. O app guarda automaticamente os próximos registros reais por carteira. Valores antigos não são estimados a partir do saldo de hoje.</p>{data?.portfolioEvolution?.assumptions.map((assumption, index) => <p key={index}>{assumption}</p>)}</>}>Como ler a evolução mensal</Def></p>
+          <p className="performance-estimate"><Def text={<><p>O CDI usa os mesmos aportes e resgates, até a data de cada mês. A linha da carteira reúne os registros reais e os meses reconstruídos com preços históricos, cotas da CVM e os movimentos informados por você.</p><p>Nos FIIs, o resultado inclui a variação das cotas e os proventos conhecidos, contados uma vez. No pós-fixado, usa a cota histórica da CVM e os aportes cadastrados. As fontes e as datas aparecem ao selecionar um mês.</p><p>Movimentos de cotas ou impostos não cadastrados não são inventados. Quando faltam rendimentos, o ganho conhecido pode aparecer, mas a comparação fica pendente.</p><p>O ponto “Últimos valores” conserva a data de cada saldo e fica separado da linha mensal quando as datas são diferentes. Onde ainda faltam preços ou saldos, há uma lacuna.</p>{data?.portfolioEvolution?.assumptions.map((assumption, index) => <p key={index}>{assumption}</p>)}</>}>Como ler a evolução mensal</Def></p>
           {cashBenchmarkPending && <p className="performance-message performance-warning performance-cash-benchmark-pending">A comparação das caixinhas precisa das datas dos depósitos e retiradas. <TextLink onClick={onCash}>Conferir caixinhas</TextLink></p>}
         </div>
         <div className="performance-breakdown">

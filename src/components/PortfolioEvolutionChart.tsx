@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { dateBR, money } from '../lib/bridge';
 import type { PortfolioEvolution, PortfolioEvolutionPoint } from '../lib/bridge';
+import { Def } from '../components';
+import PublicSourceLink from './PublicSourceLink';
 
 interface Props { data?: PortfolioEvolution | null; loading?: boolean }
 
@@ -31,10 +33,30 @@ const partialMonth = (point: PortfolioEvolutionPoint) => {
   return day < new Date(year, month, 0).getDate();
 };
 const comparison = (point: PortfolioEvolutionPoint) => {
+  if (point.provenance?.incomeComplete === false) return 'Rendimentos incompletos; comparação pendente.';
   if (value(point.portfolioResult) == null || value(point.cdiResult) == null || value(point.difference) == null) return 'Faltam dados para comparar este mês.';
   const difference = value(point.difference)!;
   return difference > 0 ? 'Carteira acima do CDI.' : difference < 0 ? 'Carteira abaixo do CDI.' : 'Carteira no mesmo nível do CDI.';
 };
+const difference = (point: PortfolioEvolutionPoint) => point.provenance?.incomeComplete === false ? null : point.difference;
+const safeHistoricalSource = (href: string) => {
+  try {
+    const url = new URL(href);
+    return url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443')
+      && ['dadosb3.com', 'dados.cvm.gov.br'].includes(url.hostname) ? url.href : null;
+  } catch { return null; }
+};
+function HistoryOrigin({ point }: { point: PortfolioEvolutionPoint }) {
+  const origin = point.provenance;
+  if (!origin) return null;
+  return <div className="evolution-provenance">
+    <p><span className="evolution-origin-badge">Reconstruído pelas APIs</span> <Def text={<><p>FIIs: preço histórico × cotas acumuladas, menos as compras, mais os proventos conhecidos.</p><p>Pós-fixado: cotas históricas da CVM e aportes informados. Movimentos de cotas ou impostos não cadastrados não são inventados.</p>{origin.assumptions.map((assumption, index) => <p key={index}>{assumption}</p>)}</>}>Como foi calculado</Def></p>
+    <ul aria-label="Fontes dos valores deste mês">{origin.components.map((component, index) => {
+      const source = safeHistoricalSource(component.sourceUrl);
+      return <li key={`${component.kind}-${component.id ?? index}`}><Def text={<><p>Aplicado: {money(component.invested)}</p><p>Valor na data: {money(component.marketValue)}</p><p>Resultado: {signed(component.result)}</p><p>Consultado em {dateBR(component.fetchedAt)}.</p></>}>{component.name}</Def><span> · <time dateTime={component.asOf}>{dateBR(component.asOf)}</time> · </span>{source ? <PublicSourceLink href={source}>{component.source}</PublicSourceLink> : <span>{component.source}</span>}</li>;
+    })}</ul>
+  </div>;
+}
 
 /** Draws native monthly results without filling unknown history or calculating returns in the browser. */
 export default function PortfolioEvolutionChart({ data, loading = false }: Props) {
@@ -51,6 +73,7 @@ export default function PortfolioEvolutionChart({ data, loading = false }: Props
   const selected = points[selectedIndex];
   const warning = data?.issues.find((issue) => issue !== selected?.issues[0]);
   const knownCount = points.filter((point) => value(point.portfolioResult) != null).length;
+  const reconstructed = points.some((point) => point.provenance?.kind === 'reconstructed');
   const hasPortfolio = points.some((point) => value(point.portfolioResult) != null);
   const hasCdi = points.some((point) => value(point.cdiResult) != null);
   const current = data?.latestKnown;
@@ -135,7 +158,7 @@ export default function PortfolioEvolutionChart({ data, loading = false }: Props
             const portfolio = value(point.portfolioResult);
             const cdi = value(point.cdiResult);
             const selectedPoint = index === selectedIndex;
-            const below = value(point.difference) != null && value(point.difference)! < 0;
+            const below = value(difference(point)) != null && value(difference(point))! < 0;
             const hitLeft = index === 0 ? left - 10 : (x(index - 1) + x(index)) / 2;
             const hitRight = index === points.length - 1 ? right + 10 : (x(index) + x(index + 1)) / 2;
             return <g key={point.month} data-month={point.month} className={selectedPoint ? 'is-selected' : undefined} onPointerEnter={() => { select(index); setShowTooltip(true); setShowLatestTooltip(false); }} onClick={() => { select(index); setShowTooltip(true); setShowLatestTooltip(false); }}>
@@ -143,7 +166,7 @@ export default function PortfolioEvolutionChart({ data, loading = false }: Props
               {portfolio != null && <circle className={`evolution-dot portfolio ${below ? 'is-below' : ''}`} cx={x(index)} cy={y(portfolio)} r={selectedPoint ? 4 : 2.5} />}
               {portfolio == null && <line className="evolution-missing" x1={x(index)} x2={x(index)} y1={bottom - 3} y2={bottom + 3} />}
               {labels.has(index) && <text className="evolution-month" x={x(index)} y="242" textAnchor={index === 0 ? 'start' : index === points.length - 1 ? 'end' : 'middle'}>{monthLabel(point.month)}</text>}
-              <rect className="evolution-hit" x={hitLeft} y={top} width={Math.max(1, hitRight - hitLeft)} height={bottom - top + 34}><title>{monthLabel(point.month, true)}. Carteira: {signed(point.portfolioResult, 'Sem saldo registrado')}. CDI: {signed(point.cdiResult)}. {comparison(point)}{point.issues.length > 0 ? ` ${point.issues.join(' ')}` : ''}</title></rect>
+              <rect className="evolution-hit" x={hitLeft} y={top} width={Math.max(1, hitRight - hitLeft)} height={bottom - top + 34}><title>{monthLabel(point.month, true)}. Carteira: {signed(point.portfolioResult, 'Sem saldo registrado')}. CDI: {signed(point.cdiResult)}. {point.provenance ? 'Reconstruído pelas APIs. ' : ''}{comparison(point)}{point.issues.length > 0 ? ` ${point.issues.join(' ')}` : ''}</title></rect>
             </g>;
           })}
           {latest && hasLatestMarker && latestAmount != null && <g className="evolution-latest-marker" data-latest-month={latest.toDate.slice(0, 7)} tabIndex={0} role="img" aria-label={latestDescription} onPointerEnter={() => { setShowTooltip(false); setShowLatestTooltip(true); }} onClick={() => { setShowTooltip(false); setShowLatestTooltip(true); }} onFocus={(event) => { event.stopPropagation(); setShowTooltip(false); setShowLatestTooltip(true); }} onBlur={() => setShowLatestTooltip(false)}>
@@ -156,8 +179,10 @@ export default function PortfolioEvolutionChart({ data, loading = false }: Props
         </svg>
         {showTooltip && selected && <div className="evolution-tooltip" role="tooltip" style={{ left: `clamp(0px, ${x(selectedIndex) / width * 100}% - 112px, 100% - 224px)` }}>
           <strong>{monthLabel(selected.month, true)}{partialMonth(selected) ? ' · parcial' : ''}</strong><span>Até {dateBR(selected.asOf)}</span>
-          <dl><div><dt>{selectedPortfolioLabel}</dt><dd className={resultClass(selected.portfolioResult)}>{signed(selected.portfolioResult, selectedPortfolioMissing)}</dd></div><div><dt>100% do CDI</dt><dd>{signed(selected.cdiResult)}</dd></div><div><dt>Diferença</dt><dd className={resultClass(selected.difference)}>{signed(selected.difference, 'Não comparável')}</dd></div></dl>
-          <p className={resultClass(selected.difference)}>{comparison(selected)}</p>
+          {selected.provenance && <span className="evolution-origin-badge">Reconstruído pelas APIs</span>}
+          <dl><div><dt>{selectedPortfolioLabel}</dt><dd className={resultClass(selected.portfolioResult)}>{signed(selected.portfolioResult, selectedPortfolioMissing)}</dd></div><div><dt>100% do CDI</dt><dd>{signed(selected.cdiResult)}</dd></div><div><dt>Diferença</dt><dd className={resultClass(difference(selected))}>{signed(difference(selected), 'Não comparável')}</dd></div></dl>
+          <p className={selected.provenance?.incomeComplete === false ? 'evolution-pending' : resultClass(difference(selected))}>{comparison(selected)}</p>
+          {selected.provenance && <span>Fontes e cálculo abaixo do gráfico.</span>}
           {selected.issues.length > 0 && <p className="evolution-pending">{selected.issues[0]}</p>}
         </div>}
         {showLatestTooltip && hasLatestMarker && latest && <div className="evolution-tooltip evolution-latest-tooltip" role="tooltip" style={{ left: `clamp(0px, ${latestX / width * 100}% - 112px, 100% - 224px)` }}>
@@ -170,13 +195,14 @@ export default function PortfolioEvolutionChart({ data, loading = false }: Props
     </div>
     {selected && <div className="evolution-selected" id={`${chartId}-selected`} role="status" aria-live="polite" aria-atomic="true">
       <p><strong>{monthLabel(selected.month, true)}</strong>{partialMonth(selected) && <span> · parcial até {dateBR(selected.asOf)}</span>}{selected.estimated && <span> · CDI com datas aproximadas</span>}</p>
-      <dl><div><dt>{selectedPortfolioLabel}</dt><dd className={resultClass(selected.portfolioResult)}>{signed(selected.portfolioResult, selectedPortfolioMissing)}</dd></div><div><dt>100% do CDI</dt><dd>{signed(selected.cdiResult)}</dd></div><div><dt>Diferença</dt><dd className={resultClass(selected.difference)}>{signed(selected.difference, 'Não comparável')}</dd></div></dl>
+      <dl><div><dt>{selectedPortfolioLabel}</dt><dd className={resultClass(selected.portfolioResult)}>{signed(selected.portfolioResult, selectedPortfolioMissing)}</dd></div><div><dt>100% do CDI</dt><dd>{signed(selected.cdiResult)}</dd></div><div><dt>Diferença</dt><dd className={resultClass(difference(selected))}>{signed(difference(selected), 'Não comparável')}</dd></div></dl>
       {selectedLatestGap && latest && <p>Último resultado conhecido: <strong className={resultClass(latest.portfolioResult)}>{signed(latest.portfolioResult)}</strong>. O ponto verde usa as datas dos saldos acima; o registro mensal ainda não está completo.</p>}
-      <p className={resultClass(selected.difference)}>{comparison(selected)}</p>
+      <p className={selected.provenance?.incomeComplete === false ? 'evolution-pending' : resultClass(difference(selected))}>{comparison(selected)}</p>
+      <HistoryOrigin point={selected} />
       {selected.issues.length > 0 && <p className="evolution-pending">{selected.issues[0]}</p>}
     </div>}
-    {points.length > 0 && <p className="evolution-hint">Passe o mouse ou use as setas no gráfico para consultar um mês. <span>{knownCount} de {points.length} meses com registro da carteira.{knownCount < points.length && ' Lacunas indicam saldos ausentes; os valores não são estimados a partir do saldo atual.'}</span></p>}
+    {points.length > 0 && <p className="evolution-hint">Passe o mouse ou use as setas no gráfico para consultar um mês. <span>{knownCount} de {points.length} meses {reconstructed ? 'com valores da carteira (dados das APIs e registros).' : 'com registro da carteira.'}{knownCount < points.length && ' Lacunas indicam dados ausentes; os valores não são estimados a partir do saldo atual.'}</span></p>}
     {warning && <p className="evolution-warning">{warning}</p>}
-    {points.length > 0 && <details className="extra-details evolution-table"><summary>Ver valores mês a mês</summary><div className="table-wrap"><table><caption className="sr-only">Ganhos acumulados da carteira inteira e do CDI por mês. Sem saldo registrado indica que falta uma observação real da carteira.</caption><thead><tr><th scope="col">Mês / data</th><th scope="col" className="num">Carteira</th><th scope="col" className="num">100% CDI</th><th scope="col" className="num">Diferença</th></tr></thead><tbody>{points.map((point) => <tr key={point.month}><th scope="row">{monthLabel(point.month)}{partialMonth(point) && <span className="evolution-table-note">Parcial</span>}<time className="evolution-table-note" dateTime={point.asOf}>{dateBR(point.asOf)}</time>{point.issues[0] && <span className="evolution-table-note evolution-pending">{point.issues[0]}</span>}</th><td className={`num ${resultClass(point.portfolioResult)}`}>{signed(point.portfolioResult, 'Sem saldo registrado')}</td><td className="num">{signed(point.cdiResult)}</td><td className={`num ${resultClass(point.difference)}`}>{signed(point.difference, 'Não comparável')}</td></tr>)}</tbody></table></div></details>}
+    {points.length > 0 && <details className="extra-details evolution-table"><summary>Ver valores mês a mês</summary><div className="table-wrap"><table><caption className="sr-only">Ganhos acumulados da carteira inteira e do CDI por mês. Cada mês conserva suas datas e a origem dos valores.</caption><thead><tr><th scope="col">Mês / data</th><th scope="col" className="num">Carteira</th><th scope="col" className="num">100% CDI</th><th scope="col" className="num">Diferença</th></tr></thead><tbody>{points.map((point) => <tr key={point.month}><th scope="row">{monthLabel(point.month)}{partialMonth(point) && <span className="evolution-table-note">Parcial</span>}<time className="evolution-table-note" dateTime={point.asOf}>{dateBR(point.asOf)}</time>{point.provenance && <span className="evolution-table-note evolution-origin-badge">Reconstruído pelas APIs</span>}{point.provenance?.incomeComplete === false && <span className="evolution-table-note evolution-pending">Rendimentos incompletos; comparação pendente.</span>}{point.issues[0] && <span className="evolution-table-note evolution-pending">{point.issues[0]}</span>}</th><td className={`num ${resultClass(point.portfolioResult)}`}>{signed(point.portfolioResult, 'Sem saldo registrado')}</td><td className="num">{signed(point.cdiResult)}</td><td className={`num ${resultClass(difference(point))}`}>{signed(difference(point), 'Não comparável')}</td></tr>)}</tbody></table></div></details>}
   </div>;
 }

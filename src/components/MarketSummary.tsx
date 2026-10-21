@@ -5,7 +5,7 @@ import { usePublicData } from '../lib/publicData';
 import { Def, SectionHeading, TextLink } from '../components';
 import PublicSourceLink from './PublicSourceLink';
 
-const sourceNames: Record<PublicDataSourceId, string> = { economics: 'Indicadores', news: 'Notícias', quotes: 'Cotações', cvm: 'CVM', cdiHistory: 'CDI da comparação', dividends: 'Proventos B3' };
+const sourceNames: Record<PublicDataSourceId, string> = { economics: 'Indicadores', news: 'Notícias', quotes: 'Cotações', cvm: 'CVM', cdiHistory: 'CDI da comparação', dividends: 'Proventos B3', historicalValuations: 'Histórico da carteira' };
 const statusNames = { updated: 'Consulta concluída', cached: 'Dados salvos', unavailable: 'Indisponível agora', not_configured: 'Falta configuração', deferred: 'Consulta adiada', unsupported: 'Sem cobertura para este fundo' };
 const indicators = [
   { id: 'cdi', label: 'CDI anual', unit: '% a.a.', help: 'CDI anualizado na data de referência, em uma base de 252 dias úteis. Não é uma promessa de rendimento da sua carteira.' },

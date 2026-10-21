@@ -2,6 +2,7 @@
 use crate::{CdiHistorySnapshot, DividendPanel, QuotePanel};
 use chrono::{DateTime, Datelike, Days, FixedOffset, NaiveDate};
 use ivestfii_core::{
+    historical_valuation::reconstruct_portfolio_evolution,
     performance::{
         calculate_fii_performance, calculate_fii_performance_with_income, DailyCdiRate,
         FiiPerformance, PerformanceQuote,
@@ -46,14 +47,72 @@ pub fn cached_report(
             errors.push(error);
             DividendPanel::default()
         });
-    build_report_with_income(
+    let report = build_report_with_income(
         snapshot,
         &panel,
         history.as_ref(),
         &dividends,
         today,
         errors,
-    )
+    )?;
+    Ok(attach_historical_cache(
+        snapshot,
+        directory,
+        report,
+        history.as_ref(),
+        &dividends,
+        today,
+    ))
+}
+
+/// Attach derived historical points without changing today's result or creating
+/// a captured account observation. MCP and desktop reads use this same path.
+pub fn attach_historical_cache(
+    snapshot: &PortfolioSnapshot,
+    directory: &std::path::Path,
+    mut report: PerformanceReport,
+    cdi: Option<&CdiHistorySnapshot>,
+    dividends: &DividendPanel,
+    today: NaiveDate,
+) -> PerformanceReport {
+    match crate::historical_performance::read_cache(snapshot, directory, today) {
+        Ok((history, mut coverage)) => {
+            let rates = cdi
+                .map(|history| {
+                    history
+                        .observations
+                        .iter()
+                        .map(|row| DailyCdiRate {
+                            date: row.date.clone(),
+                            value: row.value.clone(),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if let Err(error) = reconstruct_portfolio_evolution(
+                snapshot,
+                &mut report.portfolio_evolution,
+                &history,
+                &crate::dividends::income_events(dividends),
+                &rates,
+                today,
+            ) {
+                coverage.status = "partial".into();
+                coverage.issues.push(error.to_string());
+                report.portfolio_evolution.issues.push(error.to_string());
+            }
+            report.historical_data = Some(coverage);
+        }
+        Err(error) => {
+            report.historical_data = Some(crate::historical_performance::HistoricalDataCoverage {
+                status: "unavailable".into(),
+                issues: vec![error.clone()],
+                ..Default::default()
+            });
+            report.portfolio_evolution.issues.push(error);
+        }
+    }
+    report
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +134,8 @@ pub struct PerformanceReport {
     pub portfolio: PortfolioPerformance,
     pub portfolio_benchmark: PortfolioBenchmark,
     pub portfolio_evolution: PortfolioEvolution,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub historical_data: Option<crate::historical_performance::HistoricalDataCoverage>,
     #[serde(skip_serializing)]
     pub history_observation: Option<PortfolioHistoryObservation>,
     pub quote_source: Option<String>,
@@ -239,6 +300,7 @@ fn build_report_inner(
     Ok(PerformanceReport {
         portfolio,
         portfolio_evolution,
+        historical_data: None,
         history_observation,
         portfolio_benchmark,
         calculation,
@@ -302,6 +364,157 @@ pub fn cdi_range(report: &PerformanceReport) -> Result<Option<(NaiveDate, NaiveD
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn historical_fixture(directory: &std::path::Path) -> PortfolioSnapshot {
+        let mut value = serde_json::to_value(snapshot()).unwrap();
+        value["funds"][0]["entries"][0]["dividendTotal"] = json!("2");
+        value["funds"][0]["entries"].as_array_mut().unwrap().push(json!({
+            "id":"r2","month":"2026-09","cotasAdded":"0","pricePerCota":"0","dividendPerCota":"0","dividendTotal":"3","notes":""
+        }));
+        value["funds"][0]["dividendsReceived"] = json!("5");
+        value["recordCount"] = json!(2);
+        value["brokerPosition"] = json!({"referenceDate":"2026-10-19","institution":"Teste","importedAt":"2026-10-19T12:00:00Z",
+            "sourcePath":"fixture.json","sourceHash":"a".repeat(64),"warnings":[],
+            "overview":{"totalWithCash":"99999","invested":"99999","cash":"0","listedFunds":"99999","fixedIncome":"99999","pendingIncome":"0"},
+            "listedFunds":{"marketValue":"90","costBasis":"100","unrealizedResult":"-10","dailyResult":"0",
+                "holdings":[{"ticker":"TEST11","shares":"10","averagePrice":"10","price":"9","marketValue":"90","unrealizedResult":"-10","costBasis":"100"}]},
+            "fixedIncome":{"name":"Pós-fixado sintético","nameTruncated":false,"balance":"120","netBalance":"119","reportedEarnings":"20","return12Months":"9999","redemptionConversion":"D+0","redemptionSettlement":"D+0",
+                "latestObservation":{"referenceDate":"2026-10-19","name":"Pós-fixado sintético","category":"Renda fixa","riskLevel":"1","balance":"120","invested":"100","totalEarnings":"20","earnings12Months":"9999","return12Months":"9999","returnReferenceDate":"2026-10-19",
+                    "contributions":[{"applicationDate":"2026-08-03","invested":"100","currentValue":"120","earnings":"20","returnPercent":"20"}],"sources":[],"importedAt":"2026-10-19T12:00:00Z","sourcePath":"fixture.json","sourceHash":"b".repeat(64)}}});
+        let fetched = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let public = directory.join("public-data");
+        std::fs::create_dir_all(&public).unwrap();
+        let mut items = serde_json::Map::new();
+        let mut nav_months = serde_json::Map::new();
+        for (month, end, price, nav_rows) in [
+            (
+                "2026-08",
+                "2026-08-31",
+                "9",
+                vec![("2026-08-03", "1"), ("2026-08-31", "1.1")],
+            ),
+            ("2026-09", "2026-09-30", "11", vec![("2026-09-30", "1.2")]),
+        ] {
+            items.insert(format!("TEST11:{month}"), json!({
+                "request":{"symbol":"TEST11","month":month},"requestedThrough":end,
+                "observation":{"symbol":"TEST11","tradeDate":end,"rawClose":price,"currency":"BRL","source":"Dados B3 · COTAHIST",
+                    "sourceUrl":format!("https://dadosb3.com/fiis/TEST11/desempenho?de={month}-01&ate={end}"),"fetchedAt":fetched,"corporateActionsChecked":false},
+                "checkedAt":fetched,"available":true,"error":null
+            }));
+            nav_months.insert(month.into(), json!({"fetchedAt":fetched,"issues":[],"observations":nav_rows.into_iter().map(|(date,nav)|json!({
+                "cnpj":"00332266000131","date":date,"value":nav,"source":"CVM · Informe Diário de Fundos",
+                "sourceUrl":format!("https://dados.cvm.gov.br/dados/FI/DOC/INF_DIARIO/DADOS/inf_diario_fi_{}.zip",month.replace('-' ,"")),"fetchedAt":fetched
+            })).collect::<Vec<_>>()}));
+        }
+        std::fs::write(
+            public.join("historical-prices.json"),
+            serde_json::to_vec(&json!({"version":1,"items":items,"retryAfter":null})).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(public.join("fund-nav.json"), serde_json::to_vec(&json!({"version":1,"register":{"fetchedAt":fetched,"funds":{"00332266000131":["Pós-fixado sintético"]}},"funds":{"00332266000131":nav_months}})).unwrap()).unwrap();
+        let mut day = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 10, 19).unwrap();
+        let mut observations = Vec::new();
+        while day <= end {
+            observations.push(json!({"date":day.to_string(),"value":"0"}));
+            day = day.succ_opt().unwrap();
+        }
+        std::fs::write(public.join("cdi-history.json"), serde_json::to_vec(&json!({"version":1,"snapshot":{
+            "seriesId":12,"unit":"% a.d.","source":"Banco Central do Brasil · SGS 12",
+            "sourceUrl":"https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados?formato=json&dataInicial=01/08/2026&dataFinal=19/10/2026",
+            "requestedStartDate":"2026-08-01","requestedEndDate":"2026-10-19","observations":observations,"fetchedAt":fetched,"stale":false
+        }})).unwrap()).unwrap();
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn cached_report_reconstructs_entire_wallet_months_without_capturing_balances_or_changing_sources(
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let snapshot = historical_fixture(directory.path());
+        let original = serde_json::to_value(&snapshot).unwrap();
+        let paths = [
+            "historical-prices.json",
+            "fund-nav.json",
+            "cdi-history.json",
+        ];
+        let before = paths
+            .map(|name| std::fs::read(directory.path().join("public-data").join(name)).unwrap());
+        let report = cached_report(
+            &snapshot,
+            directory.path(),
+            NaiveDate::from_ymd_opt(2026, 10, 20).unwrap(),
+        )
+        .unwrap();
+        assert!(report.history_observation.is_none());
+        assert!(report.portfolio_evolution.latest_known.is_none());
+        let points = &report.portfolio_evolution.points;
+        assert_eq!(points[0].portfolio_result.as_deref(), Some("2"));
+        assert_eq!(points[1].portfolio_result.as_deref(), Some("35"));
+        assert_eq!(points[1].invested.as_deref(), Some("200"));
+        assert_eq!(points[1].cdi_result.as_deref(), Some("0"));
+        assert_eq!(points[1].difference.as_deref(), Some("35"));
+        assert!(points[2].portfolio_result.is_none());
+        assert_eq!(points[1].provenance.as_ref().unwrap().components.len(), 2);
+        let coverage = report.historical_data.as_ref().unwrap();
+        assert_eq!(coverage.price_observations, 2);
+        assert_eq!(coverage.nav_observations, 3);
+        assert_eq!(coverage.status, "ready");
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), original);
+        for (index, name) in paths.iter().enumerate() {
+            assert_eq!(
+                std::fs::read(directory.path().join("public-data").join(name)).unwrap(),
+                before[index]
+            );
+        }
+        assert_eq!(
+            std::fs::read_dir(directory.path().join("public-data"))
+                .unwrap()
+                .count(),
+            3
+        );
+        let repeat = cached_report(
+            &snapshot,
+            directory.path(),
+            NaiveDate::from_ymd_opt(2026, 10, 20).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&repeat).unwrap(),
+            serde_json::to_value(&report).unwrap()
+        );
+    }
+
+    #[test]
+    fn bad_historical_price_cache_keeps_valid_nav_and_current_accounting_available() {
+        let directory = tempfile::tempdir().unwrap();
+        let snapshot = historical_fixture(directory.path());
+        std::fs::write(
+            directory.path().join("public-data/historical-prices.json"),
+            b"not-json",
+        )
+        .unwrap();
+        let report = cached_report(
+            &snapshot,
+            directory.path(),
+            NaiveDate::from_ymd_opt(2026, 10, 20).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.portfolio.fixed_income.income.as_deref(), Some("20"));
+        let coverage = report.historical_data.as_ref().unwrap();
+        assert_eq!(coverage.nav_observations, 3);
+        assert_eq!(coverage.price_observations, 0);
+        assert_eq!(coverage.price_pending, 2);
+        assert_eq!(coverage.status, "partial");
+        assert!(!coverage.issues.is_empty());
+        assert!(report.portfolio_evolution.points[0]
+            .portfolio_result
+            .is_none());
+        assert_eq!(
+            std::fs::read(directory.path().join("public-data/historical-prices.json")).unwrap(),
+            b"not-json"
+        );
+    }
 
     fn snapshot() -> PortfolioSnapshot {
         serde_json::from_value(json!({

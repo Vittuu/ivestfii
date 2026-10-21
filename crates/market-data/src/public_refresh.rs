@@ -145,12 +145,55 @@ pub async fn refresh_if_due(
                 )
             })
     };
-    let (economics, news, mut quotes, cvm, dividends) = tokio::join!(
+    let historical_refresh = async {
+        let before = crate::historical_performance::read_cache(snapshot, directory, today)
+            .ok()
+            .map(|(_, coverage)| coverage);
+        match crate::historical_performance::refresh_if_due(snapshot, directory, today).await {
+            Ok(after) => {
+                let changed = before.as_ref().is_none_or(|before| {
+                    before.price_observations != after.price_observations
+                        || before.nav_observations != after.nav_observations
+                        || before.price_pending != after.price_pending
+                        || before.nav_pending_months != after.nav_pending_months
+                });
+                let pending = after.price_pending + after.nav_pending_months;
+                let message = if !after.issues.is_empty() {
+                    Some(after.issues.join(" "))
+                } else if pending > 0 {
+                    Some(format!("Histórico em preenchimento: {} cotações e {} meses de cotas ainda pendentes. O progresso consultado foi salvo.", after.price_pending, after.nav_pending_months))
+                } else {
+                    None
+                };
+                SourceRefresh {
+                    id: "historicalValuations",
+                    status: if changed {
+                        "updated"
+                    } else if after.price_observations + after.nav_observations > 0
+                        || after.status == "ready"
+                    {
+                        "cached"
+                    } else {
+                        "unavailable"
+                    }
+                    .into(),
+                    message,
+                }
+            }
+            Err(error) => SourceRefresh {
+                id: "historicalValuations",
+                status: "unavailable".into(),
+                message: Some(error),
+            },
+        }
+    };
+    let (economics, news, mut quotes, cvm, dividends, historical) = tokio::join!(
         economics.refresh_if_due(),
         news.refresh_if_due(),
         quote_refresh,
         cvm_refresh,
         dividend_refresh,
+        historical_refresh,
     );
     if let Some(panel) = quotes.data.as_mut() {
         panel.set_credential_presence(key.as_ref().is_ok_and(|key| key.is_some()));
@@ -161,6 +204,7 @@ pub async fn refresh_if_due(
         source("quotes", &quotes),
         source("cvm", &cvm),
         source("dividends", &dividends),
+        historical,
     ];
     let quote_panel = quotes.data.unwrap_or_default();
     let dividend_panel = dividends.data.unwrap_or_default();
