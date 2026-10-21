@@ -33,7 +33,8 @@ const focusedIncomePerformance=process.env.IVESTFII_UI_FOCUS==='income-performan
 const focusedFixedIncome=process.env.IVESTFII_UI_FOCUS==='fixed-income';
 const focusedWalletBenchmark=process.env.IVESTFII_UI_FOCUS==='wallet-benchmark';
 const focusedWalletEvolution=process.env.IVESTFII_UI_FOCUS==='wallet-evolution';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':'report.json';
+const focusedMarketPrice=process.env.IVESTFII_UI_FOCUS==='market-price';
+const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':focusedMarketPrice?'market-price-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -165,6 +166,27 @@ const quoteObservation = {symbol:'TEST11',price:'8.99',currency:'BRL',quotedAt:'
 // A successful fetch can still contain an older trading observation; never conflate these dates.
 const recentQuoteObservation = {...quoteObservation,fetchedAt:'2026-10-20T12:00:00Z'};
 const quotePanel = {items:[{symbol:'TEST11',status:'not_configured',observation:quoteObservation,error:'Cadastre a chave para atualizar.'},{symbol:'MOCK11',status:'not_configured',observation:null,error:null}],fetchedAt:quoteObservation.fetchedAt,credentialConfigured:false,errors:[]};
+// The comparison uses the selected wallet's purchase basis, never a broker
+// snapshot or another wallet's price. Quotes and amounts here are synthetic.
+const marketPriceCases=[
+  {symbol:'TEST11',price:'98.99',average:'100',shares:'10',tone:'below'},
+  {symbol:'NEAR11',price:'100',average:'100',shares:'10',tone:'near'},
+  {symbol:'LOWB11',price:'99',average:'100',shares:'10',tone:'near'},
+  {symbol:'HIGH11',price:'101',average:'100',shares:'10',tone:'near'},
+  {symbol:'OVER11',price:'101.01',average:'100',shares:'10',tone:'above'},
+  {symbol:'NOAV11',price:'100',average:'0',shares:'10',tone:'unknown'},
+  {symbol:'NOPR11',price:null,average:'100',shares:'10',tone:'unknown'},
+  {symbol:'USDX11',price:'1',average:'100',shares:'10',currency:'USD',tone:'unknown'},
+  {symbol:'ZERO11',price:'1',average:'100',shares:'0',tone:'unknown'},
+  {symbol:'BADP11',price:'0',average:'100',shares:'10',tone:'unknown'},
+  {symbol:'FUTR11',price:'98.99',average:'100',shares:'10',futurePurchase:true,tone:'below'},
+  {symbol:'INFO11',price:'98.99',average:'100',shares:'10',priceOnly:true,tone:'below'},
+  {symbol:'MIXZ11',price:'1',average:'100',shares:'10',unpricedPurchase:true,tone:'unknown'},
+  {symbol:'BROK11',price:'1',average:'100',shares:'10',brokerOnly:true,tone:'unknown'},
+  {symbol:'WGHT11',price:'79.19',average:'80',shares:'5',weightedBuys:true,tone:'below'},
+  {symbol:'OBSM11',price:'1',average:'100',shares:'10',mismatchedObservation:true,tone:'unknown'},
+];
+const marketPricePanel={...quotePanel,items:marketPriceCases.map(item=>({symbol:item.symbol,status:'cached',observation:item.price===null?null:{...quoteObservation,symbol:item.mismatchedObservation?'OTHER11':item.symbol,price:item.price,currency:item.currency||'BRL'},error:null}))};
 const cvmReport = {cnpj:'12345678000195',fundName:'Fundo CVM sintético A',referenceDate:'2020-01-31',filedAt:'2020-02-03T12:00:00Z',netAssets:'1000000',equityPerShare:'10.25',shareholders:123,issuedShares:'97560.9756',source:'CVM · informe mensal',sourceUrl:'https://dados.cvm.gov.br/dataset/fii-doc-inf_mensal',fetchedAt:'2020-02-04T12:00:00Z'};
 // The instrument label is real; all report contents and the CNPJ remain synthetic.
 const fiagroReport = {...cvmReport,cnpj:'11111111000191',fundName:'FIAGRO sintético VGIA11',fundType:'FIAGRO',referenceDate:'2026-09-30',filedAt:'2026-10-08T12:00:00Z',equityPerShare:null,shareholders:null,issuedShares:null,source:'CVM · Informe Mensal de FIAGRO',sourceUrl:'https://dados.cvm.gov.br/dados/FIAGRO/DOC/INF_MENSAL/DADOS/inf_mensal_fiagro_202609.zip',fetchedAt:'2026-10-20T12:00:00Z'};
@@ -357,10 +379,26 @@ function bootstrap(mode) {
     initial.recordCount=initial.funds.reduce((sum,fund)=>sum+fund.entries.length,0);
   }
   if (mode === 'connected') initial.funds.push({...initial.funds[0],id:'fund-fiagro',ticker:'VGIA11',name:'FIAGRO sintético VGIA11',entries:[],totalCotas:'0',totalInvested:'0',averagePrice:'0',dividendsReceived:'0',estimatedMonthlyIncome:'0'});
+  if(mode.startsWith('market-price')){
+    initial.brokerPosition=structuredClone(position);initial.brokerPosition.listedFunds.holdings.push({...position.listedFunds.holdings[0],ticker:'BROK11'});initial.cashPockets=[];initial.cashBalance='0';
+    initial.funds=marketPriceCases.filter(item=>!item.brokerOnly).map(item=>{
+      const fund={...snapshot.funds[0],id:'market-'+item.symbol,ticker:item.symbol,name:'Fundo sintético '+item.symbol,entries:[{...entry('market-buy-'+item.symbol,item.average,'0'),cotasAdded:item.shares,dividendPerCota:'0'}],totalCotas:item.shares,totalInvested:String(Number(item.average)*Number(item.shares)),averagePrice:item.average,dividendsReceived:'0',estimatedMonthlyIncome:'0'};
+      if(item.futurePurchase){fund.entries.push({...entry('market-future-'+item.symbol,'500','0'),month:'2099-01',purchaseDate:'2099-01-10',cotasAdded:'10',dividendPerCota:'0'});fund.totalCotas='20';fund.totalInvested='6000';fund.averagePrice='300';}
+      if(item.priceOnly)fund.entries.push({...entry('market-price-only-'+item.symbol,'9999','0'),cotasAdded:'0',dividendPerCota:'0'});
+      if(item.unpricedPurchase){fund.entries.push({...entry('market-unpriced-'+item.symbol,'0','0'),cotasAdded:'2',dividendPerCota:'0'});fund.totalCotas='12';fund.averagePrice='83.3333333333';}
+      if(item.weightedBuys)fund.entries=[{...entry('market-weighted-first','50','0'),cotasAdded:'2',dividendPerCota:'0'},{...entry('market-weighted-second','100','0'),cotasAdded:'3',dividendPerCota:'0'}];
+      return fund;
+    });
+    initial.totals={invested:String(initial.funds.reduce((sum,fund)=>sum+Number(fund.totalInvested),0)),cotas:String(initial.funds.reduce((sum,fund)=>sum+Number(fund.totalCotas),0)),dividendsReceived:'0',estimatedMonthlyIncome:'0'};initial.recordCount=initial.funds.length;
+  }
   const other = structuredClone(initial);
   other.brokerPosition = null; other.funds = [{...initial.funds[0],id:'fund-other',ticker:'BANK11',name:'Fundo de outra carteira',entries:[{...entry('entry-other','100','0'),cotasAdded:'2',dividendPerCota:'0'}],totalCotas:'2',totalInvested:'200',averagePrice:'100',dividendsReceived:'0',estimatedMonthlyIncome:'0'}];
   other.totals = {invested:'200',cotas:'2',dividendsReceived:'0',estimatedMonthlyIncome:'0'};other.recordCount=0;
   other.cashPockets=[{...cash,id:'pocket-other',name:'Reserva da outra carteira',balance:'300',totalDeposits:'280'}];other.cashBalance='300';
+  if(mode.startsWith('market-price')){
+    other.funds=[{...initial.funds[0],id:'market-other-test',entries:[{...entry('market-other-buy','50','0'),cotasAdded:'10',dividendPerCota:'0'}],totalCotas:'10',totalInvested:'500',averagePrice:'50'}];
+    other.totals={invested:'500',cotas:'10',dividendsReceived:'0',estimatedMonthlyIncome:'0'};other.recordCount=1;other.cashPockets=[];other.cashBalance='0';
+  }
   if (mode === 'without-position') initial.brokerPosition = null;
   const automaticMode=mode.startsWith('auto-');
   const keyConfigured = mode === 'connected' || mode === 'corrupt-quotes' || (automaticMode&&mode!=='auto-no-key');
@@ -459,6 +497,7 @@ const wallets=${JSON.stringify(wallets)};
 Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformance)},otherPerformance:{...${JSON.stringify(performance)},portfolioBenchmark:${JSON.stringify(benchmarkOther)},${mode.startsWith('wallet-evolution')?`portfolioEvolution:${JSON.stringify(evolutionOther)},`:''}invested:'200',dividends:'0',marketValue:'220',priceResult:'20',totalResult:'20',totalReturnPercent:'10',cdi:{endingValue:'210',result:'10',returnPercent:'5'},difference:'10'},deferPerformance:false,performanceWaiters:[],deferPerformanceRead:${mode === 'performance-loading'},performanceReadWaiters:[],failPerformance:false});
 Object.assign(globalThis.__uiTest,{chat:${JSON.stringify(chatFixture)},deferChatStart:false,chatStartWaiters:[],eventSubscriptions:[],eventCalls:[]});
 Object.assign(globalThis.__uiTest,{automaticMode:${JSON.stringify(mode)},deferAutoWallets:${JSON.stringify(automaticMode?['wallet-original']:[])},autoWaiters:[],publicCache:{shared:{economics:${JSON.stringify(economics)},news:${JSON.stringify(news)}},wallets:{}},autoCheckedAt:'2026-10-20T12:00:00Z'});
+${mode.startsWith('market-price')?`globalThis.__uiTest.publicCache.wallets={'wallet-original':{quotes:${JSON.stringify(marketPricePanel)}},'wallet-other':{quotes:${JSON.stringify({...marketPricePanel,items:marketPricePanel.items.slice(0,1)})}}};`:''}
 Object.assign(globalThis.__uiTest,{incomeReport:${JSON.stringify(mode==='income-api-date-required'?incomeApiUnknownReport:mode==='income-api'?incomeApiReport:{months:[]})}});
 Object.assign(globalThis.__uiTest,{dividendPanel:${JSON.stringify(mode.startsWith('income-api')?incomeApiDividendPanel:mode.startsWith('income-performance')||mode==='fixed-income-api'?incomePerformanceDividendPanel:{items:[],fetchedAt:null,errors:[]})}});
 ${mode.startsWith('income')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{items:[],fetchedAt:null,credentialConfigured:false,errors:[]},cvm:{items:[],fetchedAt:null,errors:[]}};`:''}
@@ -634,7 +673,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark&&!focusedWalletEvolution)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark&&!focusedWalletEvolution&&!focusedMarketPrice)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -713,7 +752,7 @@ try {
     if(sidebarPreference!==undefined)await context.addInitScript(value=>localStorage.setItem('ivestfii.sidebarCollapsed',value),sidebarPreference);
     const page=await context.newPage();page.setDefaultTimeout(12000);
     const externalRequests=[];
-    if(mode==='web'||mode.startsWith('income'))await page.route('**/*',route=>{
+    if(mode==='web'||mode.startsWith('income')||mode.startsWith('market-price'))await page.route('**/*',route=>{
       const url=new URL(route.request().url());
       if(/^https?:$/.test(url.protocol)&&url.origin!==base){externalRequests.push(url.href);return route.fulfill({status:503,contentType:'text/plain',body:'External requests are blocked in the synthetic web preview.'});}
       return route.fallback();
@@ -2475,6 +2514,91 @@ try {
     const zoom=await openPage('wallet-evolution-zoom-200',{width:720,height:500},{expandedSidebar:false});await zoom.page.locator('.portfolio-evolution svg').waitFor();await noOverflow(zoom.page,'wallet-evolution-zoom200-no-overflow');await sectionShot(zoom.page,'zoom200-wallet-evolution',region(zoom.page,'Resultado da carteira'));check('wallet-evolution-zoom200-remains-readable-without-global-horizontal-scroll');await noUnexpectedCommands(zoom.page);await zoom.context.close();
   }
 
+  async function verifyMarketPriceComparison(){
+    const fixture=await openPage('market-price',{width:1440,height:1000}),page=fixture.page;
+    const original=await page.evaluate(()=>({first:globalThis.__uiTest.snapshot,other:globalThis.__uiTest.otherSnapshot}));
+    const automaticBefore=(await calls(page,'refresh_public_data_if_due')).length;
+    await navigate(page,'Mercado');
+    const scope=region(page,'Cotações dos fundos');
+    const table=scope.locator('.market-quotes-table');
+    const row=symbol=>table.locator('tbody > tr').filter({has:page.getByRole('rowheader',{name:symbol,exact:true})});
+    const assessment=symbol=>row(symbol).locator('.market-price-assessment');
+    const labels={below:/Abaixo da sua média/,near:/Próximo da sua média/,above:/Acima da sua média/};
+    const colorOf=locator=>locator.evaluate(element=>getComputedStyle(element).color);
+    const colors={};
+    for(const item of marketPriceCases){
+      const current=row(item.symbol);await current.waitFor();
+      assert.equal(await assessment(item.symbol).getAttribute('data-tone'),item.tone,`${item.symbol}: price comparison classification`);
+      if(item.tone!=='unknown'){
+        await textMatches(assessment(item.symbol),labels[item.tone]);
+        await textEquals(current.locator('.market-price-average'),'Preço médio: '+new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(item.average)).replace(/\s+/g,' '));
+        const tickerColor=await colorOf(current.getByRole('rowheader',{name:item.symbol,exact:true}));
+        const quoteColor=await colorOf(current.locator('td').first());
+        assert.equal(tickerColor,quoteColor,`${item.symbol}: color both fund and price`);
+        if(colors[item.tone])assert.equal(tickerColor,colors[item.tone]);else colors[item.tone]=tickerColor;
+      }else{
+        assert.doesNotMatch(await assessment(item.symbol).innerText(),/Abaixo da sua média|Próximo da sua média|Acima da sua média/);
+        assert.notEqual(await colorOf(current.getByRole('rowheader',{name:item.symbol,exact:true})),colors.below,`${item.symbol}: incomplete data must not paint the fund green`);
+        assert.notEqual(await colorOf(current.locator('td').first()),colors.below,`${item.symbol}: incomplete data must not paint the quote green`);
+      }
+    }
+    assert.equal(new Set(Object.values(colors)).size,3,'Below, average and above use distinct visible font colors');
+    for(const [tone,color] of Object.entries(colors)){
+      const [red,green,blue]=color.match(/[\d.]+/g).slice(0,3).map(Number);
+      if(tone==='below')assert.ok(green>red&&green>blue,`Below is green: ${color}`);
+      if(tone==='above')assert.ok(red>green&&red>blue,`Above is red: ${color}`);
+      if(tone==='near')assert.ok(red>=green&&green>blue,`Near is yellow: ${color}`);
+    }
+    check('market-price-colors-use-selected-wallet-purchase-basis-and-inclusive-one-percent-band');
+    check('market-price-missing-average-price-foreign-currency-and-zero-held-shares-never-become-buy-signals');
+    check('market-price-future-purchases-and-price-only-rows-do-not-change-paid-basis-and-unpriced-buys-block-classification');
+    check('market-price-multiple-purchases-use-quantity-weighted-cost-and-mismatched-observation-symbol-stays-neutral');
+
+    const legend=scope.getByRole('group',{name:'Legenda de preços em relação ao seu preço médio',exact:true});
+    await legend.waitFor();await textMatches(legend,/Verde.*Amarelo.*Vermelho/);
+    await textMatches(scope,/1%/);
+    assert.equal(await row('TEST11').locator(`time[datetime="${quoteObservation.quotedAt}"]`).count(),1);
+    await row('TEST11').getByText('Salvo neste computador',{exact:true}).waitFor();
+    assert.equal((await calls(page,'refresh_public_data_if_due')).length,automaticBefore,'Navigating to price colors must not create another automatic source request');
+    await noIndividualAutomaticRefresh(page);
+    check('market-price-visible-color-key-keeps-source-date-and-cache-status-without-extra-API-calls');
+    await rowPaintContinuity(page,table,'market-price-row-headers');
+    await noOverflow(page,'market-price-desktop-no-overflow');await sectionShot(page,'desktop-market-price-colors',scope);
+
+    await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-other');
+    await textMatches(row('TEST11').locator('.market-price-average'),/^Preço médio: R\$ 50,00$/);
+    assert.equal(await assessment('TEST11').getAttribute('data-tone'),'above');
+    await textMatches(assessment('TEST11'),labels.above);assert.equal(await table.locator('tbody > tr').count(),1);
+    await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-original');
+    await textMatches(row('TEST11').locator('.market-price-average'),/^Preço médio: R\$ 100,00$/);
+    assert.equal(await assessment('TEST11').getAttribute('data-tone'),'below');
+    assert.deepEqual(await page.evaluate(()=>({first:globalThis.__uiTest.snapshot,other:globalThis.__uiTest.otherSnapshot})),original);
+    const writes=await page.evaluate(()=>globalThis.__uiTest.calls.filter(item=>/^(save_|delete_|import_)/.test(item.command)));
+    assert.deepEqual(writes,[]);await noIndividualAutomaticRefresh(page);assert.deepEqual(fixture.externalRequests,[]);await noUnexpectedCommands(page);
+    check('market-price-same-fund-switches-between-wallet-costs-without-leaking-average-or-changing-ledger');
+    await fixture.context.close();
+
+    for(const viewport of [{width:375,height:812},{width:720,height:500}]){
+      const label=viewport.width===375?'mobile375':'zoom200';
+      const small=await openPage('market-price-'+(viewport.width===720?'zoom-200':'mobile'),viewport,{expandedSidebar:false});
+      await navigate(small.page,'Mercado');const section=region(small.page,'Cotações dos fundos');
+      await section.getByRole('group',{name:'Legenda de preços em relação ao seu preço médio',exact:true}).waitFor();
+      await noOverflow(small.page,'market-price-'+label+'-no-global-overflow');
+      const scrollable=section.getByRole('region',{name:'Tabela de cotações, role horizontalmente para ver todas as colunas',exact:true});
+      await scrollable.evaluate(element=>{element.scrollLeft=element.scrollWidth;});
+      await section.locator('.market-price-assessment').first().waitFor();
+      await sectionShot(small.page,label+'-market-price-colors',section);
+      await noIndividualAutomaticRefresh(small.page);assert.deepEqual(small.externalRequests,[]);await noUnexpectedCommands(small.page);await small.context.close();
+    }
+    check('market-price-legend-and-readable-comparison-fit-mobile-and-two-hundred-percent-layout');
+  }
+
+  if(focusedMarketPrice){
+    await verifyMarketPriceComparison();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'market-price',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
+
   if(focusedWalletEvolution){
     await verifyWalletEvolution();assert.deepEqual(browserErrors,[]);
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
@@ -2552,6 +2676,7 @@ try {
   await verifyRecentMovements();
   await verifyWalletBenchmark();
   await verifyWalletEvolution();
+  await verifyMarketPriceComparison();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {

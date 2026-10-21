@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { LoaderCircle, RefreshCw } from 'lucide-react';
 import { amount, call, dateBR, desktop, errorMessage, money, monthShort, quantity } from '../lib/bridge';
-import type { CvmFundItem, EconomicIndicator, MarketDataSettings, MarketDataStatus, QuoteItem } from '../lib/bridge';
+import type { CvmFundItem, EconomicIndicator, MarketDataSettings, MarketDataStatus, QuoteItem, Snapshot } from '../lib/bridge';
 import { Def, Empty, Field, Loading, PageActions } from '../components';
 import PublicSourceLink from '../components/PublicSourceLink';
 import { emptyEconomics as emptyPanel, usePublicData } from '../lib/publicData';
+import { compareQuote, marketToday } from '../lib/quoteComparison';
+import type { QuoteComparison } from '../lib/quoteComparison';
 
 const definitions = [
   { id: 'cdi', label: 'CDI', unit: '% a.a.', note: 'Base de 252 dias úteis · usado nas caixinhas', description: 'Referência para simular suas caixinhas. A taxa anualizada corresponde à data informada.' },
@@ -16,7 +18,7 @@ const SEP = '\u00a0· ';
 /** "consultado em" preso ao horário que vem depois. */
 const FETCHED = 'consultado\u00a0em\u00a0';
 
-export default function Market({ walletId }: { walletId: string }) {
+export default function Market({ walletId, snapshot }: { walletId: string; snapshot: Snapshot | null }) {
   const publicData = usePublicData();
   const panel = publicData.economics ?? emptyPanel;
   const loading = publicData.loading;
@@ -49,7 +51,7 @@ export default function Market({ walletId }: { walletId: string }) {
 
     {publicData.refreshing && <p className="market-status" role="status">Consultando fontes em segundo plano. Os dados salvos continuam disponíveis.</p>}
     {publicData.error && <p className="market-status" role="status">{publicData.error}</p>}
-    <WalletMarket key={walletId} walletId={walletId} />
+    <WalletMarket key={walletId} walletId={walletId} snapshot={snapshot} />
 
     <section className="group" aria-labelledby="market-indicators-title">
       <div className="group-head">
@@ -114,10 +116,11 @@ function useWalletPanel<K extends 'quotes' | 'cvm'>(walletId: string, source: K)
   return { panel, loading, refreshing: refreshing || publicData.refreshing, error, notice, refresh };
 }
 
-function WalletMarket({ walletId }: { walletId: string }) {
+function WalletMarket({ walletId, snapshot }: { walletId: string; snapshot: Snapshot | null }) {
   const publicData = usePublicData();
   const quotes = useWalletPanel(walletId, 'quotes');
   const cvm = useWalletPanel(walletId, 'cvm');
+  const today = marketToday();
   const [mapping, setMapping] = useState<{ symbol: string; cnpj: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [mappingError, setMappingError] = useState('');
@@ -166,9 +169,14 @@ function WalletMarket({ walletId }: { walletId: string }) {
           <PanelMessages error={quotes.error} notice={quotes.notice} errors={quotes.panel.errors} />
           {quotes.panel.items.length ? <div className="table-wrap" role="region" aria-label="Tabela de cotações, role horizontalmente para ver todas as colunas" tabIndex={0}><table className="market-quotes-table">
             <caption className="sr-only">Cotações externas dos fundos da carteira selecionada</caption>
-            <thead><tr><th scope="col">Ativo</th><th scope="col" className="num"><Def text="Preço externo da brapi, separado da posição importada. Não altera o patrimônio da carteira e pode ter atraso conforme o plano.">Cotação</Def></th><th scope="col"><Def text="Data e horário de mercado informados para esta cotação. A data da coleta fica nos detalhes e não substitui este horário.">Data de mercado</Def></th><th scope="col">Situação</th></tr></thead>
-            <tbody>{quotes.panel.items.map((item) => <QuoteRow item={item} key={item.symbol} />)}</tbody>
+            <thead><tr><th scope="col">Ativo</th><th scope="col" className="num"><Def text="Preço externo da brapi, separado da posição importada. Não altera o patrimônio da carteira e pode ter atraso conforme o plano.">Cotação</Def></th><th scope="col"><Def text="Data e horário de mercado informados para esta cotação. A data da coleta fica nos detalhes e não substitui este horário.">Data de mercado</Def></th><th scope="col"><Def text="Compara a cotação ao preço médio das compras registradas nesta carteira. A faixa próxima da média inclui até 1% abaixo ou acima.">Em relação ao que você pagou</Def></th><th scope="col">Situação</th></tr></thead>
+            <tbody>{quotes.panel.items.map((item) => <QuoteRow item={item} comparison={compareQuote(item, snapshot?.funds ?? [], today)} key={item.symbol} />)}</tbody>
           </table></div> : <Empty title="Nenhum fundo para consultar">Os fundos registrados na carteira selecionada aparecerão aqui.</Empty>}
+          {quotes.panel.items.length > 0 && <div className="market-price-legend" role="group" aria-label="Legenda de preços em relação ao seu preço médio">
+            <strong>Cores em relação ao seu preço médio</strong>
+            <ul><li className="market-price-below"><span aria-hidden="true" />Verde: mais de 1% abaixo</li><li className="market-price-near"><span aria-hidden="true" />Amarelo: até 1% abaixo ou acima</li><li className="market-price-above"><span aria-hidden="true" />Vermelho: mais de 1% acima</li><li className="market-price-unknown"><span aria-hidden="true" />Cinza: sem comparação</li></ul>
+            <p>Preço médio = valor das compras ÷ cotas compradas nesta carteira. Compras futuras e rendimentos não entram nessa média.</p>
+          </div>}
           {quotes.panel.items.length > 0 && <details className="extra-details market-data-details"><summary>Detalhes dos dados</summary>
             <div className="table-wrap" role="region" aria-label="Fontes e coleta das cotações" tabIndex={0}><table className="market-quotes-details-table"><caption className="sr-only">Fontes, coleta e cadência das cotações externas</caption><thead><tr><th scope="col">Ativo</th><th scope="col">Fonte e coleta</th><th scope="col">Cadência informada</th></tr></thead><tbody>{quotes.panel.items.map((item) => <tr key={item.symbol}><th scope="row" className="ticker">{item.symbol}</th><td>{item.observation ? <SourceCollected source={item.observation.source} url={item.observation.sourceUrl} fetchedAt={item.observation.fetchedAt} /> : '—'}</td><td>{item.observation?.delayMinutes == null ? 'Não informada' : <>Cadência do gratuito: {item.observation.delayMinutes} min</>}</td></tr>)}</tbody></table></div>
             <p className="market-detail-note">Cotações externas não alteram a posição importada, os lançamentos nem o patrimônio registrado. O plano gratuito pode ter atraso e limites por ativo.</p>
@@ -230,13 +238,18 @@ function PanelMessages({ error, notice, errors }: { error: string; notice: strin
   return <>{error && <p className="market-data-message form-error" role="alert">{error}</p>}{notice && <p className="market-data-message" role="status">{notice}</p>}{errors.length > 0 && <ul className="market-data-message market-panel-errors" aria-label="Avisos da consulta">{Array.from(new Set(errors)).map((issue) => <li key={issue}>{issue}</li>)}</ul>}</>;
 }
 
-function QuoteRow({ item }: { item: QuoteItem }) {
+function QuoteRow({ item, comparison }: { item: QuoteItem; comparison: QuoteComparison }) {
   const value = item.observation;
   const stale = value && item.status !== 'available';
   return <tr>
-    <th scope="row" className="ticker">{item.symbol}</th>
-    <td className="num right">{value ? quoteMoney(value.price, value.currency) : '—'}</td>
+    <th scope="row" className={`ticker market-price-${comparison.tone}`}>{item.symbol}</th>
+    <td className={`num right market-price-${comparison.tone}`}>{value ? quoteMoney(value.price, value.currency) : '—'}</td>
     <td>{value?.quotedAt ? <Stamp value={value.quotedAt} /> : <span className="market-cell-note">Não informada</span>}</td>
+    <td className={`market-price-assessment market-price-${comparison.tone}`} data-tone={comparison.tone}>
+      <Def text={comparison.explanation}>{comparison.label}</Def>
+      {comparison.differencePercent !== null && <span className="num market-price-difference">{comparison.differencePercent > 0 ? '+' : ''}{comparison.differencePercent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span>}
+      {comparison.average !== null && <span className="market-cell-note market-price-average">Preço médio: {money(comparison.average)}</span>}
+    </td>
     <td><span className="market-cell-status">{statusLabels[item.status] || item.status}</span>{stale && item.status !== 'cached' && <span className="market-cell-note">Exibindo cotação salva</span>}{item.error && <span className="market-cell-error">{item.error}</span>}</td>
   </tr>;
 }

@@ -24,7 +24,23 @@
 .market-page .market-data-guidance { border-bottom: 1px solid var(--line); color: var(--text-2); }
 .market-page .market-panel-errors { list-style: disc; padding-left: calc(var(--sp-4) + 16px); color: var(--warn); }
 .market-page .market-panel-errors > li + li { margin-top: var(--sp-1); }
-.market-page .market-quotes-table { min-width: 580px; }
+.market-page .market-quotes-table { min-width: 780px; }
+.market-page .market-quotes-table .market-price-below,
+.market-page .market-price-legend .market-price-below { color: var(--pos); }
+.market-page .market-quotes-table .market-price-near,
+.market-page .market-price-legend .market-price-near { color: var(--warn); }
+.market-page .market-quotes-table .market-price-above,
+.market-page .market-price-legend .market-price-above { color: var(--neg); }
+.market-page .market-quotes-table .market-price-unknown,
+.market-page .market-price-legend .market-price-unknown { color: var(--text-2); }
+.market-page .market-price-assessment { min-width: 235px; }
+.market-page .market-price-difference { display: inline-block; margin-left: var(--sp-2); white-space: nowrap; }
+.market-page .market-price-legend { padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); font-size: var(--fs-12); }
+.market-page .market-price-legend > strong { font-weight: 500; color: var(--text-2); }
+.market-page .market-price-legend ul { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); list-style: none; padding: 0; margin-block: var(--sp-2); }
+.market-page .market-price-legend li { display: flex; align-items: center; gap: var(--sp-2); }
+.market-page .market-price-legend li > span { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.market-page .market-price-legend p { color: var(--text-3); }
 .market-page .market-cvm-table { min-width: 460px; }
 .market-page .market-quotes-details-table { min-width: 560px; }
 .market-page .market-cvm-details-table { min-width: 1040px; }
