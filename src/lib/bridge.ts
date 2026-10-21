@@ -247,6 +247,15 @@ export interface PortfolioEvolution {
   startDate?: string | null;
   asOf?: string | null;
   points: PortfolioEvolutionPoint[];
+  /** Latest complete result, keeping each component's own balance date.
+   * Separate from real monthly observations; never implies a same-date CDI comparison. */
+  latestKnown?: {
+    fromDate: string;
+    toDate: string;
+    invested: string;
+    portfolioResult: string;
+    components: { kind: string; id: string | null; name: string; asOf: string; result: string }[];
+  } | null;
   issues: string[];
   assumptions: string[];
 }

@@ -18,7 +18,7 @@ const playwrightModule = process.env.IVESTFII_PLAYWRIGHT_PATH
     return import(pathToFileURL(bundledPlaywright).href);
   });
 const { chromium } = playwrightModule.default || playwrightModule;
-const uiVersion = 'evolucao-mensal-real-da-carteira-e-cdi-sem-interpolar-lacunas';
+const uiVersion = 'evolucao-mensal-real-com-resultado-conhecido-separado-e-datas-dos-saldos';
 const checks = [];
 const browserErrors = [];
 const screenshots = [];
@@ -249,6 +249,7 @@ const evolutionMonthly={status:'partial',startDate:'2025-08-01',asOf:'2026-10-20
   evolutionPoint('2026-10','2026-10-20','130','150','-20',[],true),
 ],issues:['A linha da carteira usa somente os saldos reais registrados; meses ausentes ficam com lacunas.'],assumptions:['FIIs, pós-fixado e caixinhas entram uma vez, na mesma data de referência.']};
 const evolutionInitial={...evolutionMonthly,points:evolutionMonthly.points.map(point=>({...point,portfolioResult:point.month==='2026-10'?'130':null,difference:point.month==='2026-10'?'-20':null,status:point.month==='2026-10'?'available':'incomplete',issues:point.month==='2026-10'?[]:['Sem saldo registrado da carteira neste mês.']}))};
+const evolutionLatest={...evolutionMonthly,points:evolutionMonthly.points.map(point=>({...point,portfolioResult:null,cdiResult:point.month==='2026-10'?null:point.cdiResult,difference:null,status:'incomplete',issues:['Sem saldo registrado da carteira neste mês.']})),latestKnown:{fromDate:'2026-10-19',toDate:'2026-10-20',invested:'2540',portfolioResult:'130',components:[{kind:'fiis',id:null,name:'FIIs',asOf:'2026-10-20',result:'35.44'},{kind:'fixedIncome',id:null,name:'Pós-fixado sintético',asOf:'2026-10-19',result:'60'},{kind:'cash',id:'pocket-a',name:'Caixinha sintética',asOf:'2026-10-20',result:'34.56'}]}};
 const evolutionOther={status:'available',startDate:'2026-09-01',asOf:'2026-10-20',points:[evolutionPoint('2026-09','2026-09-30','20','10','10'),evolutionPoint('2026-10','2026-10-20','40','15','25',[],true)],issues:[],assumptions:[]};
 const incomePerformanceDividendPanel={items:['TEST11','MOCK11'].map(symbol=>({symbol,status:'cached',observation:{symbol,fetchedAt:'2026-10-20T12:00:00Z',source:'B3',sourceUrl:'https://sistemaswebb3-listados.b3.com.br/fundsListedPage/events-main/'+symbol.slice(0,4),events:[incomeApiEvent(symbol,'2026-03',symbol==='TEST11'?'1.5':'2',symbol==='TEST11'?'10':'2',symbol==='TEST11'?'15':'4'),incomeApiEvent(symbol,'2020-02','1','10','10'),incomeApiEvent(symbol,'2026-11','1','10','10')]},error:null})),fetchedAt:'2026-10-20T12:00:00Z',errors:[]};
 const chatFixture={
@@ -408,6 +409,13 @@ function bootstrap(mode) {
     initial.cashPockets=initial.cashPockets.map(pocket=>({...pocket,balanceDate:'2026-10-20'}));
     walletPerformance={...structuredClone(fixedIncomeApiPerformance),asOf:'2026-10-20',marketValue:'1045.44',priceResult:'5.44',totalResult:'35.44',totalReturnPercent:'3.4076923077',portfolio:{...structuredClone(fixedIncomeApiPerformance.portfolio),currentValue:'2640',knownCurrentValue:'2640',totalResult:'130',knownResult:'130',totalReturnPercent:'5.1181102362'},portfolioBenchmark:{...structuredClone(benchmarkFixedApi),asOf:'2026-10-20',result:'130',returnPercent:'5.1181102362',cdi:{endingValue:'2690',result:'150',returnPercent:'5.905511811'},difference:'-20',components:[{...benchmarkFixedApi.components[0],asOf:'2026-10-20',result:'35.44',cdi:{endingValue:'1135',result:'95',returnPercent:'9.134615385'}},{...benchmarkFixedApi.components[1],asOf:'2026-10-20'},benchmarkFixedApi.components[2]]},portfolioEvolution:structuredClone(mode==='wallet-evolution-initial'?evolutionInitial:evolutionMonthly)};
     if(mode==='wallet-evolution-empty')walletPerformance.portfolioEvolution={status:'empty',startDate:null,asOf:null,points:[],issues:[],assumptions:[]};
+    if(mode==='wallet-evolution-latest'){
+      walletPerformance.portfolioEvolution=structuredClone(evolutionLatest);
+      walletPerformance.portfolio.fixedIncome.referenceDate='2026-10-19';
+      walletPerformance.portfolioBenchmark.asOf=null;walletPerformance.portfolioBenchmark.cdi=null;walletPerformance.portfolioBenchmark.difference=null;
+      walletPerformance.portfolioBenchmark.components=walletPerformance.portfolioBenchmark.components.map(component=>({...component,asOf:component.kind==='fixedIncome'?'2026-10-19':'2026-10-20',cdi:null,issues:['Falta o CDI para a data deste saldo.']}));
+    }
+    if(mode==='wallet-evolution-latest-only')walletPerformance.portfolioEvolution={...structuredClone(evolutionLatest),points:[],issues:[]};
   }
   return `
 import { mockIPC, mockWindows } from '/node_modules/@tauri-apps/api/mocks.js';
@@ -2270,6 +2278,61 @@ try {
     await textMatches(initialChart.locator('.evolution-hint'),/1 de 12 meses com registro da carteira/);await initialGraph.focus();await initial.page.keyboard.press('Home');await textMatches(initialChart.locator('.evolution-selected'),/Sem saldo registrado/);
     await initial.page.keyboard.press('End');await textMatches(initialChart.locator('.evolution-selected'),/\+R\$ 130,00/);await sectionShot(initial.page,'desktop-wallet-evolution-one-real-observation',initialScope);
     check('wallet-evolution-initial-one-real-point-retains-CDI-history-and-explicit-missing-balance-coverage');await noUnexpectedCommands(initial.page);await initial.context.close();
+
+    const latest=await openPage('wallet-evolution-latest',{width:1440,height:1000}),latestPage=latest.page,latestScope=region(latestPage,'Resultado da carteira');
+    const latestChart=latestScope.locator('.portfolio-evolution'),latestGraph=latestChart.locator('svg'),latestSummary=latestChart.locator('.evolution-latest-summary'),latestMarker=latestGraph.locator('.evolution-latest-marker');
+    const reloadLatest=async mutation=>{await latestPage.evaluate(mutation);await latestScope.getByRole('button',{name:'Atualizar resultado',exact:true}).click();await latestScope.getByText('Consulta concluída. Confira as datas dos dados.',{exact:true}).waitFor();};
+    await latestMarker.waitFor();await figureEquals(latestSummary.locator('p').first().locator('span'),'+R$ 130,00');
+    await textMatches(latestSummary,/FIIs · 20\/10\/2026.*Pós-fixado sintético · 19\/10\/2026.*Caixinha sintética · 20\/10\/2026.*Ainda não há histórico mensal.*datas diferentes/);
+    assert.equal(await latestGraph.locator('.evolution-dot.portfolio').count(),0);assert.equal((await latestGraph.locator('.evolution-line.portfolio').getAttribute('d')).trim(),'');
+    assert.ok((await latestGraph.locator('.evolution-line.cdi').getAttribute('d')).includes('L'),'The independent actual CDI series must remain visible');
+    assert.equal(await latestMarker.getAttribute('data-latest-month'),'2026-10');await textMatches(latestChart.locator('.evolution-hint'),/0 de 12 meses com registro/);
+    assert.deepEqual((await latestChart.locator('.evolution-legend li').allInnerTexts()).map(normalize),['Carteira · último resultado','100% do CDI']);
+    await latestGraph.focus();await latestPage.keyboard.press('End');await textMatches(latestChart.locator('.evolution-selected'),/Registro mensal da carteira.*Ainda não disponível.*Não comparável.*Último resultado conhecido: \+R\$ 130,00/);
+    await latestMarker.focus();await textMatches(latestChart.getByRole('tooltip'),/último resultado conhecido.*\+R\$ 130,00.*19\/10\/2026.*não é um registro mensal nem uma comparação com o CDI/);
+    await latestPage.mouse.move(0,0);await latestGraph.focus();await latestPage.keyboard.press('Home');await textMatches(latestChart.locator('.evolution-selected'),/Sem saldo registrado/);
+    await latestPage.keyboard.press('End');await latestPage.mouse.move(0,0);await latestPage.locator('body').click({position:{x:0,y:0}});
+    await sectionShot(latestPage,'desktop-wallet-evolution-latest-without-history',latestScope);
+    check('wallet-evolution-zero-monthly-observations-retains-known-whole-wallet-result-as-distinct-marker-with-source-dates-and-no-CDI-comparison');
+    await latestPage.setViewportSize({width:375,height:812});await noOverflow(latestPage,'wallet-evolution-latest-mobile375-no-overflow');
+    assert.deepEqual(await latestGraph.locator('text').evaluateAll(texts=>texts.filter(text=>{const svg=text.closest('svg').getBoundingClientRect(),box=text.getBoundingClientRect();return box.left<svg.left-1||box.right>svg.right+1;}).map(text=>text.textContent)),[],'Latest marker value must fit the mobile SVG');
+    await latestMarker.focus();await figureEquals(latestSummary.locator('p').first().locator('span'),'+R$ 130,00');
+    assert.equal(await latestSummary.evaluate(element=>{const summary=element.getBoundingClientRect(),tooltip=element.parentElement.querySelector('.evolution-tooltip').getBoundingClientRect();return summary.bottom>tooltip.top&&summary.top<tooltip.bottom;}),false,'A tooltip may not cover the visible current-result summary');
+    await latestPage.mouse.move(0,0);await latestPage.locator('body').click({position:{x:0,y:0}});await sectionShot(latestPage,'mobile-wallet-evolution-latest375',latestScope);
+    await latestPage.setViewportSize({width:720,height:500});await noOverflow(latestPage,'wallet-evolution-latest-zoom200-no-overflow');
+    await latestPage.setViewportSize({width:1440,height:1000});
+    check('wallet-evolution-latest-visible-value-and-source-dates-remain-readable-on-mobile-and-zoom200');
+    for(const [amount,expected] of [['0','R$ 0,00'],['-25','−R$ 25,00']]){
+      await reloadLatest(()=>{const e=globalThis.__uiTest.performance.portfolioEvolution;e.latestKnown.portfolioResult=e.latestKnown.portfolioResult==='130'?'0':'-25';e.latestKnown.components[0].result=e.latestKnown.portfolioResult==='0'?'-94.56':'-119.56';});
+      await figureEquals(latestSummary.locator('p').first().locator('span'),expected);assert.equal(compact(await latestMarker.locator('.evolution-latest-value').textContent()),compact(expected));
+      assert.doesNotMatch(await latestMarker.locator('.evolution-latest-diamond').getAttribute('d'),/NaN|Infinity/);assert.equal(await latestGraph.locator('.evolution-dot.portfolio').count(),0);await textMatches(latestChart.locator('.evolution-hint'),/0 de 12 meses/);
+      if(amount==='-25')assert.match(await latestMarker.locator('.evolution-latest-value').getAttribute('class'),/value-negative/);
+    }
+    await reloadLatest(()=>{const e=globalThis.__uiTest.performance.portfolioEvolution;e.points.forEach(point=>point.cdiResult=null);});assert.equal(await latestMarker.count(),1);assert.equal(await latestGraph.locator('.evolution-dot.cdi').count(),0);
+    check('wallet-evolution-latest-zero-and-negative-results-are-real-values-and-remain-visible-without-CDI');
+    await reloadLatest(()=>{const e=globalThis.__uiTest.performance.portfolioEvolution;e.latestKnown.fromDate='2026-10-20';e.latestKnown.components.forEach(component=>component.asOf='2026-10-20');Object.assign(e.points.at(-1),{portfolioResult:'-25',cdiResult:'150',difference:'-175',status:'available'});});
+    assert.equal(await latestMarker.count(),0);assert.equal(await latestSummary.count(),0);assert.equal(await latestGraph.locator('.evolution-dot.portfolio').count(),1);await textMatches(latestChart.locator('.evolution-hint'),/1 de 12 meses/);
+    check('wallet-evolution-latest-same-date-same-result-already-in-real-history-is-not-duplicated');
+    await reloadLatest(()=>{const e=globalThis.__uiTest.performance.portfolioEvolution;Object.assign(e.points.at(-1),{portfolioResult:null,cdiResult:'150',difference:null,status:'incomplete'});e.latestKnown.fromDate='2024-10-19';e.latestKnown.toDate='2024-10-20';e.latestKnown.components.forEach(component=>component.asOf='2024-10-20');});
+    assert.equal(await latestMarker.count(),0);await figureEquals(latestSummary.locator('p').first().locator('span'),'−R$ 25,00');await textMatches(latestSummary,/fora do período exibido/);
+    assert.equal(await latestGraph.locator('[data-latest-month="2024-10"]').count(),0,'An older current result must not be plotted at another month');
+    check('wallet-evolution-latest-outside-the-visible-months-stays-in-summary-without-false-x-date');
+    await reloadLatest(()=>{const e=globalThis.__uiTest.performance.portfolioEvolution;e.latestKnown.fromDate='2026-10-19';e.latestKnown.toDate='2026-10-20';e.latestKnown.components.forEach(component=>component.asOf='2026-10-20');e.issues=['Mesma observação sintética.'];e.points.at(-1).issues=['Mesma observação sintética.'];});
+    await latestGraph.focus();await latestPage.keyboard.press('End');await textMatches(latestChart.locator('.evolution-selected'),/Mesma observação sintética/);assert.equal(await latestChart.locator('.evolution-warning').count(),0);
+    await latestChart.locator('.evolution-table > summary').click();await textMatches(latestChart.locator('.evolution-table tbody tr').last(),/Mesma observação sintética/);await latestChart.locator('.evolution-table > summary').click();
+    check('wallet-evolution-identical-selected-and-global-warnings-appear-once-with-table-context-preserved');
+    await reloadLatest(()=>{globalThis.__uiTest.performance.portfolioEvolution.latestKnown.portfolioResult=null;});assert.equal(await latestMarker.count(),0);assert.equal(await latestSummary.count(),0);
+    check('wallet-evolution-missing-current-result-is-never-rendered-as-zero');
+    await reloadLatest(()=>{globalThis.__uiTest.performance.portfolioEvolution.latestKnown.portfolioResult='130';});assert.equal(await latestMarker.count(),1);
+    await latestPage.evaluate(()=>{globalThis.__uiTest.deferPerformance=true;});await latestScope.getByRole('button',{name:'Atualizar resultado',exact:true}).click();await latestPage.waitForFunction(()=>globalThis.__uiTest.performanceWaiters.length===1);
+    await latestPage.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-other');await textMatches(latestChart.locator('.evolution-selected'),/\+R\$ 40,00/);assert.equal(await latestMarker.count(),0);assert.equal(await latestSummary.count(),0);
+    await latestPage.evaluate(()=>globalThis.__uiTest.performanceWaiters.splice(0).forEach(resolve=>resolve()));await latestPage.waitForTimeout(100);assert.equal(await latestMarker.count(),0);assert.equal(await latestSummary.count(),0);
+    await noUnexpectedCommands(latestPage);assert.deepEqual(latest.externalRequests,[]);await latest.context.close();
+    check('wallet-evolution-latest-marker-is-isolated-by-wallet-and-ignores-a-stale-refresh');
+
+    const latestOnly=await openPage('wallet-evolution-latest-only',{width:375,height:812}),latestOnlyChart=region(latestOnly.page,'Resultado da carteira').locator('.portfolio-evolution');await latestOnlyChart.locator('.evolution-latest-marker').waitFor();
+    assert.equal(await latestOnlyChart.locator('[data-month]').count(),0);assert.equal(await latestOnlyChart.locator('.evolution-dot').count(),0);assert.equal(await latestOnlyChart.locator('.evolution-selected').count(),0);assert.equal(compact(await latestOnlyChart.locator('.evolution-latest-value').textContent()),'+R$130,00');await noOverflow(latestOnly.page,'wallet-evolution-current-only-no-overflow');
+    check('wallet-evolution-current-only-without-monthly-points-still-shows-a-distinct-real-known-result');await noUnexpectedCommands(latestOnly.page);await latestOnly.context.close();
 
     const empty=await openPage('wallet-evolution-empty',{width:1440,height:1000});const emptyChart=region(empty.page,'Resultado da carteira').locator('.portfolio-evolution');await emptyChart.locator('.evolution-empty').waitFor();assert.equal(await emptyChart.locator('svg').count(),0);assert.equal(await emptyChart.locator('.evolution-selected').count(),0);check('wallet-evolution-empty-response-does-not-create-a-zero-chart');await noUnexpectedCommands(empty.page);await empty.context.close();
     const zoom=await openPage('wallet-evolution-zoom-200',{width:720,height:500},{expandedSidebar:false});await zoom.page.locator('.portfolio-evolution svg').waitFor();await noOverflow(zoom.page,'wallet-evolution-zoom200-no-overflow');await sectionShot(zoom.page,'zoom200-wallet-evolution',region(zoom.page,'Resultado da carteira'));check('wallet-evolution-zoom200-remains-readable-without-global-horizontal-scroll');await noUnexpectedCommands(zoom.page);await zoom.context.close();

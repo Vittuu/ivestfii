@@ -40,6 +40,28 @@ pub struct PortfolioEvolutionPoint {
     pub is_partial_month: bool,
 }
 
+/// Latest real values, retaining each investment's own source date. This is
+/// not a same-day monthly observation and has no matched-date CDI result.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PortfolioLatestValuation {
+    pub from_date: String,
+    pub to_date: String,
+    pub invested: String,
+    pub portfolio_result: String,
+    pub components: Vec<PortfolioLatestValuationComponent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PortfolioLatestValuationComponent {
+    pub kind: String,
+    pub id: Option<String>,
+    pub name: String,
+    pub as_of: String,
+    pub result: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortfolioEvolution {
@@ -49,6 +71,8 @@ pub struct PortfolioEvolution {
     pub points: Vec<PortfolioEvolutionPoint>,
     pub issues: Vec<String>,
     pub assumptions: Vec<String>,
+    #[serde(default)]
+    pub latest_known: Option<PortfolioLatestValuation>,
 }
 
 fn invalid(message: &str) -> CoreError {
@@ -315,6 +339,126 @@ pub fn observe_portfolio(
     };
     validate_history_observation(&output)?;
     Ok(Some(output))
+}
+
+/// Show the wallet's already calculated result even when its latest real
+/// component valuations have different dates. No rate, date or balance is
+/// inferred; historical observation capture keeps its common-date rule.
+pub fn latest_known_valuation(
+    fii: &FiiPerformance,
+    portfolio: &PortfolioPerformance,
+    benchmark: &PortfolioBenchmark,
+    today: NaiveDate,
+) -> Result<Option<PortfolioLatestValuation>> {
+    let (Some(invested), Some(result)) = (
+        portfolio.invested.as_deref(),
+        portfolio.total_result.as_deref(),
+    ) else {
+        return Ok(None);
+    };
+    if portfolio.status != "available" {
+        return Ok(None);
+    }
+    // Require exactly the active components from the accounting calculation.
+    // An absent fixed-income position is not an unknown zero position. Cash
+    // pockets with known zero balances still retain their reconciliation date.
+    let mut expected = BTreeMap::new();
+    if fii.status != "empty" {
+        expected.insert(
+            ("fiis".to_string(), None),
+            (
+                Some(fii.invested.as_str()),
+                fii.total_result.as_deref(),
+                fii.as_of.as_deref(),
+            ),
+        );
+    }
+    if portfolio.fixed_income.status != "empty" {
+        let fixed = &portfolio.fixed_income;
+        expected.insert(
+            ("fixedIncome".to_string(), None),
+            (
+                fixed.invested.as_deref(),
+                fixed.result.as_deref(),
+                fixed.reference_date.as_deref(),
+            ),
+        );
+    }
+    for cash in &portfolio.cash.items {
+        if expected
+            .insert(
+                ("cash".to_string(), Some(cash.id.clone())),
+                (
+                    cash.invested.as_deref(),
+                    cash.income.as_deref(),
+                    cash.balance_date.as_deref(),
+                ),
+            )
+            .is_some()
+        {
+            return Ok(None);
+        }
+    }
+    if expected.is_empty() || expected.len() != benchmark.components.len() {
+        return Ok(None);
+    }
+    let invested = parse_nonnegative(invested, "Valor aplicado na carteira")?;
+    let result = parse_decimal(result)?;
+    let mut component_invested = Decimal::ZERO;
+    let mut component_result = Decimal::ZERO;
+    let mut dates = BTreeSet::new();
+    let mut components = Vec::with_capacity(expected.len());
+    for component in &benchmark.components {
+        let Some((Some(source_invested), Some(source_result), Some(source_date))) =
+            expected.remove(&(component.kind.clone(), component.id.clone()))
+        else {
+            return Ok(None);
+        };
+        let (Some(cost), Some(gain), Some(as_of)) = (
+            component.invested.as_deref(),
+            component.result.as_deref(),
+            component.as_of.as_deref(),
+        ) else {
+            return Ok(None);
+        };
+        let Some(observed) = date(as_of).ok().filter(|day| *day <= today) else {
+            return Ok(None);
+        };
+        let cost = parse_nonnegative(cost, "Valor aplicado no investimento")?;
+        let gain = parse_decimal(gain)?;
+        if source_date != as_of
+            || parse_nonnegative(source_invested, "Valor aplicado no investimento")? != cost
+            || parse_decimal(source_result)? != gain
+        {
+            return Ok(None);
+        }
+        component_invested = add(component_invested, cost)?;
+        component_result = add(component_result, gain)?;
+        dates.insert(observed);
+        components.push(PortfolioLatestValuationComponent {
+            kind: component.kind.clone(),
+            id: component.id.clone(),
+            name: component.name.clone(),
+            as_of: observed.to_string(),
+            result: decimal_string(gain),
+        });
+    }
+    if !expected.is_empty() || component_invested != invested || component_result != result {
+        return Ok(None);
+    }
+    Ok(Some(PortfolioLatestValuation {
+        from_date: dates
+            .first()
+            .expect("nonempty complete components")
+            .to_string(),
+        to_date: dates
+            .last()
+            .expect("nonempty complete components")
+            .to_string(),
+        invested: decimal_string(invested),
+        portfolio_result: decimal_string(result),
+        components,
+    }))
 }
 
 #[derive(Default)]
@@ -590,6 +734,7 @@ pub fn calculate_portfolio_evolution(
             points: vec![],
             issues: vec![],
             assumptions,
+            latest_known: None,
         });
     };
     let count =
@@ -702,6 +847,7 @@ pub fn calculate_portfolio_evolution(
         points,
         issues: summary.into_iter().collect(),
         assumptions,
+        latest_known: None,
     })
 }
 
@@ -838,6 +984,221 @@ mod tests {
         let benchmark =
             calculate_portfolio_benchmark(snapshot, &fii, &portfolio, rates, day(as_of)).unwrap();
         observe_portfolio(snapshot, &fii, &portfolio, &benchmark, events, day(as_of)).unwrap()
+    }
+
+    fn latest_parts(
+        snapshot: &PortfolioSnapshot,
+        as_of: &str,
+        price: &str,
+    ) -> (FiiPerformance, PortfolioPerformance, PortfolioBenchmark) {
+        let quotes = snapshot
+            .funds
+            .iter()
+            .map(|fund| PerformanceQuote {
+                ticker: fund.ticker.clone(),
+                price: price.into(),
+                as_of: as_of.into(),
+            })
+            .collect::<Vec<_>>();
+        let fii =
+            calculate_fii_performance_with_income(snapshot, &quotes, &[], &[], day(as_of)).unwrap();
+        let portfolio = calculate_portfolio_performance(snapshot, &fii).unwrap();
+        let benchmark =
+            calculate_portfolio_benchmark(snapshot, &fii, &portfolio, &[], day(as_of)).unwrap();
+        (fii, portfolio, benchmark)
+    }
+
+    fn with_fii_and_fixed() -> PortfolioSnapshot {
+        let mut original = with_fii();
+        let mut position = fixed();
+        // The real FII calculator reconciles holdings against the dated broker
+        // position, so this mixed-asset fixture must describe both positions.
+        position.listed_funds.holdings.push(crate::BrokerHolding {
+            ticker: "TEST11".into(),
+            shares: "10".into(),
+            average_price: "10".into(),
+            price: "11".into(),
+            market_value: "110".into(),
+            unrealized_result: "10".into(),
+            cost_basis: "100".into(),
+        });
+        original.broker_position = Some(position);
+        original
+    }
+
+    #[test]
+    fn latest_values_keep_distinct_real_dates_without_fabricating_a_monthly_point_or_cdi() {
+        let original = with_fii_and_fixed();
+        let before = serde_json::to_value(&original).unwrap();
+        let (fii, portfolio, benchmark) = latest_parts(&original, "2026-01-12", "11");
+        assert_eq!(portfolio.total_result.as_deref(), Some("20"));
+        assert!(benchmark.as_of.is_none());
+        assert!(benchmark.cdi.is_none());
+        assert_eq!(benchmark.status, "incomplete");
+        let latest = latest_known_valuation(&fii, &portfolio, &benchmark, day("2026-01-12"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest.from_date, "2026-01-09");
+        assert_eq!(latest.to_date, "2026-01-12");
+        assert_eq!(latest.invested, "200");
+        assert_eq!(latest.portfolio_result, "20");
+        assert_eq!(latest.components.len(), 2);
+        assert_eq!(latest.components[0].as_of, "2026-01-12");
+        assert_eq!(latest.components[1].as_of, "2026-01-09");
+        let current = observe_portfolio(
+            &original,
+            &fii,
+            &portfolio,
+            &benchmark,
+            &[],
+            day("2026-01-12"),
+        )
+        .unwrap();
+        assert!(current.is_none());
+        let history = evolution(
+            &original,
+            &[],
+            &[],
+            &[],
+            current.as_ref(),
+            day("2026-01-12"),
+        )
+        .unwrap();
+        assert!(history.latest_known.is_none());
+        assert!(history
+            .points
+            .iter()
+            .all(|point| point.portfolio_result.is_none() && point.difference.is_none()));
+        let serialized = serde_json::to_value(&latest).unwrap();
+        assert!(serialized.get("cdiResult").is_none());
+        assert!(serialized.get("difference").is_none());
+        assert_eq!(serde_json::to_value(&original).unwrap(), before);
+    }
+
+    #[test]
+    fn latest_valuation_accepts_losses_and_same_date_values_without_daily_cdi() {
+        let original = with_fii();
+        let (fii, portfolio, benchmark) = latest_parts(&original, "2026-01-09", "9");
+        let latest = latest_known_valuation(&fii, &portfolio, &benchmark, day("2026-01-09"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest.from_date, "2026-01-09");
+        assert_eq!(latest.to_date, "2026-01-09");
+        assert_eq!(latest.portfolio_result, "-10");
+        assert!(benchmark.cdi.is_none());
+    }
+
+    #[test]
+    fn latest_valuation_preserves_a_reconciled_zero_and_ignores_absent_positions() {
+        let mut original = snapshot();
+        let mut pocket = cash();
+        pocket.balance = "0".into();
+        pocket.total_withdrawals = Some("100".into());
+        pocket.cash_flows.as_mut().unwrap()[1].amount = "100".into();
+        original.cash_pockets.push(pocket);
+        let (fii, portfolio, benchmark) = latest_parts(&original, "2026-01-09", "1");
+        let latest = latest_known_valuation(&fii, &portfolio, &benchmark, day("2026-01-09"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest.portfolio_result, "0");
+        assert_eq!(latest.components.len(), 1);
+        assert_eq!(latest.components[0].kind, "cash");
+        let (fii, portfolio, benchmark) = latest_parts(&snapshot(), "2026-01-09", "1");
+        assert!(
+            latest_known_valuation(&fii, &portfolio, &benchmark, day("2026-01-09"))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn latest_valuation_requires_all_component_dates_and_complete_accounting() {
+        let original = with_fii_and_fixed();
+        let (fii, portfolio, benchmark) = latest_parts(&original, "2026-01-12", "11");
+        assert_eq!(portfolio.status, "available");
+        for missing in ["date", "result", "cost", "component"] {
+            let mut broken = benchmark.clone();
+            match missing {
+                "date" => broken.components[1].as_of = None,
+                "result" => broken.components[1].result = None,
+                "cost" => broken.components[1].invested = None,
+                _ => {
+                    broken.components.pop();
+                }
+            }
+            assert!(
+                latest_known_valuation(&fii, &portfolio, &broken, day("2026-01-12"))
+                    .unwrap()
+                    .is_none(),
+                "{missing}"
+            );
+        }
+        let mut incomplete = portfolio.clone();
+        incomplete.total_result = None;
+        assert!(
+            latest_known_valuation(&fii, &incomplete, &benchmark, day("2026-01-12"))
+                .unwrap()
+                .is_none()
+        );
+        incomplete = portfolio.clone();
+        incomplete.status = "incomplete".into();
+        assert!(
+            latest_known_valuation(&fii, &incomplete, &benchmark, day("2026-01-12"))
+                .unwrap()
+                .is_none()
+        );
+        let mut fixed_without_date = portfolio.clone();
+        fixed_without_date.fixed_income.reference_date = None;
+        assert!(
+            latest_known_valuation(&fii, &fixed_without_date, &benchmark, day("2026-01-12"))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn latest_valuation_rejects_future_dates_invalid_dates_and_mismatched_totals() {
+        let original = with_fii();
+        let (fii, portfolio, benchmark) = latest_parts(&original, "2026-01-12", "11");
+        assert!(
+            latest_known_valuation(&fii, &portfolio, &benchmark, day("2026-01-09"))
+                .unwrap()
+                .is_none()
+        );
+        let mut invalid = benchmark.clone();
+        invalid.components[0].as_of = Some("2026-1-12".into());
+        assert!(
+            latest_known_valuation(&fii, &portfolio, &invalid, day("2026-01-12"))
+                .unwrap()
+                .is_none()
+        );
+        for field in ["result", "cost"] {
+            let mut mismatch = portfolio.clone();
+            if field == "result" {
+                mismatch.total_result = Some("999".into());
+            } else {
+                mismatch.invested = Some("999".into());
+            }
+            assert!(
+                latest_known_valuation(&fii, &mismatch, &benchmark, day("2026-01-12"))
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let mut mismatch = benchmark.clone();
+        mismatch.components[0].result = Some("999".into());
+        assert!(
+            latest_known_valuation(&fii, &portfolio, &mismatch, day("2026-01-12"))
+                .unwrap()
+                .is_none()
+        );
+        mismatch = benchmark.clone();
+        mismatch.components.push(mismatch.components[0].clone());
+        assert!(
+            latest_known_valuation(&fii, &portfolio, &mismatch, day("2026-01-12"))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

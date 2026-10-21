@@ -18,9 +18,13 @@ O gráfico mostra **ganho acumulado em reais**, desde os primeiros investimentos
 
 A linha da carteira usa registros reais dos saldos e os rendimentos disponíveis. Meses sem um registro ficam com uma lacuna: não são preenchidos com zero, repetidos do mês anterior ou interpolados a partir do saldo atual. Não é possível afirmar em que momento a carteira cruzou o CDI dentro de uma lacuna. Um único mês registrado aparece como ponto, até existirem outros registros mensais. O último registro pode ser anterior ao fim do mês, e sua data permanece visível.
 
+O marcador verde **Últimos valores** mostra o resultado completo já conhecido nos cartões, mesmo quando os investimentos têm datas diferentes. Cada componente mantém sua data original, apresentada no gráfico. Esse marcador é independente da série mensal: não liga pontos antigos, não aumenta a contagem de meses registrados e não calcula diferença contra o CDI. Se já existir um ponto mensal com a mesma data e valor, o marcador não é repetido. Carteira incompleta ou com uma data ausente não produz um marcador com subtotal apresentado como total.
+
 O aplicativo guarda automaticamente o último registro completo de cada mês, por carteira, ao carregar ou atualizar o resultado na interface. Isso não cria compras, rendimentos recebidos ou itens na fila de sincronização. Datas mais recentes substituem o registro anterior do mesmo mês; correções na mesma data também são aceitas. Uma impressão dos dados financeiros daquele período permite identificar mudanças retroativas: uma compra ou rendimento antigo corrigido invalida o valor derivado antigo, enquanto movimentos posteriores preservam os pontos anteriores. Renomeações e horários de consulta não alteram a base econômica.
 
 O histórico privado fica na tabela SQLite `performance_history` (schema9) e acompanha a exportação/restauração como `performanceHistory`. Backups anteriores têm histórico vazio. A migração acrescenta a tabela sem reescrever dados financeiros existentes. A leitura pelo MCP é somente leitura e não captura novos registros; o relatório contém a mesma série mensal da interface.
+
+O relatório fornece `portfolioEvolution.latestKnown` separadamente de `points`, com `fromDate`, `toDate` e as datas dos componentes. Esse valor já faz parte de `portfolio.totalResult`; não deve ser somado novamente nem tratado como saldo histórico na data mais recente do intervalo. O marcador é derivado dos dados disponíveis, sem gravação em `performance_history` e sem novas consultas de API.
 
 ## Cenário CDI
 

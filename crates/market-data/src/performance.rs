@@ -8,8 +8,8 @@ use ivestfii_core::{
     },
     portfolio_benchmark::{calculate_portfolio_benchmark, PortfolioBenchmark},
     portfolio_evolution::{
-        calculate_portfolio_evolution, observe_portfolio, PortfolioEvolution,
-        PortfolioHistoryObservation,
+        calculate_portfolio_evolution, latest_known_valuation, observe_portfolio,
+        PortfolioEvolution, PortfolioHistoryObservation,
     },
     portfolio_performance::{calculate_portfolio_performance, PortfolioPerformance},
     PortfolioSnapshot,
@@ -224,7 +224,7 @@ fn build_report_inner(
         today,
     )
     .map_err(|error| error.to_string())?;
-    let portfolio_evolution = calculate_portfolio_evolution(
+    let mut portfolio_evolution = calculate_portfolio_evolution(
         snapshot,
         &rates,
         &events,
@@ -233,6 +233,9 @@ fn build_report_inner(
         today,
     )
     .map_err(|error| error.to_string())?;
+    portfolio_evolution.latest_known =
+        latest_known_valuation(&calculation, &portfolio, &portfolio_benchmark, today)
+            .map_err(|error| error.to_string())?;
     Ok(PerformanceReport {
         portfolio,
         portfolio_evolution,
@@ -334,6 +337,10 @@ mod tests {
         assert_eq!(report.calculation.as_of.as_deref(), Some("2026-10-19"));
         assert_eq!(report.calculation.total_result.as_deref(), Some("-5"));
         assert!(report.calculation.cdi.is_none());
+        let latest = report.portfolio_evolution.latest_known.as_ref().unwrap();
+        assert_eq!(latest.from_date, "2026-10-19");
+        assert_eq!(latest.to_date, "2026-10-19");
+        assert_eq!(latest.portfolio_result, "-5");
         assert_eq!(
             report.quote_fetched_at.as_deref(),
             Some("2026-10-20T12:00:00Z")
@@ -360,6 +367,7 @@ mod tests {
         assert_eq!(start.to_string(), "2026-08-01");
         assert_eq!(end.to_string(), "2026-10-20");
         assert!(report.history_observation.is_none());
+        assert!(report.portfolio_evolution.latest_known.is_none());
         assert!(report
             .portfolio_evolution
             .points
@@ -392,6 +400,10 @@ mod tests {
         let serialized = serde_json::to_value(&september).unwrap();
         assert!(serialized.get("historyObservation").is_none());
         assert!(!serialized.to_string().contains("basisFingerprint"));
+        assert_eq!(
+            serialized["portfolioEvolution"]["latestKnown"]["portfolioResult"],
+            "-5"
+        );
         snapshot.performance_history.push(observed.clone());
         let original = serde_json::to_value(&snapshot).unwrap();
 
@@ -472,6 +484,52 @@ mod tests {
             .points
             .iter()
             .all(|point| point.cdi_result.is_some()));
+    }
+
+    #[test]
+    fn latest_known_result_is_serialized_separately_when_component_dates_differ() {
+        let mut value = serde_json::to_value(snapshot()).unwrap();
+        value["cashPockets"] = json!([{
+            "id":"cash-a","name":"Reserva de teste","institution":"Teste","balance":"220",
+            "totalDeposits":"200","totalWithdrawals":"10","balanceDate":"2026-10-19",
+            "cashFlows":[{"date":"2026-08-10","kind":"deposit","amount":"200"},
+                {"date":"2026-09-10","kind":"withdrawal","amount":"10"}],
+            "cdiPercent":"120","annualCdiRate":null,"rateDate":null,"notes":"",
+            "createdAt":"2026-08-01T12:00:00Z","updatedAt":"2026-10-19T12:00:00Z"
+        }]);
+        let original: PortfolioSnapshot = serde_json::from_value(value).unwrap();
+        let before = serde_json::to_value(&original).unwrap();
+        let report = build_report(
+            &original,
+            &quote("BRL", "2026-10-20T21:00:00Z"),
+            None,
+            NaiveDate::from_ymd_opt(2026, 10, 20).unwrap(),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(report.portfolio.total_result.as_deref(), Some("25"));
+        assert!(report.history_observation.is_none());
+        assert!(report.portfolio_benchmark.cdi.is_none());
+        assert!(report
+            .portfolio_evolution
+            .points
+            .iter()
+            .all(|point| point.portfolio_result.is_none()));
+        let serialized = serde_json::to_value(&report).unwrap();
+        let latest = &serialized["portfolioEvolution"]["latestKnown"];
+        assert_eq!(latest["fromDate"], "2026-10-19");
+        assert_eq!(latest["toDate"], "2026-10-20");
+        assert_eq!(latest["invested"], "300");
+        assert_eq!(latest["portfolioResult"], "25");
+        assert_eq!(latest["components"][0]["kind"], "fiis");
+        assert_eq!(latest["components"][0]["asOf"], "2026-10-20");
+        assert_eq!(latest["components"][1]["kind"], "cash");
+        assert_eq!(latest["components"][1]["asOf"], "2026-10-19");
+        assert!(latest.get("cdiResult").is_none());
+        assert!(latest.get("difference").is_none());
+        assert!(serialized.get("historyObservation").is_none());
+        assert!(!serialized.to_string().contains("basisFingerprint"));
+        assert_eq!(serde_json::to_value(&original).unwrap(), before);
     }
 
     #[test]
