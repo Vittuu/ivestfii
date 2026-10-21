@@ -2,6 +2,7 @@ import { dateBR } from '../lib/bridge';
 import { Def } from '../components';
 import type { FundContributionResult, FundContributionRow } from '../lib/fundContributionSimulation';
 import { simulationNumber } from '../lib/fundContributionSimulation';
+import ConfirmSimulationPurchases from './ConfirmSimulationPurchases';
 import '../styles/fund-contribution-simulation.css';
 
 const money = (value: string | null) => value === null ? '—' : `R$ ${simulationNumber(value, 2)}`;
@@ -15,7 +16,7 @@ function Quote({ row }: { row: FundContributionRow }) {
   return <span className="fund-simulation-note"><Def text={description}>{money(row.price)}</Def>{row.quoteDate && <> · <time dateTime={row.quoteDate}>{dateBR(row.quoteDate)}</time></>}{row.quoteStatus !== 'available' && <span className="fund-simulation-source">Cotação salva</span>}</span>;
 }
 
-export default function FundContributionSimulation({ result, toolId }: { result: FundContributionResult; toolId: string }) {
+export default function FundContributionSimulation({ result, toolId, conversationId, onPurchasesSaved, onBusyChange }: { result: FundContributionResult; toolId: string; conversationId: string; onPurchasesSaved?: (walletId: string) => Promise<void>; onBusyChange?: (busy: boolean) => void }) {
   const { report, wallet } = result;
   const allocation = report.portfolioAllocation;
   const incomplete = report.status === 'incomplete' || allocation.status === 'incomplete';
@@ -44,6 +45,7 @@ export default function FundContributionSimulation({ result, toolId }: { result:
       </tr>)}</tbody><tfoot><tr><th scope="row">Total</th><td className="fund-simulation-number">{pair(allocation.totalBefore, allocation.totalAfter, money)}</td><td>—</td></tr></tfoot></table>
     </div>
     <p className="fund-simulation-foot">{basis && <span>{basis} </span>}Cotações são referências, sem garantia de preço de execução. Saldo livre permanece disponível e não é aplicado em caixinhas.</p>
-    <p className="fund-simulation-foot">Simulação; seus saldos e lançamentos permanecem iguais. “—” indica dado indisponível.</p>
+    <p className="fund-simulation-foot">Os valores acima preservam a simulação original. Compras confirmadas aparecem abaixo; “—” indica dado indisponível.</p>
+    <ConfirmSimulationPurchases result={result} toolId={toolId} conversationId={conversationId} onPurchasesSaved={onPurchasesSaved} onBusyChange={onBusyChange} />
   </section>;
 }

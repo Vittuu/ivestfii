@@ -18,3 +18,41 @@
 .fund-contribution-simulation .fund-simulation-foot { padding: var(--sp-2) var(--sp-3); color: var(--text-3); line-height: 1.5; overflow-wrap: anywhere; }
 .fund-contribution-simulation .fund-simulation-foot + .fund-simulation-foot { padding-top: 0; }
 .fund-contribution-simulation tfoot th { color: var(--text-1); border-top: 1px solid var(--line); border-bottom: 0; font-weight: 500; }
+
+.purchase-confirmation-actions { min-width: 0; border-top: 1px solid var(--line); }
+.purchase-confirmation-action-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-3); }
+.purchase-confirmation-action-row .fund-simulation-foot { flex: 1 1 210px; padding: 0; }
+.purchase-confirmation-action-row .button { max-width: 100%; white-space: normal; }
+.purchase-confirmation-load-error { padding: 0 var(--sp-3) var(--sp-3); color: var(--warn); overflow-wrap: anywhere; }
+.purchase-confirmation-form { min-width: 0; }
+.purchase-confirmation-intro, .purchase-confirmation-reference { margin-bottom: var(--sp-3); color: var(--text-2); font-size: var(--fs-13); line-height: 1.5; overflow-wrap: anywhere; }
+.purchase-confirmation-fund { min-width: 0; margin: var(--sp-3) 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-2); }
+.purchase-confirmation-fund legend { max-width: 100%; padding: 0 var(--sp-1); }
+.purchase-confirmation-fund legend label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-12); }
+.purchase-confirmation-fund legend input { width: 16px; height: 16px; margin: 0; }
+.purchase-confirmation-fund .ticker { color: var(--text-1); }
+.purchase-confirmation-reference { font-size: var(--fs-12); }
+.purchase-confirmation-fields { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .75fr) minmax(0, 1.2fr); gap: 0 var(--sp-3); }
+.purchase-confirmation-fields :is(.field, input) { min-width: 0; max-width: 100%; }
+.purchase-confirmation-fields .field { font-size: var(--fs-12); }
+.purchase-confirmation-table { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; border: 1px solid var(--line); border-radius: var(--r-2); }
+.purchase-confirmation-table table { min-width: 640px; width: 100%; font-size: var(--fs-12); }
+.purchase-confirmation-table caption { padding: var(--sp-2) var(--sp-3); text-align: left; background: var(--surface-2); color: var(--text-1); }
+.purchase-confirmation-table :is(th, td) { padding: var(--sp-2) var(--sp-3); vertical-align: top; }
+.purchase-confirmation-table th[scope='row'] { font-weight: 500; }
+.purchase-confirmation-table td:last-child { max-width: 260px; min-width: 180px; white-space: normal; overflow-wrap: anywhere; }
+.purchase-confirmation-table .fund-simulation-note { display: block; margin-top: var(--sp-1); font-weight: 400; font-family: var(--font-ui); color: var(--text-3); line-height: 1.5; }
+.purchase-confirmation-table .fund-simulation-number { white-space: nowrap; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.purchase-status { font-size: var(--fs-12); font-weight: 500; }
+.purchase-status-new { color: var(--warn); }
+.purchase-status-already_confirmed, .purchase-status-already_saved, .purchase-confirmation-success { color: var(--pos); }
+.purchase-status-conflict { color: var(--neg); }
+.purchase-confirmation-success { margin-bottom: var(--sp-3); font-size: var(--fs-13); line-height: 1.5; }
+.purchase-confirmation-preview { margin-top: var(--sp-4); }
+.purchase-confirmation-preview > .purchase-confirmation-intro { margin-top: var(--sp-3); }
+.purchase-confirmation-completed { margin-top: var(--sp-3); }
+.purchase-confirmation-actions > .purchase-confirmation-table { margin: var(--sp-3); max-width: calc(100% - var(--sp-3) * 2); }
+@media (max-width: 600px) {
+  .purchase-confirmation-fields { grid-template-columns: minmax(0, 1fr); }
+  .purchase-confirmation-fund { padding: var(--sp-2); }
+}

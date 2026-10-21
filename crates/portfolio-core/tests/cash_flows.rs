@@ -184,7 +184,7 @@ fn schema_seven_upgrade_adds_unknown_dates_without_rewriting_old_financial_rows_
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        10
     );
     assert_eq!(
         db.query_row("SELECT cash_flows FROM cash_pockets", [], |row| row

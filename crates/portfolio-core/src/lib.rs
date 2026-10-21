@@ -23,6 +23,7 @@ mod broker;
 mod cash;
 pub mod contribution_simulation;
 pub mod fund_contribution;
+pub mod purchase_confirmation;
 mod evolution_history;
 pub mod historical_valuation;
 pub mod income;
@@ -39,6 +40,10 @@ pub use broker::{
 };
 pub use cash::{CashFlow, CashPocket, CashPocketInput, CashSimulation, CashSimulationInput};
 pub use profile::{InvestmentProfile, InvestmentProfileInput};
+pub use purchase_confirmation::{
+    PurchaseConfirmationInput, PurchaseConfirmationItem, PurchaseConfirmationReport,
+    PurchaseConfirmationRow,
+};
 pub use wallets::{Wallet, WalletCatalog, WalletInput, DEFAULT_WALLET_ID};
 pub use wealth::{WalletWealth, WealthOverview, WealthTotals};
 
@@ -273,7 +278,7 @@ impl Repository {
             "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;",
         )?;
         let version: u32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if version > 9 {
+        if version > 10 {
             return Err(CoreError::Validation(
                 "Este banco foi criado por uma versão mais recente do aplicativo.".into(),
             ));
@@ -356,7 +361,7 @@ impl Repository {
         let migration = (|| -> Result<()> {
             let locked_version: u32 =
                 connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            if locked_version > 9 {
+            if locked_version > 10 {
                 return Err(CoreError::Validation(
                     "Este banco foi criado por uma versão mais recente do aplicativo.".into(),
                 ));
@@ -388,7 +393,19 @@ impl Repository {
                 connection
                     .execute_batch("ALTER TABLE monthly_records ADD COLUMN purchase_date TEXT;")?;
             }
-            connection.execute_batch("PRAGMA user_version = 9; COMMIT;")?;
+            connection.execute_batch(
+                "CREATE TABLE IF NOT EXISTS simulation_purchase_receipts (
+                    source_tool_id TEXT NOT NULL,
+                    fund_id TEXT NOT NULL REFERENCES funds(id),
+                    record_id TEXT NOT NULL REFERENCES monthly_records(id),
+                    purchase_date TEXT NOT NULL,
+                    shares TEXT NOT NULL,
+                    price_per_share TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(source_tool_id, fund_id)
+                );
+                PRAGMA user_version = 10; COMMIT;",
+            )?;
             Ok(())
         })();
         if let Err(error) = migration {

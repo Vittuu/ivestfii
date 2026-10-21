@@ -390,7 +390,7 @@ fn schema_five_upgrade_is_additive_without_inventing_a_profile_or_rewriting_fina
     let version: u32 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
     drop(db);
     let reopened = Repository::open_existing(path).unwrap();
     assert_eq!(reopened.export_legacy_json().unwrap(), export);

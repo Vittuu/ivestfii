@@ -220,7 +220,7 @@ fn schema_six_upgrade_adds_only_nullable_dates_without_touching_old_rows_or_outb
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        10
     );
     let actual: (String, String, i64, String) = db
         .query_row(

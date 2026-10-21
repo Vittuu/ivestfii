@@ -31,6 +31,7 @@ interface Props {
   requestedConversation?: { id: string; token: number };
   onRunNotice?: (run: ChatRun) => void;
   onBusyChange?: (busy: boolean) => void;
+  onPurchasesSaved?: (walletId: string) => Promise<void>;
 }
 
 function readPreference(key: string): string {
@@ -153,7 +154,7 @@ function ToolCall({ tool }: { tool: ToolEvent }) {
 }
 
 /** Mounted once by App: page, drawer and hidden share this state and the same local history. */
-export default function Assistant({ walletId, walletNames, view = 'page', onOpenPage, onClose, requestedConversation, onRunNotice, onBusyChange }: Props) {
+export default function Assistant({ walletId, walletNames, view = 'page', onOpenPage, onClose, requestedConversation, onRunNotice, onBusyChange, onPurchasesSaved }: Props) {
   const conversationListId = useId();
   const [initialized, setInitialized] = useState(view !== 'hidden');
   const [showConversations, setShowConversations] = useState(false);
@@ -388,8 +389,8 @@ export default function Assistant({ walletId, walletNames, view = 'page', onOpen
   const simulations = useMemo(() => tools.flatMap((tool) => {
     if (tool.conversationId !== selected) return [];
     const result = readFundContributionSimulation(tool);
-    return result ? [{ id: `simulation-${tool.id}`, date: tool.completedAt || tool.startedAt, content: <FundContributionSimulation result={result} toolId={tool.id} /> }] : [];
-  }), [tools, selected]);
+    return result ? [{ id: `simulation-${tool.id}`, date: tool.completedAt || tool.startedAt, content: <FundContributionSimulation result={result} toolId={tool.id} conversationId={selected} onPurchasesSaved={onPurchasesSaved} /> }] : [];
+  }), [tools, selected, onPurchasesSaved]);
   const timeline = [...messages.map((message) => ({ id: `message-${message.id}`, date: message.createdAt, content: <Message message={message} /> })), ...simulations]
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   const current = conversations.find((item) => item.id === selected);

@@ -151,6 +151,21 @@ Em `fundSimulation.portfolioAllocation`, a contribuição de FIIs é apenas o va
 
 O histórico e a auditoria continuam na mesma conversa ao alternar provedores. Datas mistas e lacunas mantêm suas limitações, e o resultado permanece hipotético: nenhuma compra, resgate ou alteração de saldo é realizada pela ferramenta.
 
+### Confirmar compras realizadas
+
+O cartão de uma simulação por fundo oferece **Registrar compras realizadas** para registrar o que o usuário já comprou pela corretora. Esse fluxo usa comandos locais do Tauri e confirmação humana na interface Windows. Não acrescenta ferramenta MCP: Codex, Claude e Antigravity continuam com o mesmo catálogo de cinco ferramentas somente leitura. O assistente pode orientar o preenchimento; uma mensagem no chat não autoriza nem comprova uma gravação pelo modelo.
+
+1. Selecione explicitamente os FIIs comprados. Nenhum fundo vem selecionado para confirmação automática.
+2. Preencha a data real da compra, a quantidade inteira positiva e o preço real por cota. Os valores simulados servem de referência; a cotação e sua data não são a execução nem a data da compra.
+3. Use **Conferir compras** para revisar os valores e os registros que já existem na mesma carteira. Compras idênticas já salvas são mostradas para vinculação, sem novo lançamento. Correspondências ambíguas com registros antigos ficam bloqueadas para conferência, sem adivinhar o dia da compra.
+4. Use **Confirmar lançamentos** para efetivar apenas as compras selecionadas e conferidas. O aplicativo devolve um recibo que distingue os registros novos dos existentes vinculados. A prévia sozinha não salva.
+
+A confirmação fica persistida por carteira e vinculada à chamada da simulação (`toolId`) e ao fundo (`fundId`). Repetir a confirmação da mesma compra não duplica o lançamento, inclusive depois de reabrir o aplicativo ou trocar de provedor. A simulação e seus recibos mantêm a carteira original no histórico; selecionar outra carteira não transfere os registros para ela. Uma compra já vinculada não é reescrita silenciosamente com outra data ou preço. A conferência bloqueia conflitos para revisão em vez de inventar uma segunda compra.
+
+O assistente deve separar **simulado**, **em conferência**, **registrado** e **vinculado a registro existente**. Não pode afirmar que salvou compras sem um recibo local correspondente, nem apresentar uma chamada `simular_aporte` concluída como prova de gravação. A confirmação descreve operações realizadas pelo usuário; não envia ordens à corretora, não executa investimentos nem grava aportes em pós-fixado ou caixinhas. Sobras e rendimentos não são lançados como compras.
+
+Cada lançamento de compra mantém `purchase_date` informado e deriva o mês dessa data. Compra pura não informa rendimento: `dividendTotal` fica ausente em vez de receber zero artificial, de modo que a compra não bloqueia os proventos oficiais disponíveis para o mês. Um zero de rendimento declarado explicitamente pelo usuário continua tendo prioridade na conciliação. O histórico financeiro e as confirmações ficam em SQLite; a migração preserva os registros existentes.
+
 ## Processos e limites
 
 `crates/assistant-runtime` contém o supervisor e os adaptadores: Codex App Server por stdio, Claude em modo JSON e Antigravity em modo JSON com ciclo MCP gerenciado pelo runtime. Cada turno usa um diretório próprio em `cli-workspaces` para as configurações de execução necessárias ao provedor. O histórico canônico não depende dos arquivos desse diretório.

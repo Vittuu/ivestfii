@@ -335,7 +335,7 @@ fn schema_three_migration_preserves_cash_history_and_unchanged_outbox() {
         upgraded
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        10
     );
     let provenance: (String, Option<String>, Option<String>) = upgraded
         .query_row(

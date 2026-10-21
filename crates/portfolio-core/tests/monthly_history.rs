@@ -124,7 +124,7 @@ fn schema_eight_upgrade_adds_private_history_without_rewriting_any_existing_rows
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        10
     );
 }
 

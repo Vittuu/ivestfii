@@ -90,7 +90,7 @@ for relative, state in before.items():
             rows = connection.execute(f'SELECT {columns} FROM "{quoted}" ORDER BY rowid').fetchall()
             assert rows == original['rows'], f'Uma coluna financeira existente mudou: {relative}/{table}'
         if 'cash_pockets' in state['tables']:
-            assert upgraded['version'] == 9
+            assert upgraded['version'] == 10
             assert 'performance_history' in upgraded['tables']
             if 'performance_history' not in state['tables']:
                 assert connection.execute('SELECT COUNT(*) FROM performance_history').fetchone()[0] == 0, 'A leitura MCP inventou observações mensais.'
@@ -106,7 +106,7 @@ for relative, state in before.items():
             assert upgraded['version'] == state['version'], 'O catálogo mudou de versão inesperadamente.'
 
 report = {'status': 'ok', 'sourceUnchanged': True, 'existingFinancialColumnsUnchanged': True,
-    'legacyCashBasisNotInferred': True, 'legacyPurchaseDatesNotInferred': True, 'walletsVerified': len(wallet_ids), 'schemaVersion': 9,
+    'legacyCashBasisNotInferred': True, 'legacyPurchaseDatesNotInferred': True, 'walletsVerified': len(wallet_ids), 'schemaVersion': 10,
     'verificationDirectory': str(destination)}
 (destination / 'report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
 print(json.dumps(report))

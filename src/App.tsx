@@ -123,7 +123,7 @@ export default function App() {
     addNotification({ id: `chat:${run.id}:${run.status}`, code: run.status === 'completed' ? 'chat-completed' : 'chat-failed', title: run.status === 'completed' ? 'Resposta do assistente pronta' : 'O assistente precisa de atenção', message: run.status === 'completed' ? 'A resposta foi salva. Abra a conversa para continuar.' : 'Não foi possível concluir a resposta. Abra a conversa para conferir os detalhes.', tone: run.status === 'completed' ? 'success' : 'warning', action: { label: 'Abrir conversa', route: 'assistant', conversationId: run.conversationId } });
   }, [addNotification]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { propagateError: boolean }) => {
     if (!desktop) return;
     const request = ++requestId.current;
     setLoading(true); setError('');
@@ -147,9 +147,19 @@ export default function App() {
       } else setError((current) => current || errorMessage(infoResult.reason));
       if (wealthResult.status === 'fulfilled') setWealth(wealthResult.value);
       else { setWealth(null); setError((current) => current || errorMessage(wealthResult.reason)); }
-    } catch (err) { if (request === requestId.current) setError(errorMessage(err)); }
+      if (options?.propagateError) {
+        for (const result of [portfolioResult, infoResult, wealthResult]) {
+          if (result.status === 'rejected') throw result.reason;
+        }
+      }
+    } catch (err) { if (request === requestId.current) setError(errorMessage(err)); if (options?.propagateError) throw err; }
     finally { if (request === requestId.current) setLoading(false); }
   }, []);
+  const refreshAfterPurchase = useCallback(async (_savedWalletId: string) => {
+    // Refresh the currently open wallet and the combined overview. Confirming a
+    // historical scenario in another wallet must not silently change selection.
+    await refresh({ propagateError: true });
+  }, [refresh]);
   useEffect(() => { void refresh(); return () => { requestId.current += 1; }; }, [refresh]);
   useEffect(() => {
     if (!desktop) return;
@@ -250,7 +260,7 @@ export default function App() {
         </>}
         </div>
         <div id="assistant-panel" ref={assistantHost} className={`assistant-host assistant-host-${assistantView}`} hidden={assistantView === 'hidden'} role={drawerOpen ? 'dialog' : undefined} aria-label={drawerOpen ? 'Assistente lateral' : undefined} aria-modal={drawerOpen ? modalDrawer : undefined}>
-          {assistantStarted && <Assistant walletId={walletId} walletNames={Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))} view={assistantView} onOpenPage={() => { navigate('assistant'); requestAnimationFrame(() => document.getElementById('chat-draft')?.focus({ preventScroll: true })); }} onClose={closeAssistant} requestedConversation={requestedConversation} onRunNotice={onRunNotice} onBusyChange={setAssistantBusy} />}
+          {assistantStarted && <Assistant walletId={walletId} walletNames={Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))} view={assistantView} onOpenPage={() => { navigate('assistant'); requestAnimationFrame(() => document.getElementById('chat-draft')?.focus({ preventScroll: true })); }} onClose={closeAssistant} requestedConversation={requestedConversation} onRunNotice={onRunNotice} onBusyChange={setAssistantBusy} onPurchasesSaved={refreshAfterPurchase} />}
         </div>
       </main>
     </div>

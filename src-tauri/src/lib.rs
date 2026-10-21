@@ -8,7 +8,8 @@ use std::{
 use ivestfii_assistant::AssistantStore;
 use ivestfii_core::{
     CashPocketInput, CashSimulationInput, FundInput, InvestmentProfileInput, ProjectionInput,
-    RecordInput, Repository, WalletCatalog, WalletInput, DEFAULT_WALLET_ID,
+    PurchaseConfirmationInput, PurchaseConfirmationReport, RecordInput, Repository, WalletCatalog,
+    WalletInput, DEFAULT_WALLET_ID,
 };
 use ivestfii_market_data::{
     CdiHistoryService, CvmFundRequest, CvmPanel, CvmService, DividendPanel, DividendService,
@@ -30,6 +31,7 @@ use tauri_plugin_opener::OpenerExt;
 mod operations;
 pub mod performance;
 pub mod public_data;
+pub mod purchase_confirmation;
 mod updates;
 
 type CommandResult<T> = Result<T, String>;
@@ -346,8 +348,14 @@ fn get_monthly_income(
         .unwrap_or_default();
     // Cached public events supply the rate/date. The calculation is ephemeral:
     // it never inserts a receipt or changes the user's recorded purchases.
-    let events = ivestfii_market_data::income_history::read_cache(&snapshot, &state.data_directory, &panel, performance_today())
-        .map(|data| data.events).unwrap_or_else(|_| ivestfii_market_data::dividends::income_events(&panel));
+    let events = ivestfii_market_data::income_history::read_cache(
+        &snapshot,
+        &state.data_directory,
+        &panel,
+        performance_today(),
+    )
+    .map(|data| data.events)
+    .unwrap_or_else(|_| ivestfii_market_data::dividends::income_events(&panel));
     ivestfii_core::income::calculate_monthly_income(
         &snapshot,
         &events,
@@ -421,7 +429,11 @@ async fn refresh_fii_performance(
             &state.data_directory,
             today,
         ),
-        ivestfii_market_data::income_history::refresh_if_due(&snapshot, &state.data_directory, today),
+        ivestfii_market_data::income_history::refresh_if_due(
+            &snapshot,
+            &state.data_directory,
+            today
+        ),
     );
     match income_result {
         Ok(coverage) => errors.extend(coverage.issues),
@@ -877,6 +889,67 @@ fn save_record(
     selected_repository(&state, wallet_id.as_deref())?
         .save_monthly_record(input)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn preview_simulation_purchases(
+    state: State<AppState>,
+    wallet_id: String,
+    conversation_id: String,
+    input: PurchaseConfirmationInput,
+) -> CommandResult<PurchaseConfirmationReport> {
+    let _operation = state.operations.begin()?;
+    let repository = selected_repository(&state, Some(&wallet_id))?;
+    let assistant = state.assistant.lock().map_err(|e| e.to_string())?;
+    purchase_confirmation::preview(
+        &assistant,
+        &repository,
+        &wallet_id,
+        &conversation_id,
+        input,
+        chrono::Local::now().date_naive(),
+    )
+}
+
+#[tauri::command]
+fn confirm_simulation_purchases(
+    state: State<AppState>,
+    wallet_id: String,
+    conversation_id: String,
+    input: PurchaseConfirmationInput,
+    preview_token: String,
+) -> CommandResult<PurchaseConfirmationReport> {
+    let _operation = state.operations.begin()?;
+    let repository = selected_repository(&state, Some(&wallet_id))?;
+    let assistant = state.assistant.lock().map_err(|e| e.to_string())?;
+    purchase_confirmation::confirm(
+        &assistant,
+        &repository,
+        &wallet_id,
+        &conversation_id,
+        input,
+        chrono::Local::now().date_naive(),
+        &preview_token,
+    )
+}
+
+#[tauri::command]
+fn get_simulation_purchase_confirmations(
+    state: State<AppState>,
+    wallet_id: String,
+    conversation_id: String,
+    source_tool_id: String,
+) -> CommandResult<PurchaseConfirmationReport> {
+    let _operation = state.operations.begin()?;
+    let repository = selected_repository(&state, Some(&wallet_id))?;
+    let assistant = state.assistant.lock().map_err(|e| e.to_string())?;
+    purchase_confirmation::confirmations(
+        &assistant,
+        &repository,
+        &wallet_id,
+        &conversation_id,
+        &source_tool_id,
+    )
 }
 
 #[tauri::command]
@@ -1483,6 +1556,9 @@ pub fn run() {
             export_portfolio_file,
             upsert_fund,
             save_record,
+            preview_simulation_purchases,
+            confirm_simulation_purchases,
+            get_simulation_purchase_confirmations,
             project_income,
             get_settings,
             save_settings,

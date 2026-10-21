@@ -35,7 +35,8 @@ const focusedWalletBenchmark=process.env.IVESTFII_UI_FOCUS==='wallet-benchmark';
 const focusedWalletEvolution=process.env.IVESTFII_UI_FOCUS==='wallet-evolution';
 const focusedMarketPrice=process.env.IVESTFII_UI_FOCUS==='market-price';
 const focusedContributions=process.env.IVESTFII_UI_FOCUS==='contributions';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':focusedMarketPrice?'market-price-report.json':focusedContributions?'contributions-report.json':'report.json';
+const focusedPurchaseConfirmation=process.env.IVESTFII_UI_FOCUS==='purchase-confirmation';
+const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':focusedMarketPrice?'market-price-report.json':focusedContributions?'contributions-report.json':focusedPurchaseConfirmation?'purchase-confirmation-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -313,6 +314,16 @@ const fundSimulationData={status:'simulation',kind:'contribution-allocation',wal
 }};
 function fundSimulationTool(mode){
   const data=structuredClone(fundSimulationData);
+  if(mode.startsWith('fund-simulation-purchases')){
+    data.simulation.budget='150';Object.assign(data.fundSimulation,{budget:'100',spentAmount:'89',remainder:'11'});
+    Object.assign(data.fundSimulation.rows[0],{afterFiiPercent:'46.71',afterPortfolioPercent:'20.77'});
+    Object.assign(data.fundSimulation.rows[1],{budget:'50',sharesToBuy:'4',afterShares:'14',spentAmount:'44',remainder:'6',afterValue:'154',afterFiiPercent:'53.29',afterPortfolioPercent:'23.69'});
+    Object.assign(data.fundSimulation.portfolioAllocation,{totalAfter:'650',unallocatedCash:'11'});
+    Object.assign(data.fundSimulation.portfolioAllocation.rows[0],{contribution:'89',afterValue:'289',afterPercent:'44.46'});
+    Object.assign(data.fundSimulation.portfolioAllocation.rows[1],{afterPercent:'35.38'});
+    Object.assign(data.fundSimulation.portfolioAllocation.rows[2],{afterPercent:'18.46'});
+    Object.assign(data.fundSimulation.portfolioAllocation.rows[3],{contribution:'11',afterValue:'11',afterPercent:'1.69'});
+  }
   if(mode==='fund-simulation-direct')data.wallet.name='Carteira <img src=x onerror=globalThis.simulationInjected=true>';
   if(mode==='fund-simulation-missing'){
     Object.assign(data.fundSimulation,{status:'incomplete',spentAmount:null,remainder:null,fiiBasisComplete:false,issues:['Falta cotação para o fundo com orçamento informado.']});
@@ -340,7 +351,7 @@ function fundSimulationTool(mode){
     ];
   }
   const output=mode==='fund-simulation-claude'?[{type:'text',text:JSON.stringify(data)}]:mode==='fund-simulation-direct'?data:{isError:false,structuredContent:data,content:[{type:'text',text:JSON.stringify(data)}]};
-  const input=mode==='fund-simulation-empty'?{amount:'100',allocations:{fiis:'0',fixedIncome:'100',cashPockets:'0'},fundAllocations:[]}:{amount:'100',allocations:{fiis:'50',fixedIncome:'30',cashPockets:'20'},fundAllocations:[{fundId:mode==='fund-simulation-new-missing'?'fund-zero':'fund-a',amount:'50'}]};
+  const input=mode.startsWith('fund-simulation-purchases')?{amount:'150',allocations:{fiis:'100',fixedIncome:'30',cashPockets:'20'},fundAllocations:[{fundId:'fund-a',amount:'50'},{fundId:'fund-b',amount:'50'}]}:mode==='fund-simulation-empty'?{amount:'100',allocations:{fiis:'0',fixedIncome:'100',cashPockets:'0'},fundAllocations:[]}:{amount:'100',allocations:{fiis:'50',fixedIncome:'30',cashPockets:'20'},fundAllocations:[{fundId:mode==='fund-simulation-new-missing'?'fund-zero':'fund-a',amount:'50'}]};
   return {id:'fund-simulation-tool',conversationId:'conversation-a',taskId:null,toolName:mode==='fund-simulation-claude'?'mcp__ivestfii__simular_aporte':'simular_aporte',input,output,status:'completed',startedAt:'2026-10-21T12:01:00Z',completedAt:'2026-10-21T12:01:01Z'};
 }
 const pages = ['Visão geral', 'FIIs e posições', 'Caixinhas CDI', 'Mercado', 'Projeções', 'Assistente', 'Configurações'];
@@ -546,7 +557,19 @@ globalThis.__uiTest = { snapshot: ${JSON.stringify(initial)}, otherSnapshot: ${J
 const wallets=${JSON.stringify(wallets)};
 Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformance)},otherPerformance:{...${JSON.stringify(performance)},portfolioBenchmark:${JSON.stringify(benchmarkOther)},${mode.startsWith('wallet-evolution')?`portfolioEvolution:${JSON.stringify(evolutionOther)},`:''}invested:'200',dividends:'0',marketValue:'220',priceResult:'20',totalResult:'20',totalReturnPercent:'10',cdi:{endingValue:'210',result:'10',returnPercent:'5'},difference:'10'},deferPerformance:false,performanceWaiters:[],deferPerformanceRead:${mode === 'performance-loading'},performanceReadWaiters:[],failPerformance:false});
 Object.assign(globalThis.__uiTest,{chat:${JSON.stringify(chatFixture)},deferChatStart:false,chatStartWaiters:[],eventSubscriptions:[],eventCalls:[]});
+Object.assign(globalThis.__uiTest,{purchaseReceipts:{},purchaseStatuses:{},purchasePreviewSequence:0,lastPurchasePreview:null,purchaseCreated:[],purchaseReadError:null,purchaseSaveError:null,purchaseLoseReplyAfterCommit:false,purchaseFailRefreshAfterCommit:false,purchasePortfolioReadFailures:0,purchasePortfolioFailuresConsumed:0,deferPurchaseConfirmation:false,purchaseConfirmationWaiters:[]});
 ${mode.startsWith('fund-simulation')?`globalThis.__uiTest.chat.tools.push(${JSON.stringify(fundSimulationTool(mode))});`:''}
+// Derive a receipt's current state from the synthetic saved history, just as
+// the native repository detects a later edit without rewriting the receipt.
+globalThis.__uiTest.readPurchaseReceipts=(walletId,sourceToolId)=>{
+  const test=globalThis.__uiTest,snapshot=walletId==='wallet-other'?test.otherSnapshot:test.snapshot;
+  return structuredClone(test.purchaseReceipts[walletId+'|'+sourceToolId]||[]).map(row=>{
+    const record=snapshot.funds.find(fund=>fund.id===row.fundId)?.entries.find(entry=>entry.id===row.recordId);
+    if(!record||record.purchaseDate!==row.purchaseDate||record.cotasAdded!==row.shares||record.pricePerCota!==row.pricePerShare)return {...row,status:'conflict',message:'O lançamento confirmado foi alterado no histórico. Confira e corrija o lançamento existente; ele não será recriado.'};
+    return row;
+  });
+};
+
 Object.assign(globalThis.__uiTest,{automaticMode:${JSON.stringify(mode)},deferAutoWallets:${JSON.stringify(automaticMode?['wallet-original']:[])},autoWaiters:[],publicCache:{shared:{economics:${JSON.stringify(economics)},news:${JSON.stringify(news)}},wallets:{}},autoCheckedAt:'2026-10-20T12:00:00Z'});
 ${mode.startsWith('market-price')?`globalThis.__uiTest.publicCache.wallets={'wallet-original':{quotes:${JSON.stringify(marketPricePanel)}},'wallet-other':{quotes:${JSON.stringify({...marketPricePanel,items:marketPricePanel.items.slice(0,1)})}}};`:''}
 Object.assign(globalThis.__uiTest,{incomeReport:${JSON.stringify(mode==='income-api-date-required'?incomeApiUnknownReport:mode==='income-api'?incomeApiReport:{months:[]})}});
@@ -602,7 +625,7 @@ mockIPC(async (command, args={}) => {
   switch (command) {
     case 'get_wallets': return structuredClone(wallets);
     case 'get_wealth_overview': {const rows=wallets.map((wallet,index)=>{const value=index?test.otherSnapshot:test.snapshot;return {wallet,fiiInvested:value.totals.invested,cashBalance:cashPerformance(value.cashPockets).balance};});return {wallets:rows,totals:{fiiInvested:String(rows.reduce((sum,row)=>sum+Number(row.fiiInvested),0)),cashBalance:String(rows.reduce((sum,row)=>sum+Number(row.cashBalance),0))}};}
-    case 'get_portfolio': return structuredClone(current);
+    case 'get_portfolio': if(test.purchasePortfolioReadFailures>0){test.purchasePortfolioReadFailures--;test.purchasePortfolioFailuresConsumed++;throw new Error('Falha sintética ao reler a carteira após a compra registrada.');}return structuredClone(current);
     case 'get_fii_performance': {const result=withPortfolio(current,args.walletId==='wallet-other'?test.otherPerformance:test.performance);if(test.deferPerformanceRead)await new Promise(resolve=>test.performanceReadWaiters.push(resolve));return result;}
     case 'refresh_fii_performance': {const result=withPortfolio(current,args.walletId==='wallet-other'?test.otherPerformance:test.performance);if(test.deferPerformance)await new Promise(resolve=>test.performanceWaiters.push(resolve));if(test.failPerformance)throw new Error('Fontes de resultado temporariamente indisponíveis no teste.');return test.refreshResultOverride?structuredClone(test.refreshResultOverride):result;}
     case 'get_app_info': return {
@@ -674,6 +697,44 @@ mockIPC(async (command, args={}) => {
     case 'refresh_economic_indicators': {const result={...${JSON.stringify(economics)},errors:[{id:'cdi',message:'Fonte temporariamente indisponível no teste.'}]};test.publicCache.shared.economics=structuredClone(result);return result;}
     case 'refresh_news': throw new Error('Sem conexão sintética.');
     case 'open_public_source': return null;
+    case 'get_simulation_purchase_confirmations': {
+      if(test.purchaseReadError)throw new Error(test.purchaseReadError);
+      return {sourceToolId:args.sourceToolId,previewToken:'',rows:test.readPurchaseReceipts(args.walletId,args.sourceToolId),canConfirm:false,createdCount:0,matchedCount:0};
+    }
+    case 'preview_simulation_purchases': {
+      const input=structuredClone(args.input),key=args.walletId+'|'+input.sourceToolId;
+      const rows=input.purchases.map(purchase=>{
+        const previous=test.readPurchaseReceipts(args.walletId,input.sourceToolId).find(row=>row.fundId===purchase.fundId);
+        if(previous)return structuredClone(previous);
+        const total={'3@8.75':'26.25','3@8.80':'26.40','2@10.50':'21.00'}[purchase.shares+'@'+purchase.pricePerShare];
+        if(!total)throw new Error('Unexpected synthetic purchase; use explicit native-result fixtures.');
+        const status=test.purchaseStatuses[purchase.fundId]||'new';
+        return {...purchase,ticker:purchase.fundId==='fund-a'?'TEST11':'MOCK11',total,status,recordId:status==='already_saved'?'purchase-existing-'+purchase.fundId:null,message:status==='conflict'?'Há uma compra antiga sem data completa. Confira o histórico antes de continuar.':null};
+      });
+      const report={sourceToolId:input.sourceToolId,previewToken:'purchase-preview-'+(++test.purchasePreviewSequence),rows,canConfirm:rows.some(row=>['new','already_saved'].includes(row.status))&&rows.every(row=>row.status!=='conflict'),createdCount:0,matchedCount:0};
+      test.lastPurchasePreview={walletId:args.walletId,conversationId:args.conversationId,input,report:structuredClone(report)};
+      return report;
+    }
+    case 'confirm_simulation_purchases': {
+      if(test.deferPurchaseConfirmation)await new Promise(resolve=>test.purchaseConfirmationWaiters.push(resolve));
+      if(test.purchaseSaveError)throw new Error(test.purchaseSaveError);
+      const preview=test.lastPurchasePreview;
+      if(!preview||!preview.report.canConfirm||args.previewToken!==preview.report.previewToken||args.walletId!==preview.walletId||args.conversationId!==preview.conversationId||JSON.stringify(args.input)!==JSON.stringify(preview.input))throw new Error('A prévia sintética não corresponde à confirmação.');
+      const key=args.walletId+'|'+args.input.sourceToolId;
+      let createdCount=0,matchedCount=0;
+      const rows=preview.report.rows.map(row=>{
+        if(row.status==='new'){
+          createdCount++;
+          const record={id:'purchase-new-'+row.fundId,month:row.purchaseDate.slice(0,7),purchaseDate:row.purchaseDate,cotasAdded:row.shares,pricePerCota:row.pricePerShare,dividendPerCota:'0',dividendTotal:null,notes:'Compra real sintética confirmada pela interface.'};
+          current.funds.find(fund=>fund.id===row.fundId).entries.push(record);test.purchaseCreated.push(structuredClone(record));
+        }else if(row.status==='already_saved')matchedCount++;
+        return {...row,status:'already_confirmed',recordId:row.recordId||'purchase-new-'+row.fundId,message:null};
+      });
+      test.purchaseReceipts[key]=[...(test.purchaseReceipts[key]||[]).filter(old=>!rows.some(row=>row.fundId===old.fundId)),...structuredClone(rows)];
+      if(test.purchaseFailRefreshAfterCommit){test.purchaseFailRefreshAfterCommit=false;test.purchasePortfolioReadFailures++;}
+      if(test.purchaseLoseReplyAfterCommit){test.purchaseLoseReplyAfterCommit=false;throw new Error('Resposta sintética perdida depois de salvar a compra. Confira novamente antes de tentar confirmar.');}
+      return {sourceToolId:args.input.sourceToolId,previewToken:'',rows,canConfirm:false,createdCount,matchedCount};
+    }
     case 'get_providers': return ['codex','claude','antigravity'].map((id,index)=>({id,name:['Codex','Claude','Antigravity'][index],installed:true,ready:true,executable:'X:/fixture/'+id+'.exe',transport:'test',version:'fixture'}));
     case 'list_conversations': return structuredClone(test.chat.conversations);
     case 'create_conversation': {const conversation={id:'conversation-'+(++test.chat.sequence),title:args.title,createdAt:'2026-10-20T12:10:00Z',updatedAt:'2026-10-20T12:10:00Z'};test.chat.conversations.push(conversation);return structuredClone(conversation);}
@@ -724,7 +785,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark&&!focusedWalletEvolution&&!focusedMarketPrice&&!focusedContributions)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark&&!focusedWalletEvolution&&!focusedMarketPrice&&!focusedContributions&&!focusedPurchaseConfirmation)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -1495,6 +1556,188 @@ try {
       await horizontal.evaluate(element=>{element.scrollLeft=0;});await showCardTop(page);await shot(page,label+'-fund-contribution-result',{fullPage:false});assert.equal((await calls(page,'start_chat_turn')).length,0);await noIndividualAutomaticRefresh(page);assert.deepEqual(small.externalRequests,[]);await noUnexpectedCommands(page);await small.context.close();
     }
     check('fund-simulation-visible-result-supports-mobile-drawer-and-zoom-with-labeled-local-horizontal-scroll');
+  }
+
+  async function verifyPurchaseConfirmation(){
+    const cardOf=page=>page.locator('.fund-contribution-simulation');
+    const dialogOf=page=>page.getByRole('dialog',{name:'Registrar compras realizadas',exact:true});
+    const receiptOf=page=>cardOf(page).getByRole('region',{name:'Compras já registradas desta simulação',exact:true});
+    const inputFor=(dialog,label,symbol)=>dialog.getByLabel(label+' · '+symbol,{exact:true});
+    const checkboxFor=(dialog,symbol)=>dialog.locator('fieldset').filter({has:dialog.page().locator('.ticker',{hasText:new RegExp('^'+symbol+'$')})}).getByRole('checkbox');
+    const snapshotOf=page=>page.evaluate(()=>({snapshot:structuredClone(globalThis.__uiTest.snapshot),other:structuredClone(globalThis.__uiTest.otherSnapshot),messages:structuredClone(globalThis.__uiTest.chat.messages)}));
+    const openForm=async page=>{await cardOf(page).getByRole('button',{name:'Registrar compras realizadas',exact:true}).click();await dialogOf(page).waitFor();return dialogOf(page);};
+    const fillPurchase=async(dialog,symbol,{date='2026-10-19',shares='3',price='8,75'}={})=>{
+      await checkboxFor(dialog,symbol).check();
+      await inputFor(dialog,'Data real da compra',symbol).fill(date);
+      await inputFor(dialog,'Cotas compradas',symbol).fill(shares);
+      await dialog.getByLabel(new RegExp('^Preço real por cota \\(R\\$\\) · '+symbol)).fill(price);
+    };
+    const expectNoConfirmation=async(page,count=0)=>assert.equal((await calls(page,'confirm_simulation_purchases')).length,count);
+    const readOnlyOutsideConfirmation=async fixture=>{
+      const {page}=fixture;assert.equal((await calls(page,'save_record')).length,0,'The confirmation must use its atomic deduplicating command, never a series of save_record calls');
+      assert.equal((await calls(page,'start_chat_turn')).length,0);await noIndividualAutomaticRefresh(page);
+      assert.deepEqual(fixture.externalRequests,[]);await noUnexpectedCommands(page);
+    };
+
+    const fixture=await openPage('fund-simulation-purchases-desktop',{width:1440,height:1000}),page=fixture.page;
+    await navigate(page,'Assistente');const original=await snapshotOf(page);let dialog=await openForm(page);
+    assert.equal(await dialog.locator('fieldset').count(),2,'Only funds with a positive simulated budget are eligible; a no-allocation fund is not an implied purchase');
+    assert.equal(await dialog.getByRole('checkbox',{checked:true}).count(),0,'No purchases are selected automatically');
+    for(const symbol of ['TEST11','MOCK11']){
+      assert.equal(await inputFor(dialog,'Data real da compra',symbol).inputValue(),'','A quote date is not a purchase date');
+      assert.equal(await inputFor(dialog,'Data real da compra',symbol).isDisabled(),true);
+    }
+    await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();
+    await dialog.getByRole('alert').filter({hasText:'Selecione pelo menos uma compra'}).waitFor();
+    assert.equal((await calls(page,'preview_simulation_purchases')).length,0);await expectNoConfirmation(page);
+    check('purchase-confirmation-requires-explicit-partial-selection-and-does-not-infer-the-buy-date-from-the-quote');
+    await fillPurchase(dialog,'TEST11');
+    await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();
+    const preview=dialog.getByRole('region',{name:'Conferência dos lançamentos de compra',exact:true});await preview.waitFor();
+    await textMatches(preview,/TEST11.*19\/10\/2026.*3 cotas.*R\$ 8,75 por cota.*R\$ 26,25.*Novo lançamento/);
+    assert.equal(await preview.locator('tbody tr').count(),1);
+    const expected={sourceToolId:'fund-simulation-tool',purchases:[{fundId:'fund-a',purchaseDate:'2026-10-19',shares:'3',pricePerShare:'8.75'}]};
+    const first=(await calls(page,'preview_simulation_purchases')).at(-1).args;
+    assert.deepEqual(first,{walletId:'wallet-original',conversationId:'conversation-a',input:expected});
+    assert.deepEqual(await snapshotOf(page),original);await expectNoConfirmation(page);
+    const token=await page.evaluate(()=>globalThis.__uiTest.lastPurchasePreview.report.previewToken);
+    await dialog.getByLabel(/^Preço real por cota \(R\$\) · TEST11/).fill('8,80');
+    assert.equal(await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).count(),0,'Editing real execution data invalidates a previous preview');
+    assert.equal(await preview.count(),0);await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();await preview.waitFor();
+    await textMatches(preview,/R\$ 8,80 por cota.*R\$ 26,40/);
+    assert.notEqual(await page.evaluate(()=>globalThis.__uiTest.lastPurchasePreview.report.previewToken),token);
+    await noOverflow(page,'purchase-confirmation-desktop-preview-no-overflow');await shot(page,'desktop-purchase-confirmation-preview',{fullPage:false});
+    await dialog.getByRole('button',{name:'Cancelar',exact:true}).click();await dialog.waitFor({state:'detached'});
+    assert.deepEqual(await snapshotOf(page),original);await expectNoConfirmation(page);
+    check('purchase-confirmation-sends-real-date-quantity-and-normalized-price-only-for-selected-funds-and-preview-cancel-never-saves');
+    check('purchase-confirmation-changing-execution-input-invalidates-the-review-token-and-requires-a-new-preview');
+
+    dialog=await openForm(page);await fillPurchase(dialog,'TEST11',{price:'8,80'});
+    await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();await preview.waitFor();
+    await page.evaluate(()=>{globalThis.__uiTest.deferPurchaseConfirmation=true;});
+    const confirm=dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true});await confirm.evaluate(button=>{button.click();button.click();});
+    await page.waitForFunction(()=>globalThis.__uiTest.purchaseConfirmationWaiters.length===1);
+    await expectNoConfirmation(page,1);assert.equal(await confirm.isDisabled(),true);assert.equal(await dialog.getByRole('button',{name:'Cancelar',exact:true}).isDisabled(),true);
+    await updateBlocked(page,true);await page.keyboard.press('Escape');assert.equal(await dialog.isVisible(),true,'A pending atomic save keeps the review dialog open');
+    assert.deepEqual(await snapshotOf(page),original);
+    await page.evaluate(()=>{const test=globalThis.__uiTest;test.deferPurchaseConfirmation=false;test.purchaseConfirmationWaiters.splice(0).forEach(resolve=>resolve());});
+    await dialog.getByText('Compras registradas: 1 novo lançamento.',{exact:true}).waitFor();
+    const saved=(await calls(page,'confirm_simulation_purchases'))[0].args;
+    assert.deepEqual(saved.input,{...expected,purchases:[{...expected.purchases[0],pricePerShare:'8.80'}]});assert.equal(saved.walletId,'wallet-original');assert.equal(saved.conversationId,'conversation-a');assert.match(saved.previewToken,/^purchase-preview-/);
+    const created=await page.evaluate(()=>globalThis.__uiTest.purchaseCreated);assert.equal(created.length,1);assert.equal(created[0].purchaseDate,'2026-10-19');assert.equal(created[0].month,'2026-10');assert.equal(created[0].cotasAdded,'3');assert.equal(created[0].pricePerCota,'8.80');assert.equal(created[0].dividendTotal,null);
+    const after=await snapshotOf(page);assert.deepEqual(after.other,original.other);assert.deepEqual(after.messages,original.messages);assert.equal(after.snapshot.funds[0].entries.length,original.snapshot.funds[0].entries.length+1);assert.deepEqual(after.snapshot.funds[1],original.snapshot.funds[1]);
+    await dialog.getByRole('button',{name:'Concluir',exact:true}).click();await dialog.waitFor({state:'detached'});await receiptOf(page).waitFor();
+    await textMatches(receiptOf(page),/TEST11.*19\/10\/2026.*3 cotas.*R\$ 8,80 por cota.*R\$ 26,40.*Compra registrada/);
+    check('purchase-confirmation-double-click-creates-one-pure-purchase-with-real-fields-and-blocks-close-or-updates-while-saving');
+
+    dialog=await openForm(page);assert.equal(await checkboxFor(dialog,'TEST11').isDisabled(),true);assert.equal(await checkboxFor(dialog,'MOCK11').isChecked(),false);assert.equal(await inputFor(dialog,'Data real da compra','MOCK11').inputValue(),'');
+    await dialog.getByRole('button',{name:'Cancelar',exact:true}).click();await dialog.waitFor({state:'detached'});await expectNoConfirmation(page,1);
+    await page.getByRole('combobox',{name:'Provedor de IA',exact:true}).selectOption('claude');await receiptOf(page).waitFor();
+    await page.getByRole('button',{name:'Nova conversa',exact:true}).click();await cardOf(page).waitFor({state:'detached'});await page.getByRole('button',{name:/^Conversa sintética preservada/}).click();await receiptOf(page).waitFor();
+    await page.getByRole('combobox',{name:'Carteira',exact:true}).selectOption('wallet-other');assert.equal(await cardOf(page).getAttribute('data-wallet-id'),'wallet-original');
+    await navigate(page,'Mercado');await page.getByRole('button',{name:'Abrir assistente',exact:true}).click();const drawer=page.getByRole('dialog',{name:'Assistente lateral',exact:true});await drawer.waitFor();await receiptOf(page).waitFor();
+    dialog=await openForm(page);await textMatches(dialog,/Carteira da simulação: Carteira de teste/);assert.equal(await checkboxFor(dialog,'TEST11').isDisabled(),true);
+    await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await drawer.isVisible(),true,'Escape closes the purchase modal before the assistant drawer');
+    const statusCalls=await calls(page,'get_simulation_purchase_confirmations');assert.ok(statusCalls.length>=2);assert.ok(statusCalls.every(({args})=>args.walletId==='wallet-original'&&args.conversationId==='conversation-a'&&args.sourceToolId==='fund-simulation-tool'));
+    await noOverflow(page,'purchase-confirmation-drawer-receipt-no-overflow');await shot(page,'drawer-purchase-confirmation-receipt',{fullPage:false});
+    await expectNoConfirmation(page,1);assert.deepEqual(await snapshotOf(page),after);
+    check('purchase-confirmation-reopened-history-provider-wallet-and-page-drawer-keep-original-receipts-without-repeating-saved-purchases');
+    dialog=await openForm(page);await fillPurchase(dialog,'MOCK11',{date:'2026-10-18',shares:'2',price:'10,50'});await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).click();await dialog.getByText('Compras registradas: 1 novo lançamento.',{exact:true}).waitFor();
+    await dialog.getByRole('button',{name:'Concluir',exact:true}).click();await dialog.waitFor({state:'detached'});assert.equal(await receiptOf(page).locator('tbody tr').count(),2,'Later selected purchases merge into the original receipt without replacing earlier confirmations');
+    assert.equal((await calls(page,'confirm_simulation_purchases')).length,2);assert.equal((await calls(page,'confirm_simulation_purchases')).at(-1).args.walletId,'wallet-original');assert.deepEqual((await calls(page,'confirm_simulation_purchases')).at(-1).args.input.purchases,[{fundId:'fund-b',purchaseDate:'2026-10-18',shares:'2',pricePerShare:'10.50'}]);
+    assert.equal(await page.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),2);assert.deepEqual((await snapshotOf(page)).other,original.other);
+    await cardOf(page).getByRole('button',{name:'Ver compras registradas',exact:true}).click();await dialog.waitFor();assert.equal(await dialog.getByRole('checkbox',{checked:true}).count(),0);for(const symbol of ['TEST11','MOCK11'])assert.equal(await checkboxFor(dialog,symbol).isDisabled(),true);assert.equal(await dialog.getByRole('button',{name:'Conferir compras',exact:true}).isDisabled(),true);
+    await dialog.getByRole('button',{name:'Cancelar',exact:true}).click();await dialog.waitFor({state:'detached'});await expectNoConfirmation(page,2);await readOnlyOutsideConfirmation(fixture);await fixture.context.close();
+    check('purchase-confirmation-can-record-the-remaining-fund-later-in-the-original-wallet-and-all-confirmed-funds-become-readonly');
+
+    const mobile=await openPage('fund-simulation-purchases-mobile',{width:375,height:812},{expandedSidebar:false}),mobilePage=mobile.page;
+    await mobilePage.getByRole('button',{name:'Abrir assistente',exact:true}).click();await cardOf(mobilePage).waitFor();const mobileOriginal=await snapshotOf(mobilePage);dialog=await openForm(mobilePage);
+    await fillPurchase(dialog,'MOCK11',{date:'2026-10-18',shares:'2',price:'10,50'});
+    await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();await dialog.getByRole('region',{name:'Conferência dos lançamentos de compra',exact:true}).waitFor();
+    await textMatches(dialog,/MOCK11.*18\/10\/2026.*2 cotas.*R\$ 10,50 por cota.*R\$ 21,00.*Novo lançamento/);
+    await noOverflow(mobilePage,'purchase-confirmation-mobile375-preview-no-overflow');await shot(mobilePage,'mobile375-purchase-confirmation-preview',{fullPage:false});
+    await mobilePage.mouse.move(1,1);await mobilePage.evaluate(()=>{globalThis.__uiTest.purchaseSaveError='Falha sintética ao salvar. Confira e tente novamente.';});
+    await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).click();await dialog.getByRole('alert').filter({hasText:'Falha sintética ao salvar'}).waitFor();
+    assert.equal(await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).count(),0,'A save failure discards its preview before a retry');assert.deepEqual(await snapshotOf(mobilePage),mobileOriginal);assert.equal(await mobilePage.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),0);
+    await mobilePage.evaluate(()=>{globalThis.__uiTest.purchaseSaveError=null;});await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).click();await dialog.getByText('Compras registradas: 1 novo lançamento.',{exact:true}).waitFor();
+    assert.equal(await mobilePage.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),1);assert.equal((await calls(mobilePage,'confirm_simulation_purchases')).length,2);
+    assert.deepEqual((await calls(mobilePage,'confirm_simulation_purchases')).at(-1).args.input.purchases,[{fundId:'fund-b',purchaseDate:'2026-10-18',shares:'2',pricePerShare:'10.50'}]);
+    await noOverflow(mobilePage,'purchase-confirmation-mobile375-receipt-no-overflow');await shot(mobilePage,'mobile375-purchase-confirmation-receipt',{fullPage:false});
+    const mobileReceipt=dialog.getByRole('region',{name:'Compras já registradas desta simulação',exact:true});await mobileReceipt.focus();await mobileReceipt.evaluate(element=>{element.scrollLeft=element.scrollWidth;});assert.ok(await mobileReceipt.evaluate(element=>element.scrollWidth<=element.clientWidth||element.scrollLeft>0),'The mobile receipt reveals actual totals and saved status through local horizontal scroll');await textMatches(mobileReceipt,/R\$ 21,00.*Compra registrada/);await noOverflow(mobilePage,'purchase-confirmation-mobile375-scrolled-receipt-no-overflow');await shot(mobilePage,'mobile375-purchase-confirmation-receipt-values',{fullPage:false});
+    check('purchase-confirmation-mobile375-receipt-scroll-exposes-real-cost-and-recorded-status-without-global-overflow');
+    await dialog.getByRole('button',{name:'Concluir',exact:true}).click();await dialog.waitFor({state:'detached'});await receiptOf(mobilePage).waitFor();await readOnlyOutsideConfirmation(mobile);await mobile.context.close();
+    check('purchase-confirmation-mobile375-keeps-partial-real-purchases-readable-and-save-error-requires-review-before-a-single-successful-retry');
+
+    const existing=await openPage('fund-simulation-purchases-existing',{width:1440,height:1000}),existingPage=existing.page;
+    await existingPage.evaluate(()=>{const test=globalThis.__uiTest;test.purchaseStatuses['fund-a']='already_saved';test.snapshot.funds[0].entries.push({id:'purchase-existing-fund-a',month:'2026-10',purchaseDate:'2026-10-19',cotasAdded:'3',pricePerCota:'8.75',dividendPerCota:'0',dividendTotal:null,notes:'Compra sintética já salva antes da simulação.'});});
+    const existingOriginal=await snapshotOf(existingPage);await navigate(existingPage,'Assistente');dialog=await openForm(existingPage);await fillPurchase(dialog,'TEST11');await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();
+    await dialog.getByText('Já salvo no histórico',{exact:true}).waitFor();await textMatches(dialog,/será vinculado a esta simulação, sem novo lançamento/);await expectNoConfirmation(existingPage);assert.deepEqual(await snapshotOf(existingPage),existingOriginal);
+    await shot(existingPage,'desktop-purchase-confirmation-existing-review',{fullPage:false});await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).click();await dialog.getByText('Compras confirmadas no histórico, sem criar lançamentos duplicados.',{exact:true}).waitFor();
+    assert.deepEqual(await snapshotOf(existingPage),existingOriginal);assert.equal(await existingPage.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),0);
+    await dialog.getByRole('button',{name:'Concluir',exact:true}).click();await dialog.waitFor({state:'detached'});await receiptOf(existingPage).waitFor();await readOnlyOutsideConfirmation(existing);await existing.context.close();
+    check('purchase-confirmation-exact-existing-buy-is-explicitly-reviewed-and-linked-without-inserting-or-changing-the-financial-record');
+
+    const blocked=await openPage('fund-simulation-purchases-conflict',{width:1440,height:1000}),blockedPage=blocked.page;
+    await blockedPage.evaluate(()=>{globalThis.__uiTest.purchaseReadError='Leitura sintética indisponível.';});await navigate(blockedPage,'Assistente');const blockedCard=cardOf(blockedPage);
+    await blockedCard.getByRole('alert').filter({hasText:'Não foi possível consultar as compras'}).waitFor();assert.equal(await blockedCard.getByRole('button',{name:'Registrar compras realizadas',exact:true}).isDisabled(),true);
+    await blockedPage.evaluate(()=>{globalThis.__uiTest.purchaseReadError=null;globalThis.__uiTest.purchaseStatuses['fund-a']='conflict';});await blockedCard.getByRole('button',{name:'Tentar novamente',exact:true}).click();dialog=await openForm(blockedPage);
+    const blockedOriginal=await snapshotOf(blockedPage);await fillPurchase(dialog,'TEST11',{price:'8,755'});await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();await dialog.getByRole('alert').filter({hasText:'Informe o preço real por cota'}).waitFor();assert.equal((await calls(blockedPage,'preview_simulation_purchases')).length,0);
+    await dialog.getByLabel(/^Preço real por cota \(R\$\) · TEST11/).fill('8,75');await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();await dialog.getByText('Precisa conferir',{exact:true}).waitFor();await textMatches(dialog,/compra antiga sem data completa.*Nenhum lançamento desta seleção será salvo enquanto houver conflito/);
+    assert.equal(await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).count(),0);await expectNoConfirmation(blockedPage);assert.deepEqual(await snapshotOf(blockedPage),blockedOriginal);
+    await noOverflow(blockedPage,'purchase-confirmation-conflict-no-overflow');await shot(blockedPage,'desktop-purchase-confirmation-conflict',{fullPage:false});await dialog.getByRole('button',{name:'Cancelar',exact:true}).click();await dialog.waitFor({state:'detached'});await readOnlyOutsideConfirmation(blocked);await blocked.context.close();
+    check('purchase-confirmation-load-error-retries-safely-invalid-price-never-reaches-IPC-and-ambiguous-old-buy-blocks-all-writes');
+
+    const lost=await openPage('fund-simulation-purchases-lost-reply',{width:1440,height:1000}),lostPage=lost.page;
+    await navigate(lostPage,'Assistente');dialog=await openForm(lostPage);await fillPurchase(dialog,'TEST11');await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();
+    await lostPage.evaluate(()=>{globalThis.__uiTest.purchaseLoseReplyAfterCommit=true;});
+    const readsBeforeLoss=(await calls(lostPage,'get_portfolio')).length;
+    await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).click();await dialog.getByRole('alert').filter({hasText:'Resposta sintética perdida depois de salvar'}).waitFor();
+    await expectNoConfirmation(lostPage,1);assert.equal(await lostPage.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),1,'A lost reply happens after a durable commit in this fixture');
+    const committed=await snapshotOf(lostPage);assert.equal((await calls(lostPage,'get_portfolio')).length,readsBeforeLoss,'An unacknowledged save must not be reported as refreshed');
+    assert.equal(await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).count(),0);
+    await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();await dialog.getByText('Compras confirmadas no histórico, sem criar lançamentos duplicados.',{exact:true}).waitFor();
+    await dialog.getByRole('region',{name:'Compras já registradas desta simulação',exact:true}).waitFor();assert.equal(await dialog.getByRole('button',{name:'Conferir compras',exact:true}).count(),0);
+    await expectNoConfirmation(lostPage,1);assert.equal(await lostPage.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),1);assert.deepEqual(await snapshotOf(lostPage),committed);
+    assert.equal((await calls(lostPage,'get_portfolio')).length,readsBeforeLoss+1,'Reconciliation refreshes the visible wallet through reads only');
+    await noOverflow(lostPage,'purchase-confirmation-lost-reply-reconciled-no-overflow');await shot(lostPage,'desktop-purchase-confirmation-lost-reply-reconciled',{fullPage:false});
+    await dialog.getByRole('button',{name:'Concluir',exact:true}).click();await dialog.waitFor({state:'detached'});await receiptOf(lostPage).waitFor();await readOnlyOutsideConfirmation(lost);await lost.context.close();
+    check('purchase-confirmation-lost-postcommit-reply-is-reconciled-by-preview-without-a-second-confirm-or-financial-insert');
+
+    const refreshFailure=await openPage('fund-simulation-purchases-refresh-failure',{width:1440,height:1000}),refreshPage=refreshFailure.page;
+    await navigate(refreshPage,'Assistente');dialog=await openForm(refreshPage);await fillPurchase(dialog,'TEST11');await dialog.getByRole('button',{name:'Conferir compras',exact:true}).click();
+    await refreshPage.evaluate(()=>{globalThis.__uiTest.purchaseFailRefreshAfterCommit=true;});
+    const readsBeforeSave=(await calls(refreshPage,'get_portfolio')).length;
+    await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).click();await dialog.getByText('Compras registradas: 1 novo lançamento.',{exact:true}).waitFor();
+    await dialog.getByRole('status').filter({hasText:'As compras foram registradas. A tela da carteira ainda não foi atualizada:'}).waitFor();
+    const retryRead=dialog.getByRole('button',{name:'Atualizar a tela da carteira',exact:true});await retryRead.waitFor();
+    await expectNoConfirmation(refreshPage,1);assert.equal((await calls(refreshPage,'get_portfolio')).length,readsBeforeSave+1);assert.equal(await refreshPage.evaluate(()=>globalThis.__uiTest.purchasePortfolioFailuresConsumed),1);
+    assert.equal(await refreshPage.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),1);const savedDespiteRefresh=await snapshotOf(refreshPage);
+    await shot(refreshPage,'desktop-purchase-confirmation-refresh-failed-after-save',{fullPage:false});await retryRead.click();await retryRead.waitFor({state:'detached'});
+    await dialog.getByText('Compras registradas: 1 novo lançamento.',{exact:true}).waitFor();assert.equal((await calls(refreshPage,'get_portfolio')).length,readsBeforeSave+2);await expectNoConfirmation(refreshPage,1);assert.equal(await refreshPage.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),1);assert.deepEqual(await snapshotOf(refreshPage),savedDespiteRefresh);
+    assert.equal(await refreshPage.evaluate(()=>globalThis.__uiTest.purchasePortfolioReadFailures),0);assert.equal(await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).count(),0);
+    await dialog.getByRole('button',{name:'Concluir',exact:true}).click();await dialog.waitFor({state:'detached'});await receiptOf(refreshPage).waitFor();await readOnlyOutsideConfirmation(refreshFailure);await refreshFailure.context.close();
+    check('purchase-confirmation-refresh-failure-after-save-preserves-receipt-and-retry-only-reads-without-repeating-the-purchase');
+
+    const changed=await openPage('fund-simulation-purchases-history-edit',{width:1440,height:1000}),changedPage=changed.page;
+    await changedPage.evaluate(()=>{
+      const test=globalThis.__uiTest;
+      const rows=[{fundId:'fund-a',ticker:'TEST11',purchaseDate:'2026-10-19',shares:'3',pricePerShare:'8.75',total:'26.25',status:'already_confirmed',recordId:'history-confirmed-fund-a',message:null},{fundId:'fund-b',ticker:'MOCK11',purchaseDate:'2026-10-18',shares:'2',pricePerShare:'10.50',total:'21.00',status:'already_confirmed',recordId:'history-confirmed-fund-b',message:null}];
+      test.purchaseReceipts['wallet-original|fund-simulation-tool']=rows;
+      for(const row of rows)test.snapshot.funds.find(fund=>fund.id===row.fundId).entries.push({id:row.recordId,month:row.purchaseDate.slice(0,7),purchaseDate:row.purchaseDate,cotasAdded:row.shares,pricePerCota:row.pricePerShare,dividendPerCota:'0',dividendTotal:null,notes:'Compra sintética confirmada antes desta abertura.'});
+    });
+    await navigate(changedPage,'Assistente');await receiptOf(changedPage).waitFor();assert.equal(await receiptOf(changedPage).getByText('Compra registrada',{exact:true}).count(),2);
+    const readsBeforeEdit=(await calls(changedPage,'get_simulation_purchase_confirmations')).length;
+    await changedPage.evaluate(()=>{globalThis.__uiTest.snapshot.funds[0].entries.find(record=>record.id==='history-confirmed-fund-a').pricePerCota='9.15';});
+    const editedHistory=await snapshotOf(changedPage);
+    assert.equal(await receiptOf(changedPage).getByText('Compra registrada',{exact:true}).count(),2,'The still-mounted card has not silently refreshed its previous receipt');
+    await cardOf(changedPage).getByRole('button',{name:'Ver compras registradas',exact:true}).click();dialog=dialogOf(changedPage);await dialog.waitFor();
+    assert.equal((await calls(changedPage,'get_simulation_purchase_confirmations')).length,readsBeforeEdit+1,'Opening the receipt explicitly re-reads the durable history after an edit');
+    await dialog.getByText('Precisa conferir',{exact:true}).waitFor();await dialog.getByText('O lançamento confirmado foi alterado no histórico. Confira e corrija o lançamento existente; ele não será recriado.',{exact:true}).waitFor();
+    await textMatches(receiptOf(changedPage),/TEST11.*R\$ 8,75 por cota.*Precisa conferir.*alterado no histórico/);
+    assert.equal(await checkboxFor(dialog,'TEST11').isDisabled(),true);assert.equal(await dialog.getByRole('button',{name:'Conferir compras',exact:true}).isDisabled(),true);assert.equal(await dialog.getByRole('button',{name:'Confirmar lançamentos',exact:true}).count(),0);await expectNoConfirmation(changedPage);assert.equal((await calls(changedPage,'preview_simulation_purchases')).length,0);assert.deepEqual(await snapshotOf(changedPage),editedHistory);
+    await noOverflow(changedPage,'purchase-confirmation-reopened-edited-history-no-overflow');await shot(changedPage,'desktop-purchase-confirmation-history-changed',{fullPage:false});
+    await dialog.getByRole('button',{name:'Cancelar',exact:true}).click();await dialog.waitFor({state:'detached'});assert.equal(await changedPage.evaluate(()=>globalThis.__uiTest.purchaseCreated.length),0);await readOnlyOutsideConfirmation(changed);await changed.context.close();
+    check('purchase-confirmation-reopening-a-mounted-card-rechecks-edited-history-and-blocks-conflicting-receipts-without-recreating-a-buy');
   }
 
   async function verifyAutomaticPublicData(){
@@ -2787,6 +3030,12 @@ try {
     console.log(JSON.stringify({status:'PASS',mode:'market-price',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
   }
 
+  if(focusedPurchaseConfirmation){
+    await verifyPurchaseConfirmation();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'purchase-confirmation',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
+
   if(focusedContributions){
     await verifyContributionPlanning();assert.deepEqual(browserErrors,[]);
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
@@ -2872,6 +3121,7 @@ try {
   await verifyWalletEvolution();
   await verifyMarketPriceComparison();
   await verifyContributionPlanning();
+  await verifyPurchaseConfirmation();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {
