@@ -8,7 +8,7 @@ import PublicSourceLink from '../components/PublicSourceLink';
 import { readPublicCache, usePublicData } from '../lib/publicData';
 import { InvestmentProfileSection } from '../components/InvestmentProfileForm';
 
-export default function Settings({ walletId, walletName, info, onImport, onExport, onImportPosition, notify }: { walletId: string; walletName: string; info: AppInfo | null; onImport: () => void; onExport: () => void; onImportPosition: () => void; notify: (message: string) => void }) {
+export default function Settings({ walletId, walletName, info, onImport, onExport, onImportPosition, notify, onOnboarding }: { walletId: string; walletName: string; info: AppInfo | null; onImport: () => void; onExport: () => void; onImportPosition: () => void; notify: (message: string) => void; onOnboarding: () => void }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [initial, setInitial] = useState<AppSettings | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25,6 +25,7 @@ export default function Settings({ walletId, walletName, info, onImport, onExpor
   const saveStatus = changed ? 'Alterações não salvas.' : !desktop ? 'Disponível no aplicativo Windows.' : !settings ? (error ? 'Preferências indisponíveis.' : 'Carregando preferências…') : 'Sem alterações.';
   const syncStatus = !info || info.sync.status === 'not_configured' ? 'Não configurada' : info.sync.status;
   return <div className="page settings-page">
+    <section className="group" aria-labelledby="settings-onboarding"><div className="group-head"><h2 id="settings-onboarding">Primeiros passos</h2></div><div className="block"><ul className="settings-actions"><ActionRow title="Comece com o básico" description="Uma configuração curta, com opção de deixar informações para depois. Use o assistente para tirar dúvidas.">{() => <button className="button" type="button" disabled={!desktop} onClick={onOnboarding}>Rever primeiros passos</button>}</ActionRow></ul></div></section>
     <section className="group" aria-labelledby="settings-app">
       <div className="group-head"><h2 id="settings-app">Aplicativo</h2><p>Vale para este computador</p></div>
       <div className="modular">

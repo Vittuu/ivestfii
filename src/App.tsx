@@ -16,6 +16,10 @@ import NotificationCenter from './components/NotificationCenter';
 import { useNotifications } from './lib/notifications';
 import type { NotificationRoute } from './lib/notifications';
 import { PublicDataProvider, usePublicDataController } from './lib/publicData';
+import Onboarding from './components/Onboarding';
+import type { OnboardingDestination } from './components/Onboarding';
+import { onboardingHelp } from './lib/onboarding';
+import type { OnboardingStatus } from './lib/onboarding';
 
 type Page = 'overview' | 'portfolio' | 'cash' | 'market' | 'projections' | 'assistant' | 'settings';
 const navigation: { id: Page; label: string; icon: LucideIcon }[] = [
@@ -62,6 +66,10 @@ export default function App() {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [requestedConversation, setRequestedConversation] = useState<{ id: string; token: number }>();
+  const [requestedDraft, setRequestedDraft] = useState<{ text: string; token: number }>();
+  const [onboarding, setOnboarding] = useState<{ walletId: string; step: number } | null>(null);
+  const onboardingChecked = useRef(false);
+  const onboardingStarting = useRef(false);
   const assistantHost = useRef<HTMLDivElement>(null);
   const assistantTrigger = useRef<HTMLElement | null>(null);
   const assistantFab = useRef<HTMLButtonElement>(null);
@@ -162,6 +170,15 @@ export default function App() {
   }, [refresh]);
   useEffect(() => { void refresh(); return () => { requestId.current += 1; }; }, [refresh]);
   useEffect(() => {
+    if (!desktop || loading || !info || error || onboardingChecked.current) return;
+    onboardingChecked.current = true;
+    void call<OnboardingStatus>('get_onboarding_status').then(async status => {
+      if (!status.autoShow || info.migration?.error || info.positionImport?.error) return;
+      await call('save_onboarding_progress', { progress: { version: 1, walletId: status.walletId, step: status.step, status: 'started' } });
+      setOnboarding({ walletId: status.walletId, step: status.step });
+    }).catch(() => { /* Setup remains available in Settings; portfolio access is independent. */ });
+  }, [loading, info, error]);
+  useEffect(() => {
     if (!desktop) return;
     const unlisten = listen<string>('navigate', (event) => { if (event.payload === 'settings') { setPage('settings'); setMobileNav(false); } });
     return () => { void unlisten.then((cleanup) => cleanup()); };
@@ -186,6 +203,24 @@ export default function App() {
     if (page === 'assistant') { document.getElementById('chat-draft')?.focus(); return; }
     assistantTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setAssistantStarted(true); setMobileNav(false); setAssistantOpen(true);
+  };
+  const openOnboarding = async () => {
+    if (onboardingStarting.current || !walletId) return;
+    onboardingStarting.current = true;
+    try {
+      await call('save_onboarding_progress', { progress: { version: 1, walletId, step: 0, status: 'started' } });
+      setOnboarding({ walletId, step: 0 });
+    } catch (error) { setError(errorMessage(error)); }
+    finally { onboardingStarting.current = false; }
+  };
+  const exitOnboarding = (destination: OnboardingDestination, notice?: string) => {
+    if (notice) setNotice(notice);
+    if (onboarding && onboarding.walletId !== walletId) selectWallet(onboarding.walletId);
+    setOnboarding(null);
+    if (destination === 'assistant') {
+      setRequestedDraft(current => ({ text: onboardingHelp, token: (current?.token || 0) + 1 }));
+      navigate('assistant');
+    } else navigate(destination, destination === 'portfolio' ? 'history' : undefined);
   };
   const openNotification = (route: NotificationRoute, conversationId?: string, targetWalletId?: string) => {
     if (targetWalletId && wallets.some((wallet) => wallet.id === targetWalletId)) selectWallet(targetWalletId);
@@ -256,15 +291,16 @@ export default function App() {
           {page === 'cash' && <CashPockets key={walletId} walletId={walletId} walletName={selectedWallet?.name || 'Sua carteira'} onSaved={refresh} notify={notify} />}
           {page === 'market' && <Market walletId={walletId} snapshot={snapshot} />}
           {page === 'projections' && <Projections key={walletId} walletId={walletId} snapshot={snapshot} />}
-          {page === 'settings' && <Settings walletId={walletId} walletName={selectedWallet?.name || 'Carteira selecionada'} info={info} onImport={() => setImportOpen(true)} onExport={() => void exportPortfolio()} onImportPosition={openPositionImport} notify={notify} />}
+          {page === 'settings' && <Settings walletId={walletId} walletName={selectedWallet?.name || 'Carteira selecionada'} info={info} onImport={() => setImportOpen(true)} onExport={() => void exportPortfolio()} onImportPosition={openPositionImport} notify={notify} onOnboarding={() => void openOnboarding()} />}
         </>}
         </div>
         <div id="assistant-panel" ref={assistantHost} className={`assistant-host assistant-host-${assistantView}`} hidden={assistantView === 'hidden'} role={drawerOpen ? 'dialog' : undefined} aria-label={drawerOpen ? 'Assistente lateral' : undefined} aria-modal={drawerOpen ? modalDrawer : undefined}>
-          {assistantStarted && <Assistant walletId={walletId} walletNames={Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))} view={assistantView} onOpenPage={() => { navigate('assistant'); requestAnimationFrame(() => document.getElementById('chat-draft')?.focus({ preventScroll: true })); }} onClose={closeAssistant} requestedConversation={requestedConversation} onRunNotice={onRunNotice} onBusyChange={setAssistantBusy} onPurchasesSaved={refreshAfterPurchase} />}
+          {assistantStarted && <Assistant walletId={walletId} walletNames={Object.fromEntries(wallets.map((wallet) => [wallet.id, wallet.name]))} view={assistantView} onOpenPage={() => { navigate('assistant'); requestAnimationFrame(() => document.getElementById('chat-draft')?.focus({ preventScroll: true })); }} onClose={closeAssistant} requestedConversation={requestedConversation} requestedDraft={requestedDraft} onRunNotice={onRunNotice} onBusyChange={setAssistantBusy} onPurchasesSaved={refreshAfterPurchase} />}
         </div>
       </main>
     </div>
     {!drawerOpen && <button type="button" ref={assistantFab} className="assistant-fab" aria-label="Abrir assistente" aria-controls="assistant-panel" aria-expanded={assistantView === 'page'} title={assistantBusy ? 'Assistente respondendo. Abrir conversa' : 'Conversar com o assistente'} onClick={openAssistant}><MessageSquare size={22} aria-hidden="true" />{assistantBusy && <span className="assistant-fab-busy" aria-label="Respondendo"><LoaderCircle size={12} className="spin" /></span>}</button>}
+    {onboarding && wallets.some(wallet => wallet.id === onboarding.walletId) && <Onboarding key={onboarding.walletId} wallet={wallets.find(wallet => wallet.id === onboarding.walletId)!} initialStep={onboarding.step} onSaved={refresh} onExit={exitOnboarding} />}
     {notice && <div className="toast" role="status">{notice}<button className="icon-button" onClick={() => setNotice('')} aria-label="Fechar aviso"><X size={14} /></button></div>}
     {walletOpen && <WalletForm wallet={editingWallet || undefined} onClose={() => setWalletOpen(false)} onSaved={async (wallet) => { setWalletOpen(false); selectedId.current = wallet.id; setWalletId(wallet.id); if (!editingWallet) { setSnapshot(emptySnapshot); setImportPath(''); setPositionImportPath(''); } await refresh(); if (editingWallet) notify('Nome e instituição da carteira atualizados.'); else { navigate('portfolio'); notify(`Carteira ${wallet.name} criada. Cadastre os fundos ou importe seu histórico.`); } }} />}
     {importOpen && <Modal busy={importing} title="Importar histórico ou backup" description={`Destino: ${selectedWallet?.name || 'carteira selecionada'}. Traz os lançamentos e a posição incluída no backup.`} onClose={() => { if (!importing) setImportOpen(false); }}><form onSubmit={handleForm(importPortfolio)}><p className="import-info">O arquivo JSON original não é alterado. Importações repetidas são reconhecidas e não duplicam registros.</p><Field label="Caminho do arquivo JSON" hint="Caminho completo do arquivo neste computador."><input autoFocus value={importPath} onChange={(event) => setImportPath(event.target.value)} placeholder="C:\…\carteira.json" required disabled={importing} /></Field><button type="button" className="button secondary small" onClick={() => void chooseImport()} disabled={!desktop || importing}><FolderOpen size={14} />Procurar arquivo</button>{importError && <p className="form-error" role="alert">{importError}</p>}<div className="form-actions"><button type="button" className="button secondary" onClick={() => setImportOpen(false)} disabled={importing}>Cancelar</button><button className="button primary" disabled={importing || !desktop || !walletId || !importPath.trim()}>{importing && <LoaderCircle className="spin" size={16} />}Importar</button></div></form></Modal>}

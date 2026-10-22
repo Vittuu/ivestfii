@@ -10,6 +10,12 @@ O pacote de distribuição é um único **IvestFII-Setup.exe**. Instale uma vez;
 
 A instalação mantém `%LOCALAPPDATA%\com.ivestfii.desktop`, preservando carteiras, conversas e a chave brapi do cofre Windows. Node.js, Rust e Python são necessários apenas para desenvolver. Geração do instalador, assinatura e publicação estão no [guia Windows](docs/distribuicao-windows.md).
 
+### Primeiros passos
+
+Uma instalação nova e vazia apresenta três etapas curtas: nome da carteira, duas respostas opcionais sobre risco e reserva, e escolha de como começar. “Não sei ainda” mantém a informação ausente; objetivos, prazos e valores podem ser completados em Configurações. O assistente ajuda a entender o aplicativo e pergunta o que faltar antes de sugerir investimentos. O botão de ajuda prepara uma pergunta, sem enviá-la automaticamente ou substituir um rascunho existente.
+
+É possível adiar, retomar após reiniciar e rever o fluxo em **Configurações → Primeiros passos**. Carteiras já utilizadas não abrem o guia automaticamente. O progresso fica em `onboarding.json`; nome e perfil continuam nos seus armazenamentos existentes, sem criar investimentos, alterar saldos ou cadastrar credenciais.
+
 ## Executar a implementação nova
 
 Pré-requisitos: Node.js, Rust estável, ferramentas C++ de build do Visual Studio e WebView2 no Windows.

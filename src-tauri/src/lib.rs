@@ -28,6 +28,7 @@ use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
+mod onboarding;
 mod operations;
 pub mod performance;
 pub mod public_data;
@@ -76,6 +77,7 @@ fn persist_settings(path: &Path, settings: &AppSettings) -> CommandResult<()> {
 }
 
 struct AppState {
+    onboarding_lock: Mutex<()>,
     wallets: Mutex<WalletCatalog>,
     assistant: Mutex<AssistantStore>,
     settings: Mutex<AppSettings>,
@@ -975,6 +977,77 @@ fn get_settings(app: tauri::AppHandle, state: State<AppState>) -> CommandResult<
 }
 
 #[tauri::command]
+fn get_onboarding_status(state: State<AppState>) -> CommandResult<Value> {
+    let _operation = state.operations.begin()?;
+    let _progress = state
+        .onboarding_lock
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if let Some(progress) = onboarding::read(&state.data_directory.join("onboarding.json"))? {
+        state
+            .wallets
+            .lock()
+            .map_err(|error| error.to_string())?
+            .get(Some(&progress.wallet_id))
+            .map_err(|error| error.to_string())?;
+        return Ok(
+            json!({"autoShow":progress.status == onboarding::ProgressStatus::Started,"walletId":progress.wallet_id,"step":progress.step,"status":progress.status}),
+        );
+    }
+    let wallets = state.wallets.lock().map_err(|error| error.to_string())?;
+    let list = wallets.list().map_err(|error| error.to_string())?;
+    let wallet = wallets.get(None).map_err(|error| error.to_string())?;
+    let repository = wallets
+        .repository(Some(&wallet.id))
+        .map_err(|error| error.to_string())?;
+    let snapshot = repository.snapshot().map_err(|error| error.to_string())?;
+    let has_profile = repository
+        .investment_profile()
+        .map_err(|error| error.to_string())?
+        .is_some();
+    drop(wallets);
+    let conversations = state
+        .assistant
+        .lock()
+        .map_err(|error| error.to_string())?
+        .list_conversations()
+        .map_err(|error| error.to_string())?;
+    let has_investments = !snapshot.funds.is_empty()
+        || !snapshot.cash_pockets.is_empty()
+        || snapshot.broker_position.is_some()
+        || !snapshot.performance_history.is_empty();
+    let auto_show = onboarding::eligible(
+        list.len(),
+        wallet.name != "Carteira principal" || !wallet.institution.is_empty(),
+        has_investments,
+        has_profile,
+        !conversations.is_empty(),
+    );
+    Ok(
+        json!({"autoShow":auto_show,"walletId":wallet.id,"step":0,"status":if auto_show {"not_started"} else {"existing"}}),
+    )
+}
+
+#[tauri::command]
+fn save_onboarding_progress(
+    state: State<AppState>,
+    progress: onboarding::Progress,
+) -> CommandResult<()> {
+    let _operation = state.operations.begin()?;
+    let _progress = state
+        .onboarding_lock
+        .lock()
+        .map_err(|error| error.to_string())?;
+    state
+        .wallets
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(Some(&progress.wallet_id))
+        .map_err(|error| error.to_string())?;
+    onboarding::save(&state.data_directory.join("onboarding.json"), &progress)
+}
+
+#[tauri::command]
 fn save_settings(
     app: tauri::AppHandle,
     state: State<AppState>,
@@ -1433,6 +1506,7 @@ pub fn run() {
                 app.autolaunch().enable()?;
             }
             app.manage(AppState {
+                onboarding_lock: Mutex::new(()),
                 wallets: Mutex::new(wallets),
                 assistant: Mutex::new(assistant),
                 settings: Mutex::new(settings),
@@ -1561,6 +1635,8 @@ pub fn run() {
             get_simulation_purchase_confirmations,
             project_income,
             get_settings,
+            get_onboarding_status,
+            save_onboarding_progress,
             save_settings,
             get_app_info,
             get_providers,

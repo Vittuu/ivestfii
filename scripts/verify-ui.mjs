@@ -36,7 +36,8 @@ const focusedWalletEvolution=process.env.IVESTFII_UI_FOCUS==='wallet-evolution';
 const focusedMarketPrice=process.env.IVESTFII_UI_FOCUS==='market-price';
 const focusedContributions=process.env.IVESTFII_UI_FOCUS==='contributions';
 const focusedPurchaseConfirmation=process.env.IVESTFII_UI_FOCUS==='purchase-confirmation';
-const reportName=focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':focusedMarketPrice?'market-price-report.json':focusedContributions?'contributions-report.json':focusedPurchaseConfirmation?'purchase-confirmation-report.json':'report.json';
+const focusedOnboarding=process.env.IVESTFII_UI_FOCUS==='onboarding';
+const reportName=focusedOnboarding?'onboarding-report.json':focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':focusedMarketPrice?'market-price-report.json':focusedContributions?'contributions-report.json':focusedPurchaseConfirmation?'purchase-confirmation-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
 const compact = (value) => value.replace(/\s+/g, '');
@@ -400,6 +401,7 @@ function bootstrap(mode) {
   if (mode === 'web') return `globalThis.isTauri = false; await import('/src/main.tsx?ui-original=web');`;
   const initial = structuredClone(snapshot);
   initial.cashPockets = [cash]; initial.cashBalance = '1234.56';
+  if(mode.startsWith('onboarding'))Object.assign(initial,{funds:[],recordCount:0,cashPockets:[],cashBalance:'0',brokerPosition:null,totals:{invested:'0',cotas:'0',dividendsReceived:'0',estimatedMonthlyIncome:'0'}});
   if(mode==='fixed-income'||mode==='fixed-income-api')initial.brokerPosition.fixedIncome.latestObservation=structuredClone(fixedIncomeObservation);
   if(mode==='fixed-income-none')initial.brokerPosition=null;
   if (mode === 'position-notes') initial.brokerPosition.warnings = [...importWarnings];
@@ -464,6 +466,7 @@ function bootstrap(mode) {
   const automaticMode=mode.startsWith('auto-');
   const keyConfigured = mode === 'connected' || mode === 'corrupt-quotes' || (automaticMode&&mode!=='auto-no-key');
   let walletPerformance = (mode === 'ledger'||mode==='ledger-recent') ? {...performance,status:'incomplete',invested:'155',dividends:'16.25',marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,issues:['Cotações ausentes no cenário sintético de lançamentos.']} : performance;
+  if(mode.startsWith('onboarding'))walletPerformance={...performance,status:'empty',invested:'0',dividends:'0',marketValue:'0',priceResult:'0',totalResult:'0',totalReturnPercent:null,cdi:null,difference:null,portfolio:null,portfolioBenchmark:null,portfolioEvolution:null};
   if(mode.startsWith('fixed-income'))walletPerformance=structuredClone(mode==='fixed-income-api'?fixedIncomeApiPerformance:mode==='fixed-income-legacy'?fixedIncomeLegacyPerformance:mode==='fixed-income-none'?fixedIncomeAbsentPerformance:fixedIncomePerformance);
   if(mode.startsWith('income')&&!mode.startsWith('income-performance'))walletPerformance={...performance,status:'incomplete',asOf:'2026-10-20',startMonth:'2025-10',invested:'310',dividends:initial.totals.dividendsReceived,marketValue:null,priceResult:null,totalResult:null,totalReturnPercent:null,cdi:null,difference:null,issues:['Cotações indisponíveis no cenário sintético do gráfico mensal.']};
   if(mode.startsWith('income-performance')){
@@ -555,8 +558,13 @@ import { emit } from '/node_modules/@tauri-apps/api/event.js';
 globalThis.isTauri = true;
 globalThis.__uiTest = { snapshot: ${JSON.stringify(initial)}, otherSnapshot: ${JSON.stringify(other)}, calls: [], unexpected: [], failImports: 1, deferSaves: false, saveWaiters: [], deferImports: false, importWaiters: [], deferMarket: false, marketWaiters: [], connected:${mode === 'connected'}, corruptQuoteCache:${mode === 'corrupt-quotes'}, marketSettings: {brapiKeyConfigured:${keyConfigured},brapiKeySource:${keyConfigured ? "'local'" : 'null'},cvmMappings:{TEST11:'12345678000195'}}, settings: {autostart:false,startMinimized:false,closeToTray:true,autoUpdate:true}, update: {status:'up_to_date',currentVersion:'0.1.0',availableVersion:null,downloadedBytes:0,totalBytes:null,lastCheckedAt:'2020-02-04T12:00:00Z',error:null}, failUpdateCheck:false, failUpdateInstall:false };
 const wallets=${JSON.stringify(wallets)};
+${mode.startsWith('onboarding')?`wallets.splice(1);wallets[0].name='Carteira principal';wallets[0].institution='';`:''}
+globalThis.__uiTest.onboarding=JSON.parse(localStorage.getItem('ivestfii.test.onboarding')||'null');
+${mode==='onboarding-resume'?`globalThis.__uiTest.onboarding={version:1,walletId:'wallet-original',step:1,status:'started'};`:''}
+globalThis.__uiTest.failOnboarding=false;
 Object.assign(globalThis.__uiTest,{performance:${JSON.stringify(walletPerformance)},otherPerformance:{...${JSON.stringify(performance)},portfolioBenchmark:${JSON.stringify(benchmarkOther)},${mode.startsWith('wallet-evolution')?`portfolioEvolution:${JSON.stringify(evolutionOther)},`:''}invested:'200',dividends:'0',marketValue:'220',priceResult:'20',totalResult:'20',totalReturnPercent:'10',cdi:{endingValue:'210',result:'10',returnPercent:'5'},difference:'10'},deferPerformance:false,performanceWaiters:[],deferPerformanceRead:${mode === 'performance-loading'},performanceReadWaiters:[],failPerformance:false});
 Object.assign(globalThis.__uiTest,{chat:${JSON.stringify(chatFixture)},deferChatStart:false,chatStartWaiters:[],eventSubscriptions:[],eventCalls:[]});
+${mode.startsWith('onboarding')?`globalThis.__uiTest.chat.conversations=[];globalThis.__uiTest.chat.messages=[];globalThis.__uiTest.chat.tools=[];`:''}
 Object.assign(globalThis.__uiTest,{purchaseReceipts:{},purchaseStatuses:{},purchasePreviewSequence:0,lastPurchasePreview:null,purchaseCreated:[],purchaseReadError:null,purchaseSaveError:null,purchaseLoseReplyAfterCommit:false,purchaseFailRefreshAfterCommit:false,purchasePortfolioReadFailures:0,purchasePortfolioFailuresConsumed:0,deferPurchaseConfirmation:false,purchaseConfirmationWaiters:[]});
 ${mode.startsWith('fund-simulation')?`globalThis.__uiTest.chat.tools.push(${JSON.stringify(fundSimulationTool(mode))});`:''}
 // Derive a receipt's current state from the synthetic saved history, just as
@@ -575,7 +583,7 @@ ${mode.startsWith('market-price')?`globalThis.__uiTest.publicCache.wallets={'wal
 Object.assign(globalThis.__uiTest,{incomeReport:${JSON.stringify(mode==='income-api-date-required'?incomeApiUnknownReport:mode==='income-api'?incomeApiReport:{months:[]})}});
 Object.assign(globalThis.__uiTest,{dividendPanel:${JSON.stringify(mode.startsWith('income-api')?incomeApiDividendPanel:mode.startsWith('income-performance')||mode==='fixed-income-api'?incomePerformanceDividendPanel:{items:[],fetchedAt:null,errors:[]})}});
 ${mode.startsWith('income')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{items:[],fetchedAt:null,credentialConfigured:false,errors:[]},cvm:{items:[],fetchedAt:null,errors:[]}};`:''}
-Object.assign(globalThis.__uiTest,{profiles:{'wallet-original':${JSON.stringify(mode==='profile-stale'?{...otherProfile,riskTolerance:'aggressive',notes:'Nota da resposta antiga da carteira A.'}:null)},'wallet-other':${JSON.stringify(mode.startsWith('profile')?otherProfile:null)}},deferProfileWallets:${JSON.stringify(mode==='profile-stale'?['wallet-original']:[])},profileReadWaiters:[],deferProfileSaves:false,profileSaveWaiters:[],profileSaveError:null,profileReadError:${JSON.stringify(mode==='profile-error'?'Perfil sintético temporariamente indisponível.':null)}});
+Object.assign(globalThis.__uiTest,{profiles:{'wallet-original':${JSON.stringify(mode==='profile-stale'?{...otherProfile,riskTolerance:'aggressive',notes:'Nota da resposta antiga da carteira A.'}:null)},'wallet-other':${JSON.stringify(mode.startsWith('profile')?otherProfile:null)}},deferProfileWallets:${JSON.stringify(mode==='profile-stale'?['wallet-original']:[])},profileReadWaiters:[],deferProfileSaves:false,profileSaveWaiters:[],profileSaveError:null,profileReadError:${JSON.stringify(mode==='profile-error'||mode==='onboarding-profile-error'?'Perfil sintético temporariamente indisponível.':null)}});
 ${mode.startsWith('profile')?`globalThis.__uiTest.publicCache.wallets['wallet-original']={quotes:{...${JSON.stringify(quotePanel)},items:[{symbol:'TEST11',status:'cached',observation:{...${JSON.stringify(quoteObservation)},quotedAt:'2026-10-20T00:30:00Z'},error:null},{symbol:'MOCK11',status:'cached',observation:{...${JSON.stringify(quoteObservation)},symbol:'MOCK11',price:'25',quotedAt:'not-a-date'},error:null}]}};`:''}
 globalThis.__uiTest.readQuotes=(walletId)=>{
   const test=globalThis.__uiTest,stored=test.publicCache.wallets[walletId]?.quotes;
@@ -623,6 +631,9 @@ mockIPC(async (command, args={}) => {
   const current=args.walletId==='wallet-other'?test.otherSnapshot:test.snapshot;
   test.calls.push({command, args});
   switch (command) {
+    case 'get_onboarding_status': {const saved=test.onboarding;return saved?{...saved,autoShow:saved.status==='started'}:{autoShow:${mode.startsWith('onboarding')},walletId:'wallet-original',step:0,status:${mode.startsWith('onboarding')?"'not_started'":"'existing'"}};}
+    case 'save_onboarding_progress': {if(test.deferSaves)await new Promise(resolve=>test.saveWaiters.push(resolve));if(test.failOnboarding)throw new Error('Falha sintética ao salvar os primeiros passos.');test.onboarding=structuredClone(args.progress);localStorage.setItem('ivestfii.test.onboarding',JSON.stringify(test.onboarding));return null;}
+    case 'update_wallet': {const wallet=wallets.find(item=>item.id===args.input.id);if(!wallet)throw new Error('Carteira inexistente.');Object.assign(wallet,args.input);return structuredClone(wallet);}
     case 'get_wallets': return structuredClone(wallets);
     case 'get_wealth_overview': {const rows=wallets.map((wallet,index)=>{const value=index?test.otherSnapshot:test.snapshot;return {wallet,fiiInvested:value.totals.invested,cashBalance:cashPerformance(value.cashPockets).balance};});return {wallets:rows,totals:{fiiInvested:String(rows.reduce((sum,row)=>sum+Number(row.fiiInvested),0)),cashBalance:String(rows.reduce((sum,row)=>sum+Number(row.cashBalance),0))}};}
     case 'get_portfolio': if(test.purchasePortfolioReadFailures>0){test.purchasePortfolioReadFailures--;test.purchasePortfolioFailuresConsumed++;throw new Error('Falha sintética ao reler a carteira após a compra registrada.');}return structuredClone(current);
@@ -785,7 +796,7 @@ let server;
 let browser;
 await fs.mkdir(output, {recursive:true});
 // Captures from earlier UI versions would be mistaken for the current interface.
-if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark&&!focusedWalletEvolution&&!focusedMarketPrice&&!focusedContributions&&!focusedPurchaseConfirmation)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
+if(!focusedRowMotion&&!focusedShell&&!focusedCompact&&!focusedPublicData&&!focusedProfile&&!focusedIncome&&!focusedIncomeApi&&!focusedIncomePerformance&&!focusedFixedIncome&&!focusedWalletBenchmark&&!focusedWalletEvolution&&!focusedMarketPrice&&!focusedContributions&&!focusedPurchaseConfirmation&&!focusedOnboarding)for (const name of await fs.readdir(output)) if (/\.(png|json)$/.test(name)) await fs.rm(path.join(output, name));
 async function run(){
 try {
   server=await createServer({configFile:path.join(root,'vite.config.ts'),root,server:{port:1421,strictPort:true,host:'127.0.0.1',open:false},logLevel:'error',clearScreen:false});
@@ -864,7 +875,7 @@ try {
     if(sidebarPreference!==undefined)await context.addInitScript(value=>localStorage.setItem('ivestfii.sidebarCollapsed',value),sidebarPreference);
     const page=await context.newPage();page.setDefaultTimeout(12000);
     const externalRequests=[];
-    if(mode==='web'||mode.startsWith('income')||mode.startsWith('market-price')||mode.startsWith('profile-contributions')||mode.startsWith('fund-simulation'))await page.route('**/*',route=>{
+    if(mode==='web'||mode.startsWith('onboarding')||mode.startsWith('income')||mode.startsWith('market-price')||mode.startsWith('profile-contributions')||mode.startsWith('fund-simulation'))await page.route('**/*',route=>{
       const url=new URL(route.request().url());
       if(/^https?:$/.test(url.protocol)&&url.origin!==base){externalRequests.push(url.href);return route.fulfill({status:503,contentType:'text/plain',body:'External requests are blocked in the synthetic web preview.'});}
       return route.fallback();
@@ -3024,6 +3035,79 @@ try {
     check('market-price-legend-and-readable-comparison-fit-mobile-and-two-hundred-percent-layout');
   }
 
+  async function verifyOnboarding(){
+    const dialogOf=page=>page.getByRole('dialog',{name:'Primeiros passos',exact:true});
+    const noFinancialWrites=async fixture=>{
+      for(const name of ['save_record','upsert_fund','save_cash_pocket','import_legacy','import_broker_position','confirm_simulation_purchases','start_chat_turn'])assert.equal((await calls(fixture.page,name)).length,0,name+' must not be automatic setup');
+      assert.deepEqual(fixture.externalRequests,[]);await noUnexpectedCommands(fixture.page);
+    };
+    const fresh=await openPage('onboarding-new',{width:1440,height:1000},{expandedSidebar:false});const {page}=fresh;let dialog=dialogOf(page);await dialog.waitFor();
+    assert.equal(await dialog.locator('input').count(),2);
+    await dialog.getByLabel('Nome da carteira',{exact:true}).fill('Minha primeira carteira');
+    await noOverflow(page,'onboarding-desktop-wallet-no-overflow');await shot(page,'desktop-onboarding-wallet',{fullPage:false});
+    await dialog.getByRole('button',{name:'Continuar',exact:true}).click();await dialog.getByRole('heading',{name:'Duas perguntas rápidas'}).waitFor();
+    const risk=dialog.getByLabel('Como você lida com quedas no valor investido?',{exact:true}),reserve=dialog.getByLabel('Já separou dinheiro para imprevistos?',{exact:true});
+    await risk.waitFor().catch(async error=>{await shot(page,'onboarding-profile-read-failure',{fullPage:false});await fs.writeFile(path.join(output,'onboarding-debug.json'),JSON.stringify({text:await dialog.innerText(),calls:await page.evaluate(()=>globalThis.__uiTest.calls)},null,2));throw error;});assert.equal(await risk.inputValue(),'unknown');assert.equal(await reserve.inputValue(),'unknown');assert.equal(await dialog.locator('select').count(),2);
+    await page.waitForFunction(()=>document.activeElement?.textContent==='Duas perguntas rápidas');await page.keyboard.press('Tab');assert.equal(await risk.evaluate(element=>element===document.activeElement),true);
+    await risk.selectOption('moderate');await reserve.selectOption('partial');
+    await page.evaluate(()=>{globalThis.__uiTest.failOnboarding=true;});
+    await dialog.getByRole('button',{name:'Continuar',exact:true}).click();await dialog.getByRole('alert').waitFor();
+    assert.equal((await calls(page,'save_investment_profile')).length,1);
+    await page.evaluate(()=>{globalThis.__uiTest.failOnboarding=false;});
+    await dialog.getByRole('button',{name:'Continuar',exact:true}).click();await dialog.getByRole('heading',{name:'Por onde quer começar?'}).waitFor();
+    assert.equal((await calls(page,'save_investment_profile')).length,1,'Retry must not resave an already persisted profile');
+    const saved=(await calls(page,'save_investment_profile'))[0].args;
+    assert.equal(saved.walletId,'wallet-original');assert.equal(saved.input.riskTolerance,'moderate');assert.equal(saved.input.emergencyReserveStatus,'partial');
+    assert.equal(saved.input.shortTermMonths,null);assert.equal(saved.input.longTermMonths,null);assert.equal(saved.input.monthlyContribution,null);
+    await noOverflow(page,'onboarding-desktop-finish-no-overflow');await shot(page,'desktop-onboarding-ready',{fullPage:false});
+    await dialog.getByRole('button',{name:'Tirar dúvidas com a IA',exact:true}).click();await dialog.waitFor({state:'detached'});await title(page,'Assistente');
+    assert.match(await page.locator('#chat-draft').inputValue(),/Estou começando a usar o IvestFII/);assert.equal((await calls(page,'start_chat_turn')).length,0);
+    await noFinancialWrites(fresh);await page.reload({waitUntil:'networkidle'});await title(page,'Visão geral');assert.equal(await dialogOf(page).count(),0);
+    check('onboarding-three-short-steps-save-only-explicit-answers-retry-safely-and-open-an-unsent-AI-question');
+    check('onboarding-completion-survives-reload-and-never-registers-investments-or-sends-chat');
+    await fresh.context.close();
+
+    const small=await openPage('onboarding-new',{width:375,height:812},{expandedSidebar:false});dialog=dialogOf(small.page);await dialog.waitFor();
+    await dialog.getByRole('button',{name:'Continuar',exact:true}).click();await dialog.getByLabel('Como você lida com quedas no valor investido?',{exact:true}).waitFor();
+    await dialog.getByLabel('Como você lida com quedas no valor investido?',{exact:true}).selectOption('aggressive');
+    await noOverflow(small.page,'onboarding-mobile375-profile-no-overflow');await shot(small.page,'mobile375-onboarding-profile',{fullPage:false});
+    await dialog.getByRole('button',{name:'Fazer depois',exact:true}).click();await dialog.waitFor({state:'detached'});
+    assert.equal((await calls(small.page,'save_investment_profile')).length,0,'Skipping must not save unconfirmed draft answers');
+    await small.page.reload({waitUntil:'networkidle'});assert.equal(await dialogOf(small.page).count(),0);
+    await noFinancialWrites(small);check('onboarding-mobile-can-skip-without-saving-drafts-and-does-not-reappear-on-reload');await small.context.close();
+
+    const resumed=await openPage('onboarding-resume',{width:1440,height:1000},{expandedSidebar:false});dialog=dialogOf(resumed.page);await dialog.getByRole('heading',{name:'Duas perguntas rápidas'}).waitFor();
+    await dialog.getByLabel('Como você lida com quedas no valor investido?',{exact:true}).waitFor();await dialog.getByRole('button',{name:'Continuar',exact:true}).click();await dialog.getByRole('heading',{name:'Por onde quer começar?'}).waitFor();
+    assert.equal((await calls(resumed.page,'save_investment_profile')).length,0,'Unknown answers must remain missing, not an invented profile');
+    await dialog.getByRole('button',{name:'Explorar o aplicativo',exact:true}).click();await noFinancialWrites(resumed);check('onboarding-resumes-the-saved-step-and-unknown-answers-do-not-create-a-profile');await resumed.context.close();
+
+    const unavailable=await openPage('onboarding-profile-error',{width:375,height:812},{expandedSidebar:false});dialog=dialogOf(unavailable.page);await dialog.waitFor();await dialog.getByRole('button',{name:'Continuar',exact:true}).click();
+    await dialog.getByRole('alert').waitFor();assert.equal(await dialog.getByRole('button',{name:'Continuar',exact:true}).isDisabled(),true);
+    await unavailable.page.evaluate(()=>{globalThis.__uiTest.failOnboarding=true;});await dialog.getByRole('button',{name:'Fazer depois',exact:true}).click();await dialog.waitFor({state:'detached'});
+    assert.match(await unavailable.page.locator('.toast').innerText(),/continuar usando o aplicativo/);
+    assert.equal((await calls(unavailable.page,'save_investment_profile')).length,0);await noFinancialWrites(unavailable);check('onboarding-read-errors-never-overwrite-profile-and-skip-remains-available-even-if-progress-cannot-be-saved');await unavailable.context.close();
+
+    const existing=await openPage('desktop',{width:1440,height:1000});const old=existing.page;assert.equal(await dialogOf(old).count(),0);
+    const before=await old.evaluate(()=>JSON.stringify(globalThis.__uiTest.snapshot));
+    await navigate(old,'Configurações');await old.getByRole('button',{name:'Rever primeiros passos',exact:true}).click();dialog=dialogOf(old);await dialog.waitFor();
+    await dialog.getByRole('button',{name:'Continuar',exact:true}).click();await dialog.getByLabel('Como você lida com quedas no valor investido?',{exact:true}).waitFor();
+    await old.evaluate(()=>{globalThis.__uiTest.profiles['wallet-original']={riskTolerance:'unknown',emergencyReserveStatus:'unknown',shortTermObjective:'Viagem preservada',shortTermMonths:18,longTermObjective:'Aposentadoria preservada',longTermMonths:240,liquidityNeeds:'Reserva disponível',monthlyContribution:'123.45',knowledgeLevel:'beginner',constraints:'Preferências preservadas',notes:'Notas preservadas',updatedAt:'2026-10-20T12:00:00Z'};});
+    await dialog.getByLabel('Como você lida com quedas no valor investido?',{exact:true}).selectOption('conservative');await dialog.getByRole('button',{name:'Continuar',exact:true}).click();
+    await dialog.getByRole('heading',{name:'Por onde quer começar?'}).waitFor();const changed=(await calls(old,'save_investment_profile')).at(-1).args.input;
+    assert.equal(changed.shortTermObjective,'Viagem preservada');assert.equal(changed.longTermMonths,240);assert.equal(changed.monthlyContribution,'123.45');assert.equal(changed.notes,'Notas preservadas');
+    await dialog.getByRole('button',{name:'Adicionar meus FIIs',exact:true}).click();await title(old,'FIIs e posições');
+    assert.equal(await old.evaluate(()=>JSON.stringify(globalThis.__uiTest.snapshot)),before);
+    await navigate(old,'Assistente');await old.locator('#chat-draft').fill('Minha pergunta ainda não enviada.');await navigate(old,'Configurações');await old.getByRole('button',{name:'Rever primeiros passos',exact:true}).click();dialog=dialogOf(old);await dialog.waitFor();await dialog.getByRole('button',{name:'Prefiro tirar uma dúvida com a IA',exact:true}).click();await title(old,'Assistente');
+    assert.match(await old.locator('#chat-draft').inputValue(),/^Minha pergunta ainda não enviada\.[\s\S]*Estou começando/);
+    await noFinancialWrites(existing);check('onboarding-existing-users-opt-in-from-settings-and-preserve-financial-data-and-all-other-profile-fields');check('onboarding-AI-help-preserves-an-existing-unsent-draft-and-never-sends-it');await existing.context.close();
+  }
+
+  if(focusedOnboarding){
+    await verifyOnboarding();assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',mode:'onboarding',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
+
   if(focusedMarketPrice){
     await verifyMarketPriceComparison();assert.deepEqual(browserErrors,[]);
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
@@ -3122,6 +3206,7 @@ try {
   await verifyMarketPriceComparison();
   await verifyContributionPlanning();
   await verifyPurchaseConfirmation();
+  await verifyOnboarding();
 
   // ---------- Recorded cash income joins wallet totals; CDI simulations never do ----------
   {

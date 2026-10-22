@@ -29,6 +29,7 @@ interface Props {
   onOpenPage?: () => void;
   onClose?: () => void;
   requestedConversation?: { id: string; token: number };
+  requestedDraft?: { text: string; token: number };
   onRunNotice?: (run: ChatRun) => void;
   onBusyChange?: (busy: boolean) => void;
   onPurchasesSaved?: (walletId: string) => Promise<void>;
@@ -154,7 +155,7 @@ function ToolCall({ tool }: { tool: ToolEvent }) {
 }
 
 /** Mounted once by App: page, drawer and hidden share this state and the same local history. */
-export default function Assistant({ walletId, walletNames, view = 'page', onOpenPage, onClose, requestedConversation, onRunNotice, onBusyChange, onPurchasesSaved }: Props) {
+export default function Assistant({ walletId, walletNames, view = 'page', onOpenPage, onClose, requestedConversation, requestedDraft, onRunNotice, onBusyChange, onPurchasesSaved }: Props) {
   const conversationListId = useId();
   const [initialized, setInitialized] = useState(view !== 'hidden');
   const [showConversations, setShowConversations] = useState(false);
@@ -190,6 +191,7 @@ export default function Assistant({ walletId, walletNames, view = 'page', onOpen
   const runNoticeRef = useRef(onRunNotice);
   const busyChangeRef = useRef(onBusyChange);
   const requestedToken = useRef<number | undefined>(undefined);
+  const requestedDraftToken = useRef<number | undefined>(undefined);
   runNoticeRef.current = onRunNotice;
   busyChangeRef.current = onBusyChange;
 
@@ -220,6 +222,13 @@ export default function Assistant({ walletId, walletNames, view = 'page', onOpen
     selectConversation(requestedConversation.id);
     setShowConversations(false);
   }, [requestedConversation, selectConversation]);
+
+  useEffect(() => {
+    if (!requestedDraft || requestedDraftToken.current === requestedDraft.token) return;
+    requestedDraftToken.current = requestedDraft.token;
+    setDraft(current => current.includes(requestedDraft.text) ? current : current.trim() ? `${current.trimEnd()}\n\n${requestedDraft.text}` : requestedDraft.text);
+    requestAnimationFrame(() => draftRef.current?.focus());
+  }, [requestedDraft]);
 
   const refreshList = useCallback(async () => {
     const list = await call<Conversation[]>('list_conversations');
