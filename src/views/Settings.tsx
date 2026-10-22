@@ -7,6 +7,7 @@ import { Def, Field, SectionHeading } from '../components';
 import PublicSourceLink from '../components/PublicSourceLink';
 import { readPublicCache, usePublicData } from '../lib/publicData';
 import { InvestmentProfileSection } from '../components/InvestmentProfileForm';
+import { syncUpdateActivity } from '../lib/updateActivity';
 
 export default function Settings({ walletId, walletName, info, onImport, onExport, onImportPosition, notify, onOnboarding }: { walletId: string; walletName: string; info: AppInfo | null; onImport: () => void; onExport: () => void; onImportPosition: () => void; notify: (message: string) => void; onOnboarding: () => void }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -123,6 +124,10 @@ function UpdateSettings() {
     if (actionPending.current) return;
     actionPending.current = true; generation.current += 1; setAction(kind); setError(''); setReadError('');
     try {
+      if (kind === 'install') {
+        const pending = await syncUpdateActivity();
+        if (pending.length) throw new Error(`Antes de reiniciar: ${pending.join(' ')}`);
+      }
       const result = await call<UpdateStatus>(kind === 'check' ? 'check_for_updates' : 'install_pending_update');
       if (mounted.current) { previousStatus.current = result.status; setUpdate(result); }
     } catch (err) { if (mounted.current) setError(errorMessage(err)); }

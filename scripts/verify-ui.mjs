@@ -37,6 +37,7 @@ const focusedMarketPrice=process.env.IVESTFII_UI_FOCUS==='market-price';
 const focusedContributions=process.env.IVESTFII_UI_FOCUS==='contributions';
 const focusedPurchaseConfirmation=process.env.IVESTFII_UI_FOCUS==='purchase-confirmation';
 const focusedOnboarding=process.env.IVESTFII_UI_FOCUS==='onboarding';
+const focusedUpdater=process.env.IVESTFII_UI_FOCUS==='updater';
 const reportName=focusedOnboarding?'onboarding-report.json':focusedRowMotion?'rows-motion-report.json':focusedShell?'shell-report.json':focusedCompact?'compact-report.json':focusedPublicData?'public-data-report.json':focusedProfile?'profile-report.json':focusedIncome?'income-report.json':focusedIncomeApi?'income-api-report.json':focusedIncomePerformance?'income-performance-report.json':focusedFixedIncome?'fixed-income-report.json':focusedWalletBenchmark?'wallet-benchmark-report.json':focusedWalletEvolution?'wallet-evolution-report.json':focusedMarketPrice?'market-price-report.json':focusedContributions?'contributions-report.json':focusedPurchaseConfirmation?'purchase-confirmation-report.json':'report.json';
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 /** Figures render the currency as a separate unit ("R$" + "201,00"); compare them without spacing. */
@@ -650,7 +651,7 @@ mockIPC(async (command, args={}) => {
     case 'get_update_status': return structuredClone(test.update);
     case 'check_for_updates': if(test.failUpdateCheck)throw new Error('Servidor de atualização indisponível no teste.');return structuredClone(test.update);
     case 'install_pending_update': if(test.failUpdateInstall)throw new Error('Aguarde o assistente encerrar a tarefa antes de reiniciar.');test.update.status='installing';return structuredClone(test.update);
-    case 'set_update_activity': test.updateActivityBlocked=args.blocked;return null;
+    case 'set_update_activity': if(test.failActivityReports>0){test.failActivityReports--;throw new Error('Falha sintética de IPC.');}test.updateActivityBlocked=args.blocked;return null;
     case 'get_market_data_settings': return structuredClone(test.marketSettings);
     case 'get_investment_profile': {
       const result=structuredClone(test.profiles[args.walletId]??null);
@@ -3102,6 +3103,61 @@ try {
     await noFinancialWrites(existing);check('onboarding-existing-users-opt-in-from-settings-and-preserve-financial-data-and-all-other-profile-fields');check('onboarding-AI-help-preserves-an-existing-unsent-draft-and-never-sends-it');await existing.context.close();
   }
 
+  async function verifyUpdateRecovery(){
+    const {context,page}=await openPage('connected',{width:1440,height:1000});
+    await navigate(page,'Configurações');
+    const updates=region(page,'Atualizações');
+    const ready=()=>page.evaluate(()=>{globalThis.__uiTest.update={...globalThis.__uiTest.update,status:'ready',availableVersion:'0.2.0'};});
+    await ready();
+    const install=updates.getByRole('button',{name:'Aplicar e reiniciar',exact:true});
+    await install.waitFor();
+    const key=page.getByLabel(/^Chave da brapi/);
+    await key.fill('synthetic-unsaved-key');
+    await install.click();
+    await updates.getByRole('alert').filter({hasText:'Salve ou limpe a chave'}).waitFor();
+    assert.equal((await calls(page,'install_pending_update')).length,0);
+    check('updater-explains-unsaved-key-without-discarding-or-installing');
+    await key.fill('');
+    await page.evaluate(()=>{globalThis.__uiTest.updateActivityBlocked=true;});
+    await install.click();
+    await updates.getByRole('status').filter({hasText:'Aplicando a versão'}).waitFor();
+    const events=await page.evaluate(()=>globalThis.__uiTest.calls);
+    const at=events.findIndex(event=>event.command==='install_pending_update');
+    assert.ok(at>0);assert.deepEqual(events[at-1],{command:'set_update_activity',args:{blocked:false}});
+    check('updater-refreshes-stale-frontend-block-before-explicit-install');
+    await ready();await install.waitFor();
+    await page.getByRole('switch',{name:'Fechar para a bandeja',exact:true}).uncheck();
+    await install.click();
+    await updates.getByRole('alert').filter({hasText:'Salve as alterações pendentes'}).waitFor();
+    assert.equal((await calls(page,'install_pending_update')).length,1);
+    check('updater-preserves-unsaved-preferences-and-explains-block');
+    await page.getByRole('button',{name:'Salvar preferências',exact:true}).click();
+    await updateBlocked(page,false);
+    // A failed activity report must retry even without another user input.
+    await key.fill('synthetic-retry-key');await updateBlocked(page,true);
+    await page.evaluate(()=>{globalThis.__uiTest.failActivityReports=1;});
+    await key.fill('');
+    await updateBlocked(page,false);
+    check('updater-recovers-failed-idle-report-without-another-input');
+    // Constant status mutations must not debounce the idle report indefinitely.
+    await key.fill('synthetic-progress-key');await updateBlocked(page,true);
+    await page.evaluate(()=>{const node=document.createElement('span');node.id='synthetic-progress';document.body.append(node);globalThis.__progressTimer=setInterval(()=>{node.textContent=String(Date.now());},25);});
+    await key.fill('');await updateBlocked(page,false);
+    await page.evaluate(()=>{clearInterval(globalThis.__progressTimer);document.getElementById('synthetic-progress').remove();});
+    check('updater-status-mutations-cannot-starve-idle-report');
+    await page.evaluate(()=>{globalThis.__uiTest.update={...globalThis.__uiTest.update,status:'waiting_for_idle'};});
+    await updates.getByRole('button',{name:'Verificar atualizações',exact:true}).click();
+    assert.equal((await calls(page,'check_for_updates')).length,1);
+    check('updater-can-recheck-a-previously-downloaded-version');
+    await shot(page,'desktop-updater-recovery');
+    await context.close();
+  }
+  if(focusedUpdater){
+    await verifyUpdateRecovery();
+    assert.deepEqual(browserErrors,[]);
+    await fs.writeFile(path.join(output,'updater-report.json'),JSON.stringify({status:'PASS',checks,browserErrors,screenshots},null,2));
+    console.log(JSON.stringify({status:'PASS',checks:checks.length,screenshots:screenshots.length,browserErrors:browserErrors.length}));return;
+  }
   if(focusedOnboarding){
     await verifyOnboarding();assert.deepEqual(browserErrors,[]);
     await fs.writeFile(path.join(output,reportName),JSON.stringify({status:'PASS',uiVersion,syntheticDataOnly:true,checks,browserErrors,screenshots},null,2));
@@ -3172,6 +3228,7 @@ try {
     console.log(JSON.stringify({status:'PASS',mode:'rows-motion',checks:checks.length,rows:motion.reduce((sum,table)=>sum+new Set(table.samples.map(row=>row.row)).size,0),transitions:motion.reduce((sum,table)=>sum+table.samples.length,0),frames:motion.flatMap(table=>table.samples).reduce((sum,row)=>sum+row.frames.length,0),browserErrors:browserErrors.length}));
     return;
   }
+  if(!focusedCompact&&!focusedShell&&!focusedPublicData)await verifyUpdateRecovery();
   if(!focusedCompact&&!focusedShell&&!focusedPublicData)await verifyInvestmentProfiles();
   if(focusedProfile){
     assert.deepEqual(browserErrors,[]);

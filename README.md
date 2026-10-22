@@ -8,6 +8,8 @@ Para testar ou desenvolver em outro dispositivo, siga o [guia de outro computado
 
 O pacote de distribuição é um único **IvestFII-Setup.exe**. Instale uma vez; versões assinadas publicadas no canal do projeto são verificadas ao abrir e a cada seis horas. O aplicativo baixa a atualização e a aplica quando está recolhido, sem conversa em andamento ou alterações pendentes. Também é possível verificar e aplicar em **Configurações → Atualizações**, ou desativar as verificações automáticas nas preferências.
 
+Se a atualização aguardar uma pendência, **Aplicar e reiniciar** confere novamente os formulários e informa o que precisa ser salvo, fechado ou concluído. **Verificar atualizações** consulta o canal novamente, mesmo com um pacote já baixado. Em versões antigas presas nessa espera, baixe o instalador mais recente na página de releases e execute-o sobre a instalação existente, sem desinstalar nem apagar a pasta de dados.
+
 A instalação mantém `%LOCALAPPDATA%\com.ivestfii.desktop`, preservando carteiras, conversas e a chave brapi do cofre Windows. Node.js, Rust e Python são necessários apenas para desenvolver. Geração do instalador, assinatura e publicação estão no [guia Windows](docs/distribuicao-windows.md).
 
 ### Primeiros passos

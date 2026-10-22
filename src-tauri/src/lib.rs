@@ -140,9 +140,19 @@ fn install_pending_update(
     app: tauri::AppHandle,
     state: State<AppState>,
 ) -> CommandResult<updates::UpdateStatus> {
-    state
+    if state.runs.has_active_runs() {
+        return Err("Aguarde o assistente terminar ou cancele a tarefa antes de reiniciar.".into());
+    }
+    if state.frontend_unsettled.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("Há alterações não salvas. Salve ou feche os formulários e limpe o rascunho do assistente antes de reiniciar.".into());
+    }
+    let status = state
         .updates
-        .retry_install(&app, &update_install_permit(app.clone(), true))
+        .retry_install(&app, &update_install_permit(app.clone(), true))?;
+    if status.status == "waiting_for_idle" {
+        return Err("Uma consulta ou gravação ainda está em andamento. Aguarde a conclusão e clique em Aplicar e reiniciar novamente.".into());
+    }
+    Ok(status)
 }
 
 #[tauri::command]

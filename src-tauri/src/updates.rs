@@ -49,8 +49,8 @@ impl UpdateStatus {
         self.total_bytes = None;
     }
 
-    fn can_check(&self, enabled: bool, busy: bool, has_pending: bool) -> bool {
-        enabled && !busy && (!has_pending || self.status == "error")
+    fn can_check(&self, enabled: bool, busy: bool, _has_pending: bool) -> bool {
+        enabled && !busy
     }
 
     fn fail(&mut self, error: String) {
@@ -142,9 +142,9 @@ impl UpdateManager {
             {
                 return Ok(inner.status.clone());
             }
-            // A failed installer leaves a verified package for manual retry.
-            // "Check again" must also recover: discard that package and fetch
-            // the current manifest afresh rather than returning its old error.
+            // An explicit check must fetch the current manifest even when an
+            // older verified package is waiting. Otherwise the application can
+            // remain pinned to that version until the process is restarted.
             inner.pending = None;
             inner.busy = true;
             inner.status.begin_check();
@@ -382,13 +382,13 @@ mod tests {
     }
 
     #[test]
-    fn check_again_recovers_a_failed_pending_install_but_keeps_ready_packages() {
+    fn explicit_check_replaces_stale_pending_packages_including_ready_and_waiting() {
         let mut status = UpdateStatus::new("0.1.0".into(), true);
         status.fail("Não foi possível iniciar o instalador.".into());
         assert!(status.can_check(true, false, true));
         for state in ["ready", "waiting_for_idle"] {
             status.status = state.into();
-            assert!(!status.can_check(true, false, true), "{state}");
+            assert!(status.can_check(true, false, true), "{state}");
         }
     }
 
